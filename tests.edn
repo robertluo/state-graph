@@ -1,0 +1,30 @@
+#kaocha/v1
+;; TWO SUITES, ONE TREE. What separates them is a ^:integration on the deftest,
+;; not a directory — a namespace is free to hold both kinds, and here most will:
+;; the shape's construction checks are unit, drawing it is integration, and they
+;; belong next to each other.
+;;
+;; :unit is our own logic with nothing outside this process — no database, no
+;; socket, no clock worth waiting on. Generative tests are the unit suite here,
+;; not an extra, which is why test.check is in :deps rather than :dev. Meant to
+;; be run on every save.
+;;
+;; :integration opens real things: a datahike store on disk, manifold streams,
+;; and anything that shells out to graphviz to render a graph. It is the gate
+;; BEFORE A COMMIT, and it is not in the fast loop.
+;;
+;; The runner is `clojure -M:dev:test <suite>` — kaocha lives in the :dev alias
+;; and the main-opts in :test, so :test alone has no kaocha on the classpath.
+{:tests
+ [{:id           :unit
+   :test-paths   ["test"]
+   :source-paths ["src"]
+   :kaocha.filter/skip-meta [:integration]}
+
+  {:id           :integration
+   :test-paths   ["test"]
+   :source-paths ["src"]
+   :kaocha.filter/focus-meta [:integration]}]
+
+ :kaocha/reporter [kaocha.report/dots]
+ :kaocha.plugin/capture-output true}

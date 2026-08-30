@@ -1,0 +1,19 @@
+# The parent repository's .gitignore does NOT reach here: a pattern with a
+# separator in the middle, like `.clj-kondo/*`, is anchored to the directory of
+# the .gitignore that declares it. So this project keeps its own, and it must,
+# whether or not it stays inside that repository.
+.cpcache/
+.nrepl-port
+.rebel_readline_history
+
+# The linter's cache is derived; its configuration is not — that is a decision
+# this project made, so it travels.
+.clj-kondo/.cache/
+.clj-kondo/imports/
+
+# LSP
+.lsp/
+
+# datahike. A store is the fact itself rather than a rendering of one, and a
+# directory of growing binary files is no use in a repository.
+*.mdb
