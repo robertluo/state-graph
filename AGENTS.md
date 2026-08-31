@@ -344,7 +344,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       SPECULATIVELY, and since deferreds exist so that handlers can do I/O, speculation means real
       effects for events the machine ignores. That was refused; see
       :an-ignored-event-is-not-an-error-but-is-not-silent. The price is the same price, charged at a
-      different counter."
+      different counter.
+    - AND A THIRD REASON, the author's, which holds where both of the others fail. A handler that
+      CAUSES another event makes parallel handlers interleave WRONGLY — not wastefully, wrongly — so
+      even with pure handlers and free speculation the order would be wrong. That is why statecharts
+      have run-to-completion. v1 forbids emission (:a-handler-causes-nothing), so the hazard is shut
+      rather than survived; the argument is recorded because it is the one that would still stand if
+      the other two were answered."
 
    :what-is-persisted
    "DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
@@ -357,8 +363,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       shape an instance mid-flight belongs to. Nothing in the store needs a shape identity."
 
    :an-instance-has-an-identity
-   "DECIDED 2026-08-31. An instance is identified by a FIXED FIELD, and it is written by the
-    CONSTRUCTORS and not by hand — a caller says which machine they mean and never spells the key.
+   "DECIDED 2026-08-31. An instance is identified by a FIXED FIELD, :instance, and it is written by
+    the CONSTRUCTORS and not by hand — a caller says which machine they mean and never spells the key.
+    - THE NAME IS THE README'S OWN WORD. `A lifecycle of an instance of the FSM can be seen as a
+      reduction on a seq of events` — the specification already calls this thing an instance, so any
+      synonym would be this file overriding the README on a coin flip, which :source-of-truth forbids.
+      It is a PLAIN keyword and not a namespaced one, because it is data a user reads and writes in
+      their own maps, exactly as :id is.
     - IT IS ON THE EVENT AS WELL AS THE STATE, and the EVENT is the half that is load-bearing.
       Routing an incoming event to the right reduction is a decision made BEFORE any state is in
       hand, so the partition key cannot be read off a state. A state carries it so that a stored row
@@ -388,7 +399,21 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - THE COST, said out loud: the step's RETURN TYPE is now the caller's to know. Under the default
       it is a State and under the async layer it is a deferred State, so the :malli/schema on compile
       cannot say [:=> [:cat State Event] State] for both. Whether that becomes two schemas or one
-      loosened one is an implementation question for the async target."
+      loosened one is an implementation question for the async target.
+    - A DEFERRED UNDER THE SYNCHRONOUS DEFAULT IS DEREFERENCED, decided 2026-08-31 by the author, and
+      it is better than the guard that was going to be recommended: synchronous is exactly what
+      `block until it is available` means, so there is nothing to refuse. The default `then` derefs
+      what it is given when that thing is derefable and passes it along otherwise.
+    - AND IT COSTS NO DEPENDENCY, which is why it fits. clojure.lang.IDeref is CLOJURE'S and not
+      manifold's, and a manifold deferred implements it — that is what makes @d work — so the core
+      tests for IDeref and never learns that manifold exists. A handler's answer is a MAP, and a map
+      is not IDeref, so the common path is untouched.
+    - THE COST, said out loud: the synchronous path can now BLOCK, and with no timeout a handler whose
+      deferred never resolves hangs the reduction forever. clojure.core/deref has a 3-arity taking a
+      timeout, so a bounded wait is available without manifold if it is ever wanted; choosing a
+      default timeout is policy and none is chosen.
+    - UNVERIFIED UNTIL MANIFOLD IS A DEPENDENCY: that manifold's Deferred satisfies IDeref is read
+      and reasoned, not run. Check it the day manifold lands, the way :ubergraph-0-9-0 was checked."
 
    :a-handler-belongs-to-the-event
    "DECIDED 2026-08-31, by the author, and it is the README's own reading recovered: A HANDLER IS
@@ -426,30 +451,65 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       OPEN BY DEFAULT, so merging a handler's answer into a state with no edge for it would produce a
       state carrying keys that state never declared AND PASSING ITS OWN ENTER-VALIDATION. Verified;
       see :what-the-design-conversation-verified. `Able to apply, but wrong` was the author's phrase
-      for it and it is the sharpest hazard this design had."}
+      for it and it is the sharpest hazard this design had."
+
+   :one-ordered-stream-per-instance
+   "DECIDED 2026-08-31, by the author, and it is a REQUIREMENT THE LIBRARY STATES rather than an
+    assumption it quietly makes. A machine is fed ONE TOTALLY ORDERED stream of events. A caller with
+    several sources merges them into one order BEFORE the machine sees them, because the caller is
+    the only one who can — the machine has no clock and no way to know two events were concurrent.
+    - WHAT IT BUYS IS A WHOLE FEATURE. If external order is guaranteed then an event this state
+      cannot handle is never EARLY: it is irrelevant, or it is a bug in whoever produced it. So
+      DEFERRED EVENTS — the UML statechart mechanism where a state parks an event and the machine
+      re-delivers it after moving on — are not needed, and are out of v1. That is a per-instance
+      queue, a re-drive on every state change and a deadlock case, all avoided by writing an
+      assumption down instead of leaving it unsaid.
+    - WHERE IT BREAKS, so that nobody is surprised by it: two producers with no shared clock, an
+      at-least-once transport that redelivers, a partitioned queue where one instance's events span
+      partitions. Each is real, and each is the caller's to fix upstream."
+
+   :a-handler-causes-nothing
+   "DECIDED 2026-08-31. In v1 A HANDLER MAY NOT CAUSE ANOTHER EVENT. It answers a data map and that is
+    all it does; a cascade is spelled as the caller feeding the next event.
+    - WHY IT MATTERS: a handler that raises an event is the classic source of SELF-INFLICTED disorder,
+      and it is the reason statecharts have RUN-TO-COMPLETION — one external event processed fully,
+      internal events and all, before the next is accepted. With no emission there are no internal
+      events, so there is no queue to drain and no RTC to implement, and the core stays the reduction
+      the README promises.
+    - IT IS A CONTRACT AND NOT A GUARANTEE, and the difference matters here. :a-handler-may-answer-later
+      allows deferreds precisely so a handler can do I/O, and a handler doing I/O can publish to the
+      very stream feeding this machine. No schema catches that. It is a rule people follow, and the
+      failure mode when they do not is an ordering bug wearing the mask of a logic bug.
+    - THE DOOR, and it is the version that fits this library: an edge or an event DECLARES which
+      events it raises, so the internal flow is IN THE GRAPH and check can see it — including a cycle
+      that raises forever. That turns a runtime hazard into a static question, which is
+      :what-the-graph-buys applied to a third thing. It is a target of its own: a new part in the
+      shape, an internal queue with run-to-completion in the async layer, and a reachability question
+      over EVENTS rather than states. Not built.
+    - WHAT WAS TURNED DOWN: a handler answering both a delta and events to raise, {:data {...}
+      :raise [...]}. Least ceremony to write, and it undoes what
+      :a-handler-answers-a-map-and-declares-it bought — the answer stops being a map merged into the
+      state, so :out no longer describes it and the static check loses its subject."
+
+   :how-the-step-says-a-thing-was-ignored
+   "DECIDED 2026-08-31, and only decidable once :one-ordered-stream-per-instance and
+    :a-handler-causes-nothing had removed every reason to PARK an event. A THIRD INJECTED FUNCTION,
+    beside the `then` and `pure` of :a-handler-may-answer-later: an `ignored` of a state and an event,
+    defaulting to (fn [state _event] state), which the store layer replaces with one that records.
+    - WHY THIS AND NOT A RICHER RETURN. An outcome value — {:state s :outcome :ignored} — is the
+      STRUCTURAL answer, impossible for a caller to miss, and it was the better choice for as long as
+      `ignored` might have had to grow into `deferred`. With deferral out the signal is two-valued and
+      stays two-valued, and the outcome value's cost is real: (reduce step init events) would stop
+      yielding states, and that reduction is the README's own headline sentence.
+    - identical? IS NOT IT, and it was checked before being recommended rather than after — see
+      :what-the-design-conversation-verified. Metadata on the state is worse still: merge and assoc
+      PRESERVE metadata, so a stale flag would ride into every later state.
+    - THE COST: the guarantee is OPT-IN. A layer that injects nothing gets today's silence. It is the
+      store layer that wants the record and the store layer that injects, so the default is only ever
+      taken by a caller recording nothing anyway."}
 
   :open-questions
-  ["WHAT IS THE INSTANCE FIELD CALLED? :an-instance-has-an-identity settles that there IS a fixed
-    field and that the constructors write it; the NAME is still the author's to give. :instance is
-    a placeholder used in conversation on 2026-08-31 and nothing has been written against it. Pick
-    it before the async layer, because every event constructor and every stored row will carry it."
-   "DOES A DEFERRED UNDER THE SYNCHRONOUS DEFAULT THROW? A handler answering a deferred where `then`
-    is (fn [v f] (f v)) merges a deferred INTO A STATE, which then fails its own enter-validation
-    with a message about the wrong thing entirely — a missing key or a bad type, never `this handler
-    is async and this step is not`. Cheap to guard and baffling to debug if it is not. Decide when
-    the async layer is built, and prefer a guard."
-   "HOW DOES THE STEP SAY AN EVENT WAS IGNORED?
-    :an-ignored-event-is-not-an-error-but-is-not-silent settles that it must; the mechanism is open.
-    IDENTICAL? IS NOT IT, and that was checked: a self-loop whose handler answers {} returns the very
-    same object, because merge with {} and assoc of a value already present both answer `this`. So
-    `ignored` and `transitioned and changed nothing` cannot be told apart that way.
-    Prefer a THIRD INJECTED FUNCTION beside the `then` and `pure` of :a-handler-may-answer-later — an
-    `ignored` of a state and an event, defaulting to (fn [state _] state), which the store layer
-    replaces with one that records. It costs nothing in the default, it needs no change to the step's
-    return type, and it is the same global rule twice: inject a function that closes over them.
-    Metadata on the returned state was the other candidate and is worse — merge and assoc PRESERVE
-    metadata, so a stale ::ignored would ride along into every later state unless each success took
-    it off again."]
+  []
 
   :project-knowledge
   {:status
