@@ -107,9 +107,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     robertluo.state-graph          — THE FACADE: the vocabulary a user needs, and the only require
                                      an application should have. Constructors for a shape, `compile`,
                                      and re-exports of the two defaults so that one require is enough
-    robertluo.state-graph.async    — A DEFAULT, not the core: manifold streams. Takes a compiled step
-                                     FUNCTION and a stream of events, answers a stream of states.
-                                     Knows nothing of shapes, schemas or graphs
+    robertluo.state-graph.async    — BUILT 2026-08-31. A DEFAULT, not the core: manifold streams.
+                                     Takes a compiled step FUNCTION and a way to make a first state,
+                                     both as VALUES, and knows nothing of shapes, schemas or graphs.
+                                     `drive` is one machine, serialised; `fan` partitions on
+                                     :instance and runs one per machine, concurrently. Both answer
+                                     {:states :done}, two different things under two names
     robertluo.state-graph.store    — A DEFAULT, not the core: datahike. Takes states and events as
                                      DATA and answers history — audit and trace. Knows nothing of
                                      shapes; the schema is the caller's
@@ -384,6 +387,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - IT IS A THIRD IDENTITY AND IT GETS A THIRD NAME. :id on a state is which NODE it is in and :id
       on an event is its TYPE; see :a-state-has-an-id. A word doing two jobs here would be the bug
       nobody sees.
+    - nil NAMES NOTHING, refined 2026-08-31 when async/fan forced it. fan keys an event carrying no
+      :instance under nil, so (fn [k] (initial sh k {})) is the call site whether a caller names
+      machines or not, and initial's instance argument is [:maybe Instance] rather than Instance. It
+      asserts nothing that way — Instance is `some?` — AND THAT COSTS NOTHING REAL: the invariant
+      worth having is that no STATE ever carries a nil :instance, and that lives on the enter schema
+      where it is checked on every entry rather than once at the door.
     - WHAT WAS TURNED DOWN: a key-fn handed to the async layer, leaving the core ignorant that
       instances exist at all. It is the more decoupled design and it is not the one chosen — a fixed
       field the constructors own is simpler to document, and it makes a state self-describing to the
@@ -419,8 +428,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       deferred never resolves hangs the reduction forever. clojure.core/deref has a 3-arity taking a
       timeout, so a bounded wait is available without manifold if it is ever wanted; choosing a
       default timeout is policy and none is chosen.
-    - UNVERIFIED UNTIL MANIFOLD IS A DEPENDENCY: that manifold's Deferred satisfies IDeref is read
-      and reasoned, not run. Check it the day manifold lands, the way :ubergraph-0-9-0 was checked."
+    - VERIFIED 2026-08-31, the day manifold landed, exactly as this entry said to: a manifold
+      Deferred IS a clojure.lang.IDeref and derefs to its value, d/success-deferred likewise, and
+      d/chain takes a plain value as happily as a deferred. Nothing was read and reasoned any more."
 
    :a-handler-belongs-to-the-event
    "DECIDED 2026-08-31, by the author, and it is the README's own reading recovered: A HANDLER IS
@@ -601,7 +611,19 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       is special-cased for them.
     - AND THE INTERMEDIATE STATES NEEDED NO CHECK, which fell out rather than being solved: if
       [ta b] is an edge at all then `subsumption` has already asked whether ta admits what b
-      produces. One of the three conditions was already paid for."}
+      produces. One of the three conditions was already paid for.
+    - THE RUNTIME DOES NOT TAKE THE LICENCE YET, and this is a GAP found by building the async layer
+      rather than by thinking about it. Concurrency for a licensed pair needs the HANDLER run apart
+      from the APPLICATION — two handlers in flight, their patches applied in order of completion —
+      and `compile` answers ONE step that does both at once. Calling that step twice from the same
+      state answers two whole states derived from it, and combining those is only correct where both
+      events are self-loops with disjoint patches, which is LESS than `commuting` licenses. So
+      async/drive serialises always, and says so rather than pretending.
+    - WHAT WOULD CLOSE IT is a decision for the author, not a refactor: split `compile` into a PATCH
+      phase (run the handler, check it against its own :out) and an APPLY phase (merge, write :id and
+      :instance, validate on enter). Which is exactly the shape :a-handler-causes-nothing already
+      leans towards for chained events — a handler answers a patch, a state applies it — so one
+      decision may pay for both."}
 
   :open-questions
   ["ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
@@ -632,20 +654,24 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     THE TRAP CHECK LANDED the same day too — see :a-trap-is-what-a-cycle-hides — so the structural
     checks are now reachability, dead ends, TRAPS and subsumption.
     THE CONFLUENCE CHECK LANDED 2026-08-31 as well — see :two-events-in-flight-at-once — so the
-    static checks are reachability, dead ends, traps, subsumption AND confluence. The async layer
-    itself is still NOT BUILT and manifold is still not a dependency.
-    36 tests, 143 assertions, green; clj-kondo clean; all 27 public fns carry a :malli/schema, which
-    the instrument! count of exactly 27 confirms better than a grep can. THE COMMIT GATE IS A REAL
-    GATE: 34 tests unit, 2 ^:integration. The integration suite NEEDS GRAPHVIZ — see
+    static checks are reachability, dead ends, traps, subsumption AND confluence.
+    AND SO DID THE ASYNC LAYER, the same day: robertluo.state-graph.async, manifold 0.4.3, `drive`
+    and `fan`. It serialises always; the licensed concurrency is a GAP with a reason, recorded in
+    :two-events-in-flight-at-once.
+    43 tests, 156 assertions, green; clj-kondo clean; all 29 public fns carry a :malli/schema, which
+    the instrument! count of exactly 29 confirms better than a grep can. THE COMMIT GATE IS A REAL
+    GATE: 40 tests unit, 3 ^:integration.
+    NOT BUILT still: the FACADE (robertluo.state-graph) and the STORE (datahike), which remains a
+    dependency nothing uses. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
     NOT BUILT, and named so nobody assumes otherwise: the FACADE (robertluo.state-graph) does not
     exist, so an application requires the namespaces directly; async and store are untouched."
 
    :gaps-in-the-repository
    "Found by reading deps.edn against README.md, and every one of them will bite on first use:
-    - MANIFOLD IS NOT A DEPENDENCY. The README's async feature names manifold streams and deps.edn
-      has no manifold in it. Add it before writing that layer, and restart the REPL afterwards —
-      a running classpath cannot be repaired from inside.
+    - MANIFOLD IS NOT A DEPENDENCY: CLOSED 2026-08-31. manifold 0.4.3 is in deps.edn and
+      robertluo.state-graph.async is built. The REPL did have to be restarted, exactly as this entry
+      warned — a running classpath cannot be repaired from inside.
     - tests.edn: CLOSED 2026-08-30. Two suites over one tree, separated by
       :kaocha.filter/skip-meta [:integration] and :kaocha.filter/focus-meta [:integration],
       copied from the sibling project. VERIFIED with
@@ -789,6 +815,26 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       both are written AFTER the merge. Worth an assertion of its own, because a handler answering
       {:instance ...} is a plausible mistake and a silent one — it would move a row in the audit log
       to another machine."
+
+   :what-the-async-layer-taught
+   "VERIFIED BY RUNNING on 2026-08-31, building robertluo.state-graph.async.
+    - s/connect IS ASYNCHRONOUS, AND IT COST A LOST STATE. The first `fan` gave each machine its own
+      stream and s/connect-ed them into one output; closing that output once every machine reported
+      done DROPPED whatever was still in a connect pipeline. Seen, not theorised: instance `a` ran
+      three events and only two states came out, while its :done carried the third. The fix removes
+      connect — every machine writes STRAIGHT to the shared sink, so a machine's :done cannot resolve
+      until its last state has been ACCEPTED there. A private `pump` that does not close the sink is
+      what makes one output shareable at all.
+    - A BOUNDED DEREF IS THE ONLY HONEST ONE IN A STREAM TEST. Every deref in async-test carries a
+      timeout, so a machine that hangs FAILS instead of hanging the suite. Streams are the one thing
+      in this project that can wait for ever.
+    - ONLY ONE TEST NEEDED A CLOCK. Serialisation is asserted with a handler that really is slower
+      (d/future plus a sleep), and that one is ^:integration; everything else uses immediate
+      deferreds and is deterministic. The assertion is about ORDER, not timing, so it does not care
+      how slow the slow one is.
+    - MANIFOLD DRAGS IN slf4j-api WITH NO BINDING, so the state-graph suite now prints three SLF4J
+      NOP lines on stderr, as the sibling project already did. Noise, not a fault, and worth knowing
+      before someone hunts it."
 
    :confluence-was-measured-not-guessed
    "MEASURED BY RUNNING on 2026-08-31, over this project's own fixtures, when the question was whether

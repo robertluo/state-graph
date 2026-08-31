@@ -8,7 +8,7 @@
 
 (def namespaces
   '[robertluo.state-graph.shape robertluo.state-graph.compile
-    robertluo.state-graph.check])
+    robertluo.state-graph.check robertluo.state-graph.async])
 
 (defn instrumented
   "A fixture that makes the :malli/schema metadata actually do something. mi/collect!

@@ -126,26 +126,28 @@
                              (assoc ctx :crossing :enter)))))
          (pure (ignored state event)))))))
 
-(defn- entered
-  "The initial state, named or not. Private, and the reason both arities of `initial`
-   route through it: the 3-arity's schema says Instance and NOT [:maybe Instance],
-   because `some?` behind a :maybe admits every value there is and would assert nothing.
-   A 2-arity delegating to the 3 would then break under its own instrumentation."
-  [sh instance data]
-  (let [id (shape/initial-id sh)]
-    (conform! (shape/enter-schema sh id)
-              (cond-> (assoc data :id id)
-                (some? instance) (assoc :instance instance))
-              {:crossing :enter :to id})))
-
 (defn initial
   "The first state, ENTERED THROUGH THE SAME VALIDATION as every other one. The shape
    knows which node a run starts in; the starting data is the caller's.
 
    NAME THE RUN and the key is written for you — that is the whole of `hidden by the
    constructors`. A caller says which machine they mean and never spells :instance, here
-   or anywhere after, since the step carries it and refuses to let a handler touch it."
+   or anywhere after, since the step carries it and refuses to let a handler touch it.
+
+   nil NAMES NOTHING and is not an error: the state simply gets no :instance key. That is
+   what async/fan passes for an event carrying none, so (fn [k] (initial sh k {})) is a
+   call site that works whether the caller names machines or not.
+
+   The 3-arity therefore takes [:maybe Instance], which — Instance being `some?` — asserts
+   nothing about that argument, AND THAT COSTS NOTHING REAL. The invariant worth having is
+   that no state ever carries a nil :instance, and that lives on the enter schema, where it
+   is checked on every entry rather than once at the door."
   {:malli/schema [:function [:=> [:cat shape/Shape :map] State]
-                            [:=> [:cat shape/Shape shape/Instance :map] State]]}
-  ([sh data] (entered sh nil data))
-  ([sh instance data] (entered sh instance data)))
+                            [:=> [:cat shape/Shape [:maybe shape/Instance] :map] State]]}
+  ([sh data] (initial sh nil data))
+  ([sh instance data]
+   (let [id (shape/initial-id sh)]
+     (conform! (shape/enter-schema sh id)
+               (cond-> (assoc data :id id)
+                 (some? instance) (assoc :instance instance))
+               {:crossing :enter :to id}))))
