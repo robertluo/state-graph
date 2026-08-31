@@ -29,35 +29,41 @@
 (deftest problems-are-data
   (let [idle (shape/state :idle [:map] {:initial true})
         run  (shape/state :run [:map])
-        go   (shape/event :go [:map])
-        t    (shape/transition :idle :go :run (constantly {}))
+        go   (shape/event :go [:map] (constantly {}))
+        t    (shape/transition :idle :go :run)
         kinds (fn [& parts] (mapv :problem (apply shape/problems parts)))]
 
     (testing "a part that is not the thing it says it is — one check for a handler that
-              is not a fn, a schema that is not a map schema, and every missing key"
-      (is (= [:malformed] (kinds idle run go (assoc t :handler "not a fn")))))
+              is not a fn, a schema that is not a map schema, and every missing key.
+              The handler hangs off the EVENT, so that is where a bad one goes"
+      (is (= [:malformed] (kinds idle run (assoc go :handler "not a fn") t))))
 
     (testing "two parts under one id, which a map would silently collapse"
       (is (= [:duplicate] (kinds idle run (shape/state :run [:map]) go t))))
 
     (testing "a transition naming a state or an event that is not there"
-      (is (= [:unknown-state] (kinds idle run go (shape/transition :idle :go :nowhere (constantly {})))))
-      (is (= [:unknown-event] (kinds idle run go t (shape/transition :run :ghost :idle (constantly {}))))))
+      (is (= [:unknown-state] (kinds idle run go (shape/transition :idle :go :nowhere))))
+      (is (= [:unknown-event] (kinds idle run go t (shape/transition :run :ghost :idle)))))
 
     (testing "determinism — two transitions sharing a [from event] make compile a search"
-      (is (= [:ambiguous] (kinds idle run go t (shape/transition :idle :go :idle (constantly {}))))))
+      (is (= [:ambiguous] (kinds idle run go t (shape/transition :idle :go :idle)))))
 
     (testing "an event nothing fires. The catalogue exists only here, so this is the
               only moment the check is answerable at all"
-      (is (= [:unused-event] (kinds idle run go t (shape/event :never [:map])))))
+      (is (= [:unused-event] (kinds idle run go t (shape/event :never [:map] (constantly {}))))))
 
     (testing "exactly one root, because the reachability check above needs one"
       (is (= [:initial] (kinds (shape/state :idle [:map]) run go t)))
       (is (= [:initial] (kinds idle (shape/state :run [:map] {:initial true}) go t))))
 
-    (testing ":id is the shape's word, not a state's"
-      (is (= [:id-declared]
-             (kinds (shape/state :idle [:map [:id :keyword]] {:initial true}) run go t))))))
+    (testing ":id and :instance are the machinery's words, not a state's"
+      (is (= [:reserved-declared]
+             (kinds (shape/state :idle [:map [:id :keyword]] {:initial true}) run go t)))
+      (is (= [:reserved-declared]
+             (kinds (shape/state :idle [:map [:instance :string]] {:initial true}) run go t)))
+      (is (= [{:problem :reserved-declared :id :run :key :instance}]
+             (shape/problems idle (shape/state :run [:map [:instance :string]]) go t))
+          "and it says WHICH key, since there are two of them now"))))
 
 (deftest a-schema-argument-has-to-be-a-map-schema
   ;; The constructors declare MapSchema rather than :any, so a schema that is not one
@@ -68,21 +74,22 @@
     (testing (pr-str bad)
       (let [e (is (thrown? clojure.lang.ExceptionInfo (shape/state :idle bad)))]
         (is (= :malli.core/invalid-input (:type (ex-data e)))))
-      (let [e (is (thrown? clojure.lang.ExceptionInfo (shape/event :go bad)))]
+      (let [e (is (thrown? clojure.lang.ExceptionInfo (shape/event :go bad (constantly {}))))]
         (is (= :malli.core/invalid-input (:type (ex-data e)))))))
   (testing "a form and an already-compiled schema are both fine"
     (is (map? (shape/state :idle [:map [:n :int]])))
     (is (map? (shape/state :idle (m/schema [:map [:n :int]])))))
-  (testing "and an :out that is not a map schema is refused too, while nil is not"
+  (testing "and an :out that is not a map schema is refused too, while nil is not.
+            :out is the EVENT's now, so that is where it is refused"
     (let [e (is (thrown? clojure.lang.ExceptionInfo
-                         (shape/transition :a :go :b (constantly {}) [:vector :int])))]
+                         (shape/event :go [:map] (constantly {}) [:vector :int])))]
       (is (= :malli.core/invalid-input (:type (ex-data e)))))
-    (is (map? (shape/transition :a :go :b (constantly {}))))))
+    (is (map? (shape/event :go [:map] (constantly {}))))))
 
 (deftest shape-refuses-to-build-and-says-why
   (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"problems"
                                 (shape/shape (shape/state :idle [:map] {:initial true})
-                                             (shape/event :ghost [:map]))))]
+                                             (shape/event :ghost [:map] (constantly {})))))]
     (is (= [{:problem :unused-event :id :ghost}] (:problems (ex-data e))))))
 
 ;;; ------------------------------------------------------------------- reading
@@ -96,13 +103,39 @@
     (is (m/validate (:schema tick) {:id :set :to 3}))
     (is (not (m/validate (:schema tick) {:id :set :to "three"})))))
 
+(deftest one-event-one-handler-however-many-edges
+  ;; What moving the handler onto the EVENT bought, and the only thing that can regress
+  ;; it. Two edges fire :hop, from different states to different targets, and ONE
+  ;; declaration stands behind both — where before there were two, free to disagree.
+  ;; This fails if `shape` writes the catalogue onto some edges and not others.
+  (let [h  (fn [e] {:n (:n e)})
+        sh (shape/shape
+            (shape/state :a [:map] {:initial true})
+            (shape/state :b [:map [:n :int]])
+            (shape/state :c [:map [:n :int]])
+            (shape/event :hop [:map [:n :int]] h [:map [:n :int]])
+            (shape/transition :a :hop :b)
+            (shape/transition :b :hop :c))
+        hops (filter #(= :hop (:event %)) (shape/transitions sh))]
+    (is (= 2 (count hops)) "two edges, one event")
+    (is (every? #(identical? h (:handler %)) hops)
+        "the event's handler reached every edge that fires it, and is the SAME one")
+    (is (every? #(some? (:out %)) hops)
+        "and so did its :out, which is what the static check reads")))
+
 (deftest enter-schema-writes-the-id-in
   ;; Asserted by validating VALUES rather than comparing forms: a form comparison is
   ;; the derivation restated, and m/form over a [:fn ...] is not comparable anyway.
   (let [running (shape/enter-schema (ts/counter) :running)]
     (is (m/validate running {:id :running :n 1}))
     (is (not (m/validate running {:id :idle :n 1})) "landing elsewhere is a failure to enter")
-    (is (not (m/validate running {:id :running})) "the state's own schema still applies")))
+    (is (not (m/validate running {:id :running})) "the state's own schema still applies")
+    (testing ":instance is permitted and never required — one machine reduced over one
+              seq needs no name for itself, and the async layer will insist instead"
+      (is (m/validate running {:id :running :n 1 :instance "order-4711"}))
+      (is (m/validate running {:id :running :n 1}))
+      (is (not (m/validate running {:id :running :n 1 :instance nil}))
+          "but a partition key that may be nil is a bug waiting for the second machine"))))
 
 (deftest the-shape-knows-where-a-run-starts-and-ends
   (let [g (ts/counter)]

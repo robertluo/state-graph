@@ -40,7 +40,7 @@
        (gen/fmap
         (fn [groups]
           (concat (map-indexed (fn [i s] (shape/state s [:map] (when (zero? i) {:initial true}))) sids)
-                  (map (fn [e] (shape/event e [:map])) eids)
+                  (map (fn [e] (shape/event e [:map] (constantly {}))) eids)
                   (apply concat groups)))
         (apply gen/tuple
                (for [e eids]
@@ -48,7 +48,7 @@
                   (gen/not-empty (gen/set (gen/elements sids)))
                   (fn [froms]
                     (gen/fmap
-                     (fn [tos] (mapv (fn [f t] (shape/transition f e t (constantly {}))) froms tos))
+                     (fn [tos] (mapv (fn [f t] (shape/transition f e t)) froms tos))
                      (gen/vector (gen/elements sids) (count froms))))))))))))
 
 (def gen-event
@@ -91,13 +91,16 @@
    (shape/state :typed [:map [:n :int]])
    (shape/state :island-a [:map])
    (shape/state :island-b [:map])
-   (shape/event :go [:map]) (shape/event :stop [:map]) (shape/event :oops [:map])
-   (shape/event :bad [:map]) (shape/event :hop [:map])
-   (shape/transition :idle :go :running (constantly {:n 0}) [:map [:n :int]])
-   (shape/transition :running :stop :done (constantly {}) [:map])
-   (shape/transition :running :oops :trap (constantly {}) [:map])
-   (shape/transition :running :bad :typed (constantly {:n "seven"}) [:map [:n :string]])
-   (shape/transition :island-a :hop :island-b (constantly {}) [:map])))
+   (shape/event :go   [:map] (constantly {:n 0})       [:map [:n :int]])
+   (shape/event :stop [:map] (constantly {})           [:map])
+   (shape/event :oops [:map] (constantly {})           [:map])
+   (shape/event :bad  [:map] (constantly {:n "seven"}) [:map [:n :string]])
+   (shape/event :hop  [:map] (constantly {})           [:map])
+   (shape/transition :idle :go :running)
+   (shape/transition :running :stop :done)
+   (shape/transition :running :oops :trap)
+   (shape/transition :running :bad :typed)
+   (shape/transition :island-a :hop :island-b)))
 
 (defn counter
   "The canonical example shape, where the schemas DO bite: a counter whose :n the
@@ -107,9 +110,9 @@
    (shape/state :idle [:map] {:initial true})
    (shape/state :running [:map [:n :int]])
    (shape/state :done [:map [:n :int]] {:final true})
-   (shape/event :start [:map [:seed :int]])
-   (shape/event :set [:map [:to :int]])
-   (shape/event :stop [:map])
-   (shape/transition :idle :start :running (fn [e] {:n (:seed e)}) [:map [:n :int]])
-   (shape/transition :running :set :running (fn [e] {:n (:to e)}) [:map [:n :int]])
-   (shape/transition :running :stop :done (fn [_] {}))))
+   (shape/event :start [:map [:seed :int]] (fn [e] {:n (:seed e)}) [:map [:n :int]])
+   (shape/event :set   [:map [:to :int]]   (fn [e] {:n (:to e)})   [:map [:n :int]])
+   (shape/event :stop  [:map]              (fn [_] {}))
+   (shape/transition :idle :start :running)
+   (shape/transition :running :set :running)
+   (shape/transition :running :stop :done)))

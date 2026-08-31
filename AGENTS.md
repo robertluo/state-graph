@@ -517,10 +517,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     and .compile — the lifecycle runs, (reduce (compile shape) (initial shape data) events).
     Target 2, 2026-08-31: robertluo.state-graph.check — reachability, dead ends, a partial
     subsumption checker and the drawing.
-    26 tests, 98 assertions, green; clj-kondo clean; all 23 public fns carry a :malli/schema, which
-    the instrument! count of exactly 23 confirms better than a grep can. THE COMMIT GATE IS NOW A
-    REAL GATE: 24 tests unit, 2 ^:integration, and they are different tests at last. The
-    integration suite NEEDS GRAPHVIZ — see :graphviz-and-the-devenv.
+    THE DESIGN DECISIONS OF 2026-08-31 ARE IN THE CODE as of the same day: the handler is the
+    EVENT's, an event nobody handled is heard through :ignored, compile is parameterised by a
+    Context of :then/:pure/:ignored, a deferred under the synchronous default is dereferenced, and
+    :instance names a run. Verified live afterwards: the counter drew correctly, `broken` still
+    reports its two islands, three dead ends and one :target-refuses, and a reduction carrying an
+    :instance ends {:id :done :instance order-1 :n 9}, that name having been given once to
+    `initial` and never spelled again after.
+    31 tests, 121 assertions, green; clj-kondo clean; all 23 public fns carry a :malli/schema, which
+    the instrument! count of exactly 23 confirms better than a grep can. THE COMMIT GATE IS A REAL
+    GATE: 29 tests unit, 2 ^:integration. The integration suite NEEDS GRAPHVIZ — see
+    :graphviz-and-the-devenv.
     NOT BUILT, and named so nobody assumes otherwise: the FACADE (robertluo.state-graph) does not
     exist, so an application requires the namespaces directly; async and store are untouched."
 
@@ -649,6 +656,29 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       are identical? to s — Clojure's map assoc answers `this` when the value is already there. A
       self-loop whose handler answers {} is therefore indistinguishable from an event nobody handled.
       Checked because it was about to be recommended as a free signal."
+
+   :what-the-handler-move-taught
+   "VERIFIED BY RUNNING on 2026-08-31, building the decisions of that day.
+    - DENORMALISATION PAID FOR ITSELF, and this is the finding worth keeping. Moving the handler and
+      its :out from the transition to the event changed shape.clj AND NOTHING ELSE — compile.clj and
+      check.clj needed not one edit, because `transitions` already flattens the catalogue onto every
+      edge and both of them read a shape only through it. The suites went green on the first run.
+      That vocabulary function is doing more work than its size suggests, and the lesson is that a
+      reading layer between the graph and its consumers is what let a structural change stay local.
+    - A 2-ARITY DELEGATING TO A 3-ARITY BREAKS UNDER ITS OWN INSTRUMENTATION when the extra argument
+      refuses nil. (initial sh data) calling (initial sh nil data) goes through the INSTRUMENTED var,
+      so nil is checked against Instance and throws. Loosening to [:maybe Instance] is NOT the fix:
+      Instance is `some?`, and `some?` behind a :maybe admits every value there is, so the schema
+      would assert nothing at all. The fix is a private helper both arities call, which is not
+      instrumented and keeps the public schema strict.
+    - CLOJURE'S OWN DEREFABLES TEST THE DEREF DECISION WITH NO MANIFOLD. A delay, a promise and a
+      future are all clojure.lang.IDeref, so `a deferred under the synchronous default is
+      dereferenced` is asserted today, on the classpath as it stands. What that does NOT prove, and
+      what stays UNVERIFIED, is that manifold's Deferred implements IDeref.
+    - A HANDLER CANNOT REACH :instance EITHER, by the same construction that stops it reaching :id:
+      both are written AFTER the merge. Worth an assertion of its own, because a handler answering
+      {:instance ...} is a plausible mistake and a silent one — it would move a row in the audit log
+      to another machine."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is

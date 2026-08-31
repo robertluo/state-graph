@@ -2,9 +2,10 @@
   "THE BOTTOM: a state machine's shape, which is a graph.
 
    A STATE is a node, shaped by a malli schema and validated on enter. An EVENT is
-   shaped by a malli schema too. A TRANSITION is an edge carrying the event that fires
-   it and the handler that answers a change. Two events may join one pair of states,
-   so the graph is a MULTI-digraph and a plain digraph would silently keep one of them.
+   shaped by a malli schema too, and it CARRIES ITS HANDLER. A TRANSITION is an edge
+   naming the event that fires it and where the machine lands. Two events may join one
+   pair of states, so the graph is a MULTI-digraph and a plain digraph would silently
+   keep one of them.
 
    The shape IS CODE — built at load time, handlers are closures, schemas are compiled.
    Nothing here serialises and nothing here needs to. That is also why the event
@@ -21,6 +22,17 @@
 (def Id
   "What names a state or an event."
   :keyword)
+
+(def Instance
+  "What names a RUN of the machine — the third identity here, and it gets a third name.
+   :id on a state says which NODE it is in and :id on an event says its TYPE; this says
+   which machine either belongs to. See the README: `a lifecycle of an INSTANCE of the
+   FSM can be seen as a reduction on a seq of events`, which is where the word comes from.
+
+   Deliberately loose — a uuid, an order number, a string — because what an instance is
+   called is the caller's business and never this library's. Not nil, though: a partition
+   key that may be nil is a bug waiting for the second machine."
+  some?)
 
 (def Schema
   "Anything malli can make a schema of: a FORM like [:map [:n :int]], or one already
@@ -53,16 +65,22 @@
         [:final {:optional true} :boolean]])
 
 (def EventDef
-  "A catalogue entry. It is consumed at construction and not kept: its schema is
-   written onto every edge that fires it."
-  [:map [::kind [:= :event]] [:id Id] [:schema MapSchema]])
+  "A catalogue entry, and WHERE A HANDLER LIVES. It is consumed at construction and not
+   kept: its schema, its handler and its :out are written onto every edge that fires it.
+
+   THE HANDLER IS THE EVENT'S AND NOT THE EDGE'S, so two edges firing one event cannot
+   disagree about what handles it — there is one declaration where there were two, and a
+   construction-time check is replaced by a shape in which the error cannot be written.
+   It also completes the claim: the handler is a [:=> [:cat <this :schema>] <this :out>],
+   BOTH HALVES off this map and nothing at all off the graph."
+  [:map [::kind [:= :event]] [:id Id] [:schema MapSchema] [:handler fn?]
+        [:out {:optional true} MapSchema]])
 
 (def TransDef
-  "An edge. :handler takes THE EVENT ALONE and answers a map, which is merged into the
-   state; :out declares the schema of that answer, which is what makes the handler a
-   complete [:=> [:cat <event schema>] <out>] and the declaration a testable claim."
-  [:map [::kind [:= :transition]] [:from Id] [:event Id] [:to Id] [:handler fn?]
-        [:out {:optional true} MapSchema]])
+  "An edge: which event moves the machine from where to where, and nothing else. What
+   handles the event is the EVENT's to say — see EventDef. The TARGET is still the
+   graph's, because A -submit-> B beside C -submit-> D is what a multidigraph is for."
+  [:map [::kind [:= :transition]] [:from Id] [:event Id] [:to Id]])
 
 (def Shape
   "The graph. Its innards are ubergraph's business, so what is guarded is what goes in."
@@ -80,21 +98,25 @@
   ([id schema opts] (into {::kind :state :id id :schema (m/schema schema)} opts)))
 
 (defn event
-  "An event: an id and the malli schema of its DATA. The :id rides in the value at
-   runtime for the same reason a state's does — the step function matches an edge on it."
-  {:malli/schema [:=> [:cat Id MapSchema] EventDef]}
-  [id schema]
-  {::kind :event :id id :schema (m/schema schema)})
+  "An event: an id, the malli schema of its DATA, the HANDLER that answers it, and
+   optionally the schema of what that handler answers.
+
+   The handler takes THE EVENT ALONE — never the state it is about to change — and
+   answers a map that is merged into the state. The :id rides in the value at runtime for
+   the same reason a state's does: the step function matches an edge on it."
+  {:malli/schema [:function [:=> [:cat Id MapSchema fn?] EventDef]
+                            [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]]}
+  ([id schema handler] (event id schema handler nil))
+  ([id schema handler out]
+   (cond-> {::kind :event :id id :schema (m/schema schema) :handler handler}
+     (some? out) (assoc :out (m/schema out)))))
 
 (defn transition
-  "An edge: from a state, on an event, to a state, by a handler — and optionally the
-   schema of what that handler answers."
-  {:malli/schema [:function [:=> [:cat Id Id Id fn?] TransDef]
-                            [:=> [:cat Id Id Id fn? [:maybe MapSchema]] TransDef]]}
-  ([from event to handler] (transition from event to handler nil))
-  ([from event to handler out]
-   (cond-> {::kind :transition :from from :event event :to to :handler handler}
-     (some? out) (assoc :out (m/schema out)))))
+  "An edge: from a state, on an event, to a state. Three keywords and no functions —
+   what handles the event belongs to the event."
+  {:malli/schema [:=> [:cat Id Id Id] TransDef]}
+  [from event to]
+  {::kind :transition :from from :event event :to to})
 
 ;;; -------------------------------------------------------------------- checks
 
@@ -154,10 +176,13 @@
       (let [inits (filterv :initial state)]
         (when (not= 1 (count inits))
           [{:problem :initial :count (count inits) :ids (mapv :id inits)}]))
-      ;; 6 — :id is the shape's word. A state redeclaring it would be describing
-      ;; something the shape overwrites on every entry.
-      (for [s state :when (some #{:id} (mu/keys (:schema s)))]
-        {:problem :id-declared :id (:id s)})))))
+      ;; 6 — :id and :instance are the MACHINERY'S words, not a state's. A state
+      ;; redeclaring either would be describing something written over it on every
+      ;; entry: :id by the edge, :instance by whoever started the run.
+      (for [s state
+            k (mu/keys (:schema s))
+            :when (#{:id :instance} k)]
+        {:problem :reserved-declared :id (:id s) :key k})))))
 
 ;;; ---------------------------------------------------------------------- shape
 
@@ -174,15 +199,14 @@
   (when-let [ps (seq (apply problems parts))]
     (throw (ex-info "The shape has problems" {:problems (vec ps)})))
   (let [{:keys [state event transition]} (group-by ::kind parts)
-        catalogue (into {} (map (juxt :id :schema)) event)]
+        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out]))) event)]
     (-> (uber/multidigraph)
         (uber/add-nodes-with-attrs*
          (for [s state] [(:id s) (select-keys s [:schema :initial :final])]))
         (uber/add-directed-edges*
          (for [t transition]
            [(:from t) (:to t)
-            (assoc (select-keys t [:event :handler :out])
-                   :schema (catalogue (:event t)))])))))
+            (assoc (catalogue (:event t)) :event (:event t))])))))
 
 ;;; ------------------------------------------------------------------- reading
 
@@ -205,20 +229,26 @@
   (boolean (uber/attr shape id :final)))
 
 (defn transitions
-  "Every edge as a plain map — :from :event :to :handler :out and :schema, the event's.
-   The vocabulary everything above this reads a shape through."
+  "Every edge as a plain map — :from :event :to, and the event's :schema, :handler and
+   :out denormalised onto it. The vocabulary everything above this reads a shape through,
+   and why nothing above had to learn that the handler moved."
   {:malli/schema [:=> [:cat Shape] [:sequential :map]]}
   [shape]
   (for [e (uber/edges shape)]
     (into {:from (uber/src e) :to (uber/dest e)} (uber/attrs shape e))))
 
 (defn enter-schema
-  "What a state is validated against ON ENTER: its own schema with its :id written in.
-   DERIVED and never written by hand, so entering also checks that the machine landed
-   where it thought it did."
+  "What a state is validated against ON ENTER: its own schema with :id written in, and
+   :instance permitted. DERIVED and never written by hand, so entering also checks that
+   the machine landed where it thought it did.
+
+   :instance is OPTIONAL because one machine reduced over one seq needs no name for
+   itself — that is the README's own headline use and it should cost nothing. It is the
+   async layer, routing between many, that will insist on it."
   {:malli/schema [:=> [:cat Shape Id] MapSchema]}
   [shape id]
-  (mu/merge [:map [:id [:= id]]] (uber/attr shape id :schema)))
+  (mu/merge [:map [:id [:= id]] [:instance {:optional true} Instance]]
+            (uber/attr shape id :schema)))
 
 (defn explain
   "m/explain as PLAIN DATA — one map per error, and forms rather than compiled Schema

@@ -53,8 +53,8 @@
   ;; cannot move the machine sideways past the edge that was supposed to decide it.
   (let [g (shape/shape (shape/state :a [:map] {:initial true})
                        (shape/state :b [:map] {:final true})
-                       (shape/event :go [:map])
-                       (shape/transition :a :go :b (constantly {:id :somewhere-else})))]
+                       (shape/event :go [:map] (constantly {:id :somewhere-else}))
+                       (shape/transition :a :go :b))]
     (is (= {:id :b} ((c/compile g) (c/initial g {}) {:id :go})))))
 
 (deftest initial-enters-through-the-same-validation-as-every-other-state
@@ -64,14 +64,98 @@
     (testing "and the initial state's own schema still has to be satisfied"
       (let [strict (shape/shape (shape/state :a [:map [:n :int]] {:initial true})
                                 (shape/state :b [:map] {:final true})
-                                (shape/event :go [:map])
-                                (shape/transition :a :go :b (constantly {})))
+                                (shape/event :go [:map] (constantly {}))
+                                (shape/transition :a :go :b))
             e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"enter" (c/initial strict {})))]
         ;; :schema is the OFFENDING CHILD and not the enclosing map, which is what
         ;; malli's own (:schema error) would give for a missing key; :type is what
         ;; tells a missing key from one whose value is legitimately nil.
         (is (= [{:in [:n] :value nil :schema :int :type :malli.core/missing-key}]
                (:errors (ex-data e))))))))
+
+(deftest naming-the-run-is-optional-and-a-handler-cannot-change-it
+  ;; :instance is the THIRD identity — :id on a state is its node, :id on an event is its
+  ;; type — and it is the machinery's to write. Named once at the start, it rides the
+  ;; whole reduction, and a handler answering one is overruled exactly as a handler
+  ;; answering :id is.
+  (let [g      (ts/counter)
+        events [{:id :start :seed 0} {:id :set :to 7} {:id :stop}]]
+    (testing "unnamed, and the README's headline reduction costs nothing for it"
+      (is (= {:id :done :n 7} (reduce (c/compile g) (c/initial g {}) events))))
+
+    (testing "named once, and carried the whole way without being spelled again"
+      (is (= {:id :done :n 7 :instance "order-4711"}
+             (reduce (c/compile g) (c/initial g "order-4711" {}) events))))
+
+    (testing "a handler answering :instance is overruled, like one answering :id"
+      (let [sneaky (shape/shape
+                    (shape/state :a [:map] {:initial true})
+                    (shape/state :b [:map] {:final true})
+                    (shape/event :go [:map] (constantly {:instance "somebody-elses"}))
+                    (shape/transition :a :go :b))]
+        (is (= {:id :b :instance "mine"}
+               ((c/compile sneaky) (c/initial sneaky "mine" {}) {:id :go})))))
+
+    (testing "an event may name a run too, and the step does not care — it has only one
+              in hand. That key is for the layer that ROUTES, which cannot read it off a
+              state, having none yet"
+      (is (= {:id :running :n 1 :instance "x"}
+             ((c/compile g) (c/initial g "x" {}) {:id :start :seed 1 :instance "x"}))))))
+
+;;; ----------------------------------------------------------------- the context
+
+(deftest a-deferred-under-the-default-is-dereferenced
+  ;; The decision was `just deref it`, and the mechanism is clojure.lang.IDeref rather
+  ;; than anything of manifold's. THAT is what this proves, and it proves it with
+  ;; CLOJURE'S OWN derefables — a delay and a promise are both IDeref — so the claim is
+  ;; tested today, with no manifold on the classpath at all.
+  ;;
+  ;; What is NOT proven here and stays UNVERIFIED: that manifold's Deferred implements
+  ;; IDeref. That is read and reasoned, and is to be checked the day manifold lands.
+  (doseq [[what wrap] [["a delay"   #(delay %)]
+                       ["a promise" #(doto (promise) (deliver %))]
+                       ["a future"  #(future %)]
+                       ["a plain map, which is not IDeref at all" identity]]]
+    (testing what
+      (let [g (shape/shape (shape/state :a [:map] {:initial true})
+                           (shape/state :b [:map [:n :int]] {:final true})
+                           (shape/event :go [:map] (fn [_] (wrap {:n 7})) [:map [:n :int]])
+                           (shape/transition :a :go :b))]
+        (is (= {:id :b :n 7} ((c/compile g) (c/initial g {}) {:id :go})))))))
+
+(deftest an-ignored-event-can-be-heard
+  ;; :ignored is the whole of `not an error, but not silent`. The DEFAULT is silent and
+  ;; answers the state unchanged, which is what every other test here relies on; a layer
+  ;; that wants to record replaces it. Asserted on what it is HANDED, since a recorder
+  ;; that cannot tell which event went unhandled records nothing worth having.
+  (let [g    (ts/counter)
+        seen (atom [])
+        step (c/compile g {:ignored (fn [state event]
+                                      (swap! seen conj [(:id state) (:id event)])
+                                      state)})
+        init (c/initial g {})]
+    (testing "the state is unchanged either way"
+      (is (= init (step init {:id :stop})))
+      (is (= init (step init {:id :no-such-event}))))
+    (is (= [[:idle :stop] [:idle :no-such-event]] @seen)
+        "both the catalogued event this state has no edge for and the unknown one")
+    (testing "and a transition that DOES fire says nothing"
+      (is (= {:id :running :n 1} (step init {:id :start :seed 1})))
+      (is (= 2 (count @seen))))))
+
+(deftest the-container-is-the-callers
+  ;; :then and :pure are what keep manifold OUT of the core: swap them and the step
+  ;; answers something else entirely, while compile never learns what that something is.
+  ;; A one-key box stands in for a deferred — the point is that BOTH paths route through
+  ;; the context, the transition through :then and the miss through :pure.
+  (let [g    (ts/counter)
+        box  (fn [v] {:boxed v})
+        step (c/compile g {:then (fn [v f] (box (f v))) :pure box})
+        init (c/initial g {})]
+    (is (= {:boxed {:id :running :n 3}} (step init {:id :start :seed 3}))
+        "a fired transition came back through :then")
+    (is (= {:boxed init} (step init {:id :nope}))
+        "and an event nobody handled came back through :pure")))
 
 ;;; ------------------------------------------------------- the crossings that throw
 
@@ -91,8 +175,8 @@
               since the enter check one line later would blame the state instead"
       (let [bad (shape/shape (shape/state :a [:map] {:initial true})
                              (shape/state :b [:map [:n :int]] {:final true})
-                             (shape/event :go [:map])
-                             (shape/transition :a :go :b (constantly {:n "seven"}) [:map [:n :int]]))
+                             (shape/event :go [:map] (constantly {:n "seven"}) [:map [:n :int]])
+                             (shape/transition :a :go :b))
             e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"out"
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :out (:crossing (ex-data e))))
@@ -101,8 +185,8 @@
     (testing "a state the target will not admit, where nothing declared :out"
       (let [bad (shape/shape (shape/state :a [:map] {:initial true})
                              (shape/state :b [:map [:n :int]] {:final true})
-                             (shape/event :go [:map])
-                             (shape/transition :a :go :b (constantly {:n "seven"})))
+                             (shape/event :go [:map] (constantly {:n "seven"}))
+                             (shape/transition :a :go :b))
             e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"enter"
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :enter (:crossing (ex-data e))))
