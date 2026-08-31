@@ -213,10 +213,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       `admits` says :yes, values generated from the produced schema must all validate against the
       target. That direction is the one worth paying for — a checker saying :no where it should say
       :unknown merely nags, one saying :yes where it should say :no HIDES A BUG.
-    - NOT BUILT, and the obvious next check: a TRAP — a state from which no :final is reachable. It
-      is cheap once reachability exists (reverse traversal from the finals), and it is deliberately
-      absent because a machine with no :final at all is normal and the check would have to stay
-      quiet for it. Worth doing when a shape in anger asks for it."
+    - THE TRAP CHECK IT NAMED AS NOT BUILT IS NOW BUILT, 2026-08-31 — see
+      :a-trap-is-what-a-cycle-hides. It cost five lines, as predicted, and the exception that made
+      it wait turned out to belong inside `finishable` rather than bolted onto the check."
 
    :the-first-target
    "DECIDED 2026-08-30. The first target is THE SPINE: robertluo.state-graph.shape and
@@ -506,7 +505,31 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       PRESERVE metadata, so a stale flag would ride into every later state.
     - THE COST: the guarantee is OPT-IN. A layer that injects nothing gets today's silence. It is the
       store layer that wants the record and the store layer that injects, so the default is only ever
-      taken by a caller recording nothing anyway."}
+      taken by a caller recording nothing anyway."
+
+   :a-trap-is-what-a-cycle-hides
+   "BUILT 2026-08-31, and the cheapest thing that was left. `traps` answers the REACHABLE states
+    from which no ending can be reached: the machine stays alive, goes on accepting events, and can
+    never legitimately finish.
+    - IT IS `reachable` RUN BACKWARDS, which is why it was cheap. `finishable` traverses the
+      TRANSPOSED graph from every :final — uber/transpose and alg/pre-traverse, both already on
+      hand and both checked before being used — and a trap is a reachable state not in it.
+    - BOTH OTHER STRUCTURAL CHECKS WALK STRAIGHT PAST IT, and that is the whole argument for it.
+      `unreachable` cannot see it, because a forward traversal gets there. `dead-ends` cannot,
+      because a trap HAS out-edges: going nowhere and going nowhere USEFUL are different faults. A
+      dead end is a trap of SIZE ONE; two states bouncing off each other are the smallest
+      interesting one. The `trapped` fixture is exactly that, and check/problems answered [] on it
+      before this existed — the suite records that fact rather than describing it.
+    - THE EXCEPTION IS WHY IT WAITED, and the fix was to put it in `finishable` and not in `traps`:
+      where a shape declares no :final at all, EVERY state is finishable, vacuously, so the check
+      is silent of its own accord rather than by a special case. A machine never meant to terminate
+      is not a broken one, and the `endless` fixture asserts that silence.
+    - `traps` IS TOTAL AND `problems` IS WHAT FILTERS, the pattern `subsumption` already set. A
+      dead end is in `traps` and is reported as :dead-end, the sharper of the two diagnoses, so
+      every state is named once and named by the more specific fault.
+    - AND IT IS VISIBLE IN THE PICTURE, which is what :what-the-graph-buys claims for the drawing:
+      `oops` leads into a two-node pocket with no arrow reaching the double circle. Not as stark as
+      an island, and still obvious."}
 
   :open-questions
   []
@@ -524,9 +547,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     reports its two islands, three dead ends and one :target-refuses, and a reduction carrying an
     :instance ends {:id :done :instance order-1 :n 9}, that name having been given once to
     `initial` and never spelled again after.
-    31 tests, 121 assertions, green; clj-kondo clean; all 23 public fns carry a :malli/schema, which
-    the instrument! count of exactly 23 confirms better than a grep can. THE COMMIT GATE IS A REAL
-    GATE: 29 tests unit, 2 ^:integration. The integration suite NEEDS GRAPHVIZ — see
+    THE TRAP CHECK LANDED the same day too — see :a-trap-is-what-a-cycle-hides — so the structural
+    checks are now reachability, dead ends, TRAPS and subsumption.
+    34 tests, 131 assertions, green; clj-kondo clean; all 25 public fns carry a :malli/schema, which
+    the instrument! count of exactly 25 confirms better than a grep can. THE COMMIT GATE IS A REAL
+    GATE: 32 tests unit, 2 ^:integration. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
     NOT BUILT, and named so nobody assumes otherwise: the FACADE (robertluo.state-graph) does not
     exist, so an application requires the namespaces directly; async and store are untouched."

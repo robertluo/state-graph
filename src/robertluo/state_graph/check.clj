@@ -42,6 +42,40 @@
               (remove #(shape/final? sh %)))
         (shape/states sh)))
 
+(defn finishable
+  "The states from which a run can still reach AN ENDING — a :final, or somewhere a
+   :final is reachable from. The same argument `reachable` makes, made BACKWARDS: a
+   traversal of the transposed graph from every :final.
+
+   EVERY state when the shape declares no :final at all, because a machine that was
+   never meant to terminate is not a broken one. That is not a special case bolted on;
+   it is what `can still finish` means where finishing is not a thing this machine does."
+  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
+  [sh]
+  (let [finals (filter #(shape/final? sh %) (shape/states sh))]
+    (if (empty? finals)
+      (set (shape/states sh))
+      (let [back (uber/transpose sh)]
+        (into #{} (mapcat #(alg/pre-traverse back %)) finals)))))
+
+(defn traps
+  "Reachable states from which NO ENDING can be reached. The machine stays alive, goes
+   on accepting events, and can never legitimately finish.
+
+   THE CASE A CYCLE HIDES, and the one both other structural checks walk straight past.
+   `unreachable` does not see it, because a forward traversal gets there. `dead-ends`
+   does not see it, because a trap HAS out-edges — going nowhere and going nowhere
+   USEFUL are different faults. A dead end is a trap of size one; two states that only
+   bounce off each other are the smallest interesting one, and nothing before this
+   reported them at all.
+
+   TOTAL, so a dead end is in here too: the accessor is honest and `problems` is what
+   filters, exactly as `subsumption` publishes every verdict. Empty where the shape
+   declares no :final, by way of `finishable`."
+  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
+  [sh]
+  (into (sorted-set) (remove (finishable sh)) (reachable sh)))
+
 ;;; ------------------------------------------------------------------ subsumption
 
 (def ^:private disjoint-types
@@ -153,14 +187,20 @@
    graph, where shape/problems is the referential ones that need only the parts.
 
    Only PROVEN faults. An :unknown subsumption is not reported: a checker that cries
-   about what it could not work out is a checker people turn off."
+   about what it could not work out is a checker people turn off — and a machine with no
+   :final declared is not condemned for having no way to finish, see `finishable`."
   {:malli/schema [:=> [:cat shape/Shape] [:vector :map]]}
   [sh]
-  (vec (concat
-        (for [id (unreachable sh)] {:problem :unreachable :id id})
-        (for [id (dead-ends sh)] {:problem :dead-end :id id})
-        (for [{:keys [verdict] :as v} (subsumption sh) :when (= :no verdict)]
-          (-> v (dissoc :verdict) (assoc :problem :target-refuses))))))
+  (let [ends (dead-ends sh)]
+    (vec (concat
+          (for [id (unreachable sh)] {:problem :unreachable :id id})
+          (for [id ends] {:problem :dead-end :id id})
+          ;; A DEAD END IS A TRAP, and :dead-end is the sharper diagnosis of the two,
+          ;; so each state is named once and named by the more specific fault. `traps`
+          ;; itself stays total; this is where the filtering belongs.
+          (for [id (traps sh) :when (not (ends id))] {:problem :trap :id id})
+          (for [{:keys [verdict] :as v} (subsumption sh) :when (= :no verdict)]
+            (-> v (dissoc :verdict) (assoc :problem :target-refuses)))))))
 
 ;;; ---------------------------------------------------------------------- drawing
 

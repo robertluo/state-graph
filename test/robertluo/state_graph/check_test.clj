@@ -61,6 +61,38 @@
     (is (not (contains? (set (check/dead-ends g)) :done))
         ":done has no way out either, but it is :final and that is what :final says")))
 
+(deftest a-trap-is-what-a-cycle-hides
+  ;; The argument for this check, put as a test: on this shape BOTH other structural
+  ;; checks are entirely silent, and before `traps` existed check/problems answered [].
+  (let [g (ts/trapped)]
+    (is (= #{:limbo :retrying} (set (check/traps g))))
+    (is (= #{:idle :running :done} (check/finishable g)))
+    (testing "and neither of the others can see it"
+      (is (empty? (check/unreachable g)) "a forward traversal gets there")
+      (is (empty? (check/dead-ends g))
+          "both have somewhere to go — going nowhere and going nowhere USEFUL differ"))
+    (testing "so it is the only thing problems reports"
+      (is (= [{:problem :trap :id :limbo} {:problem :trap :id :retrying}]
+             (check/problems g))))))
+
+(deftest a-machine-that-never-ends-is-not-broken
+  ;; The exception that kept this unbuilt. With no :final declared, `can it still
+  ;; finish` is not a question about this machine, so the check stays quiet rather than
+  ;; condemning every state it has.
+  (let [g (ts/endless)]
+    (is (empty? (check/traps g)))
+    (is (= #{:awake :asleep} (check/finishable g)) "every state, vacuously")
+    (is (empty? (check/problems g)))))
+
+(deftest a-dead-end-is-a-trap-reported-as-the-sharper-fault
+  ;; `traps` is TOTAL, so :trap and :typed are both in it — neither has a way to :done.
+  ;; But :dead-end says more about them, so problems names each state once and names it
+  ;; that. The accessor is honest; problems is what filters.
+  (let [g (ts/broken)]
+    (is (= #{:trap :typed} (set (check/traps g))))
+    (is (empty? (filter #(= :trap (:problem %)) (check/problems g)))
+        "every trap here is already a dead end, and is reported as that instead")))
+
 ;;; ------------------------------------------------------------------ subsumption
 
 (deftest admits-answers-what-it-can-prove-and-declines-the-rest

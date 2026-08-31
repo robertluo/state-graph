@@ -102,6 +102,41 @@
    (shape/transition :running :bad :typed)
    (shape/transition :island-a :hop :island-b)))
 
+(defn trapped
+  "A shape whose ONLY fault is a trap, and that is the whole point of it: :limbo and
+   :retrying are reachable, both have somewhere to go, and no sequence of events from
+   either ever reaches :done. Before `traps` existed, check/problems answered [] here."
+  []
+  (shape/shape
+   (shape/state :idle [:map] {:initial true})
+   (shape/state :running [:map])
+   (shape/state :done [:map] {:final true})
+   (shape/state :limbo [:map])
+   (shape/state :retrying [:map])
+   (shape/event :go    [:map] (constantly {}))
+   (shape/event :stop  [:map] (constantly {}))
+   (shape/event :oops  [:map] (constantly {}))
+   (shape/event :retry [:map] (constantly {}))
+   (shape/event :back  [:map] (constantly {}))
+   (shape/transition :idle :go :running)
+   (shape/transition :running :stop :done)
+   (shape/transition :running :oops :limbo)
+   (shape/transition :limbo :retry :retrying)
+   (shape/transition :retrying :back :limbo)))
+
+(defn endless
+  "A machine that was never meant to finish: no :final anywhere, and a cycle so that
+   nothing is a dead end either. `traps` has to stay SILENT here, and that exception is
+   why the check went unbuilt until it was asked for."
+  []
+  (shape/shape
+   (shape/state :awake [:map] {:initial true})
+   (shape/state :asleep [:map])
+   (shape/event :sleep [:map] (constantly {}))
+   (shape/event :wake  [:map] (constantly {}))
+   (shape/transition :awake :sleep :asleep)
+   (shape/transition :asleep :wake :awake)))
+
 (defn counter
   "The canonical example shape, where the schemas DO bite: a counter whose :n the
    events carry, since a handler never sees the state it is changing."
