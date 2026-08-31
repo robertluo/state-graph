@@ -349,7 +349,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       even with pure handlers and free speculation the order would be wrong. That is why statecharts
       have run-to-completion. v1 forbids emission (:a-handler-causes-nothing), so the hazard is shut
       rather than survived; the argument is recorded because it is the one that would still stand if
-      the other two were answered."
+      the other two were answered.
+    - CORRECTED 2026-08-31, and the correction is the author's: EVERY ARGUMENT ABOVE IS ABOUT EVENTS
+      ARRIVING ONE AT A TIME. None of them touches two events PENDING IN THE SAME STATE, which is
+      what an async handler creates and which :one-ordered-stream-per-instance does nothing to
+      prevent — that contract promises arrival ORDER, not one-at-a-time PROCESSING. Both handlers are
+      then selected from the same state, so there is no speculation and no unknown state, and the
+      selection argument simply does not apply. `Across instances` is still where the PARALLELISM is;
+      a narrow CONCURRENCY inside one machine is licensed by the shape, and the whole of it is in
+      :two-events-in-flight-at-once."
 
    :what-is-persisted
    "DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
@@ -545,7 +553,45 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       every state is named once and named by the more specific fault.
     - AND IT IS VISIBLE IN THE PICTURE, which is what :what-the-graph-buys claims for the drawing:
       `oops` leads into a two-node pocket with no arrow reaching the double circle. Not as stark as
-      an island, and still obvious."}
+      an island, and still obvious."
+
+   :two-events-in-flight-at-once
+   "DECIDED 2026-08-31, and it is the async story. A handler may answer a deferred, so a second event
+    can arrive while the first is still in flight, and a machine is in ONE state at a time. What may
+    be done about the second is the whole question.
+    - THE TWO CASES, the author's: where the state admits ONLY the first event, the second must WAIT
+      and be applied to the updated state. Where the state admits BOTH, they may in principle be
+      applied in order of COMPLETION.
+    - BUT `BOTH ADMITTED` IS NOT THE CONDITION, and this is where the first analysis was wrong. Both
+      admitted means each is INDIVIDUALLY legal there, not that they COMMUTE. idle -start-> running
+      beside idle -cancel-> cancelled: both legal, and if start completes first the machine is in
+      running, which has no cancel edge, so the cancel is SILENTLY DISCARDED and the caller believes
+      they cancelled. Reverse the completion order and it lands. That is a flake, not a race anybody
+      chose.
+    - THE CONDITION IS CONFLUENCE — the diamond [S,A]->Ta, [S,B]->Tb, [Ta,B]->X, [Tb,A]->X with the
+      same X — plus patches that commute, plus both intermediate states being enterable.
+    - AND CONFLUENCE COLLAPSES TO SELF-LOOPS, which is what makes this cheap. If both events are
+      self-loops then Ta = Tb = X = S and the diamond closes TRIVIALLY, with no graph query. If
+      either event leaves the state, the other route has to exist AND rejoin, which MEASURED over
+      this project's own fixtures never happens — see :confluence-was-measured-not-guessed. Divergence
+      is the POINT of a state machine, so confluence is the exception and not the rule.
+    - SO THE RULE IS SMALL. SERIALISE BY DEFAULT, always correct and needing no annotation. Take
+      concurrency only where both pending events are SELF-LOOPS on the current state and their :out
+      key sets are DISJOINT — mu/keys on each, and that declaration was paid for by the subsumption
+      check already. That is the niche where it pays anyway: a form being filled in, a document
+      edited, independent fields updated while the machine stays put.
+    - NO DEPENDENCY AND NO INDEPENDENCE IS DECLARED. Dependency is the default and needs no saying.
+      An author-asserted independence was considered and turned down twice over: the shape ALREADY
+      says which events are self-loops, so nothing needs asserting; and independence is
+      STATE-RELATIVE, so a global claim would be refuted somewhere in most real shapes and would
+      rarely be usable.
+    - THE PATCH IS NEVER STALE, ONLY THE ADMISSION IS, which is a payoff from
+      :a-handler-belongs-to-the-event. A handler answers from the event alone, so what it computed
+      while the machine was in S is still exactly right in T; it is only whether T admits the event
+      that can have changed, and that is re-looked-up at application time as any other step is.
+    - THE COST, ACCEPTED by the author: where concurrency is taken, HISTORY ORDER STOPS MATCHING
+      ARRIVAL ORDER. Persistence is an audit trail, so the log has to represent that honestly rather
+      than pretend to a sequence that did not happen."}
 
   :open-questions
   ["ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
@@ -730,6 +776,22 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       both are written AFTER the merge. Worth an assertion of its own, because a handler answering
       {:instance ...} is a plausible mistake and a silent one — it would move a row in the audit log
       to another machine."
+
+   :confluence-was-measured-not-guessed
+   "MEASURED BY RUNNING on 2026-08-31, over this project's own fixtures, when the question was whether
+    two events pending in one state may be applied in completion order. `Commute by default` was
+    proposed and the numbers refused it.
+    - For every state, every pair of distinct events admitted there was checked for a closing diamond:
+      counter has ONE such pair, :set and :stop in :running, and it does NOT commute — set-then-stop
+      lands :running then :done, while stop-then-set lands :done and then finds NO [done, set] edge,
+      so the :set is silently discarded. trapped has one pair, :oops and :stop in :running, and it
+      does not commute either.
+    - So ONE HUNDRED PER CENT of the concurrent-candidate pairs that exist in this codebase fail
+      confluence. Commute-by-default would have been wrong in every case there is, and wrong SILENTLY
+      and ORDER-DEPENDENTLY, which is the worst way to be wrong.
+    - The finding is structural rather than a fixture accident: different events take you to different
+      places, and that is what a state machine is FOR. It is why :two-events-in-flight-at-once
+      serialises by default and licenses only self-loops."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is
