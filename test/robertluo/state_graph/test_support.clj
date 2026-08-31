@@ -7,7 +7,8 @@
             [robertluo.state-graph.shape :as shape]))
 
 (def namespaces
-  '[robertluo.state-graph.shape robertluo.state-graph.compile])
+  '[robertluo.state-graph.shape robertluo.state-graph.compile
+    robertluo.state-graph.check])
 
 (defn instrumented
   "A fixture that makes the :malli/schema metadata actually do something. mi/collect!
@@ -60,6 +61,43 @@
   "The parts of one kind, out of a generated shape."
   [kind parts]
   (filter #(= kind (:robertluo.state-graph.shape/kind %)) parts))
+
+(def gen-map-schema
+  "A small map schema. The keys come from a POOL OF THREE so that two generated
+   schemas actually overlap — two schemas sharing no keys agree about nothing and
+   would make the subsumption property vacuous — and an entry is sometimes optional,
+   which is the case `admits` has to get right and the one a naive checker gets wrong.
+   Deduplicated by key: [:map [:a :int] [:a :string]] is not a schema."
+  (gen/fmap
+   (fn [entries]
+     (into [:map]
+           (map (fn [[k opt t]] (if opt [k {:optional true} t] [k t])))
+           (vals (into {} (map (fn [e] [(first e) e])) entries))))
+   (gen/vector (gen/tuple (gen/elements [:a :b :c])
+                          gen/boolean
+                          (gen/elements [:int :string :keyword :boolean]))
+               0 4)))
+
+(defn broken
+  "A shape with one of everything wrong, and every fault STRUCTURAL — it passes
+   shape/problems, which is the point. :island-a and :island-b reach each other and
+   nothing else, so they are the case a `no in-edge` check would miss."
+  []
+  (shape/shape
+   (shape/state :idle [:map] {:initial true})
+   (shape/state :running [:map [:n :int]])
+   (shape/state :done [:map [:n :int]] {:final true})
+   (shape/state :trap [:map [:n :int]])
+   (shape/state :typed [:map [:n :int]])
+   (shape/state :island-a [:map])
+   (shape/state :island-b [:map])
+   (shape/event :go [:map]) (shape/event :stop [:map]) (shape/event :oops [:map])
+   (shape/event :bad [:map]) (shape/event :hop [:map])
+   (shape/transition :idle :go :running (constantly {:n 0}) [:map [:n :int]])
+   (shape/transition :running :stop :done (constantly {}) [:map])
+   (shape/transition :running :oops :trap (constantly {}) [:map])
+   (shape/transition :running :bad :typed (constantly {:n "seven"}) [:map [:n :string]])
+   (shape/transition :island-a :hop :island-b (constantly {}) [:map])))
 
 (defn counter
   "The canonical example shape, where the schemas DO bite: a counter whose :n the

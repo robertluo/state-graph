@@ -41,7 +41,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    :repl-eval-reload :per-namespace-in-dependency-order
    :deps {:datahike "0.8.1861" :ubergraph "0.9.0" :malli "0.20.1" :test.check "1.1.1"
           :dev {:nrepl "1.3.0" :kaocha "1.91.1392"}}
-   :inherited-from "../AGENTS.md — the sibling project robertluo.smart-boundary. Its house rules
+   :inherited-from "../smart-boundary/AGENTS.md — the SIBLING COMPONENT robertluo.smart-boundary, in the same
+                    monorepo. Its house rules
                     (dependencies point down, errors are data, only assert what can fail, a store
                     is closed in a `finally`) hold here too; its :project-knowledge is about
                     Anthropic, Datalevin and nREPL and is NOT about this project."}
@@ -88,7 +89,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     forbidden try/catch. In the sibling project one un-closed Datalevin environment kept the JVM
     alive after the suite had finished, because its executor threads are not daemons; whether
     datahike does the same is UNVERIFIED — assume it does until it has been measured"
-   "COMMIT GATE: clojure -M:dev:test integration passes. The fast suite is for every save"]
+   "COMMIT GATE: clojure -M:dev:test integration passes. The fast suite is for every save"
+   "THIS FILE IS DATA, SO CHECK IT BY PARSING IT. An unterminated string is INVISIBLE to a bracket
+    balance — it shifts which quotes pair with which and leaves every { and } matched — so a
+    balance check passes a file that no reader can read. Two entries were added with no closing
+    quote on 2026-08-31 and the balance check said fine each time; what caught it was
+    clojure.edn/read-string, which answered `Invalid number: 2026-08-31.` because it was reading
+    prose as data. Verify with (clojure.edn/read-string (subs s (index-of s \"{:statechart/id\")))
+    and nothing weaker. (../smart-boundary/AGENTS.md does NOT parse — `Duplicate key: a`, and it
+    predates any of this; it is that component's to fix.)"]
 
   :layering
   ["The bottom two are BUILT as described (2026-08-30). Everything above them is still PROPOSED,
@@ -108,9 +117,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
                                      turns data into a function, and the only one both defaults are
                                      above in spirit and below in the arrow: they take its OUTPUT
                                      as a value, so neither requires it
+    robertluo.state-graph.check    — BUILT. What the graph BUYS: the static checks and the
+                                     drawing, which answer the same question by different means.
+                                     A SIBLING of compile, not a part of shape: nothing here is on
+                                     the runtime path, and an application shipping a working shape
+                                     never loads it. Requires shape, ubergraph and malli
     robertluo.state-graph.shape    — THE BOTTOM: the graph itself. Pure data plus constructors,
                                      ubergraph underneath, the malli schemas of a shape, and the
-                                     static checks. Requires ubergraph and malli only
+                                     REFERENTIAL checks — the ones answerable from the parts alone.
+                                     Requires ubergraph and malli only
 
     The two defaults sit BELOW the facade rather than beside it because of the nesting rule — a
     child may not require its parent — and it costs nothing, since neither needs the facade's
@@ -160,6 +175,48 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    "Async and persistence are DEFAULTS. Someone with their own stream library or their own database
     must be able to use the compiled function directly and lose nothing. So neither may be
     required by the facade's core path, and neither may take a shape as an argument."
+
+   :two-kinds-of-check-and-two-places-for-them
+   "DECIDED 2026-08-31, when target 2 was built. shape/problems is REFERENTIAL — answerable from
+    the PARTS alone, so it runs inside the constructor and a bad shape never exists. check/problems
+    is STRUCTURAL — it needs the built graph, so it is a separate namespace and opt-in.
+    - WHY A NAMESPACE AND NOT MORE OF shape, which :layering originally said: nothing in `check` is
+      on the runtime path. compile does not require it, and an application shipping a working shape
+      never loads a graph algorithm. The checks are for the person WRITING the machine.
+    - THE DRAWING IS IN THERE TOO, and it belongs: an unreachable state is obvious in a picture and
+      invisible in a map literal. Same question, different means.
+    - REACHABILITY IS A TRAVERSAL FROM THE ROOT, not `has no in-edge`, and the difference is not
+      academic: two states that reach only each other both have in-edges and are both unreachable.
+      The suite has exactly that island in it, because the weaker check passes it."
+
+   :a-partial-subsumption-checker
+   "DECIDED 2026-08-31. `admits` answers :yes, :no or :unknown, and IT NEVER LIES. Malli has no
+    subsumption — m/validate answers about a VALUE, and nothing asks whether schema A is admitted
+    by schema B — so it is written here, structurally over :map entries.
+    - WHAT IT CAN PROVE, and each is decidable rather than heuristic: a REQUIRED key the produced
+      value may not have (the common bug by a distance, a handler that forgot to set something, and
+      it covers `optional where the target insists` too); a value whose TYPE cannot be the wanted
+      one, over seven primitives verified PAIRWISE disjoint rather than assumed — :int and :double
+      included, malli rejecting each for the other; and a [:= v] or an [:enum ...], where the values
+      are finite and can simply be tried.
+    - :unknown IS AN ANSWER AND NOT A FAILURE, and problems reports only the PROVEN faults. A
+      checker that cries about what it could not work out is a checker people turn off. `subsumption`
+      publishes every verdict, :unknown and :undeclared included, so the check's own COVERAGE is
+      readable — which is a better thing to have than a checker that pretends to be total.
+    - WHAT IS CHECKED IS WHAT RUNS: `produced` composes the schema in the order compile composes the
+      value — the source's own schema, the declared :out merged over it, the target's :id assoc'd
+      last. If those two ever disagree the check is worthless, so they are written to be read side
+      by side.
+    - AN EDGE WITH NO :out IS :undeclared AND NOT A FAULT. That declaration is what the whole check
+      is FOR; without it there is nothing to say about a closure.
+    - SOUNDNESS IS TESTED BY GENERATION, which is a genuinely independent second opinion: where
+      `admits` says :yes, values generated from the produced schema must all validate against the
+      target. That direction is the one worth paying for — a checker saying :no where it should say
+      :unknown merely nags, one saying :yes where it should say :no HIDES A BUG.
+    - NOT BUILT, and the obvious next check: a TRAP — a state from which no :final is reachable. It
+      is cheap once reachability exists (reverse traversal from the finals), and it is deliberately
+      absent because a machine with no :final at all is normal and the check would have to stay
+      quiet for it. Worth doing when a shape in anger asks for it."
 
    :the-first-target
    "DECIDED 2026-08-30. The first target is THE SPINE: robertluo.state-graph.shape and
@@ -284,13 +341,16 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
 
   :project-knowledge
   {:status
-   "TARGET 1 IS BUILT, 2026-08-30: robertluo.state-graph.shape and .compile, with tests.edn and a
-    test file each. 15 tests, 59 assertions, green; clj-kondo clean; every one of the 14 public
-    fns carries a :malli/schema, which the instrument! count of exactly 14 confirms better than a
-    grep can. The lifecycle runs — (reduce (compile shape) (initial shape data) events).
+   "TARGETS 1 AND 2 ARE BUILT. Target 1, 2026-08-30 (commit a588c93): robertluo.state-graph.shape
+    and .compile — the lifecycle runs, (reduce (compile shape) (initial shape data) events).
+    Target 2, 2026-08-31: robertluo.state-graph.check — reachability, dead ends, a partial
+    subsumption checker and the drawing.
+    26 tests, 98 assertions, green; clj-kondo clean; all 23 public fns carry a :malli/schema, which
+    the instrument! count of exactly 23 confirms better than a grep can. THE COMMIT GATE IS NOW A
+    REAL GATE: 24 tests unit, 2 ^:integration, and they are different tests at last. The
+    integration suite NEEDS GRAPHVIZ — see :graphviz-and-the-devenv.
     NOT BUILT, and named so nobody assumes otherwise: the FACADE (robertluo.state-graph) does not
-    exist, so an application requires the two namespaces directly; the structural checks
-    (reachability, dead ends, schema subsumption) are target 2; async and store are untouched."
+    exist, so an application requires the namespaces directly; async and store are untouched."
 
    :gaps-in-the-repository
    "Found by reading deps.edn against README.md, and every one of them will bite on first use:
@@ -377,6 +437,52 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       what is wrong, and would do so only under instrumentation, so the diagnosis would be both
       worse and different between dev and production."
 
+   :what-target-2-taught
+   "VERIFIED BY RUNNING on 2026-08-31:
+    - viz-graph WITH :format :dot NEEDS NO GRAPHVIZ. Reading its source: :save with :format :dot is
+      a `spit` of the dorothy string, every OTHER format calls dorothy.jvm/save! which shells out,
+      and no :save at all calls show!. So the drawing is testable on a machine with no `dot`
+      installed — which this one is — and that is what made ^:integration honest at last: the test
+      writes a file, which is a real thing and nothing to mock.
+    - ITS :auto-label IS USELESS HERE. It pprints the whole attribute map into the label, and ours
+      holds a COMPILED MALLI SCHEMA and a CLOSURE. Hence `labelled`, which sets our own: the state
+      id with a marker and its schema FORM, and the event name on the edge. Assert that no `$eval`
+      reached the output — a closure in a picture is the failure mode.
+    - alg/pre-traverse walks DIRECTED edges from a start node, which is what reachability wants.
+    - THE SEVEN PRIMITIVE TYPES ARE PAIRWISE DISJOINT, checked and not assumed — every value of
+      each was validated against the other six and nothing overlapped, :int against :double
+      included. That check is what licenses `admits` to answer :no from a type difference alone.
+    - mg/sample TAKES {:size n} AS THE COUNT, not as test.check's generator size: (mg/sample s)
+      gives 10 and (mg/sample s {:size 30}) gives 30. Surprising, and it matters in a property that
+      is looking for a counterexample.
+    - THE INSTRUMENT COUNT CAUGHT A STALE REPL, exactly as the sibling project warns. It still said
+      14 after `check` was written, because test-support's `namespaces` had been edited on disk and
+      not reloaded in the REPL — so nine new fns were never collected. The number is a smoke alarm
+      for the fixture AND for the REPL, which is most of why it is worth asserting.
+    - KAOCHA'S FOCUS-META, from :what-target-1-taught, IS RESOLVED: with one ^:integration test in
+      the tree the two suites finally differ — 24 tests unit, 1 integration — and `-M:dev:test` no
+      longer runs everything twice."
+
+   :graphviz-and-the-devenv
+   "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is
+    not worth having. graphviz 15.1.0; `dot` was NOT on the path before, and the devenv is shared
+    with the sibling project, which does not need it and is not harmed by it.
+    - TWO TESTS, TWO REQUIREMENTS, and the split is deliberate. :format :dot is a spit and needs
+      NOTHING, so the source is asserted about anywhere. :format :png shells out, and that test is
+      the only thing proving the RENDERING path — asserted on the PNG MAGIC BYTES (0x89 P N G),
+      because a file existing proves only that something wrote one. Verified BOTH ways: outside the
+      devenv the render test errors and the source test passes; inside, both pass.
+    - A JVM INHERITS ITS PATH AT LAUNCH, so a REPL started before graphviz was added CANNOT draw,
+      however current the devenv is. That is the same class of mistake as a stale REPL and it looks
+      just as puzzling — the shell has `dot` and the REPL does not. Start the REPL from inside the
+      devenv: `devenv shell -- sh -c 'cd state-graph && clojure -M:dev:nrepl'`.
+    - TO LOOK AT A SHAPE: (check/draw! sh) with no :save opens a viewer window; with
+      {:save {:filename f :format :png}} it writes a file. The drawing marks the initial state ▸
+      and gives a :final one a double circle, and labels every node with its schema FORM.
+    - Verified live: the `broken` fixture rendered, and its island — two states reaching only each
+      other — sits VISIBLY DETACHED from everything else. That picture is the argument for the
+      library, and it is the thing a map literal cannot show."
+
    :dependency-notes
    "What each dependency is here FOR, so that nobody reaches for the wrong one:
     - ubergraph 0.9.0 — the shape. Multigraph and digraph in one library, attributes on nodes and
@@ -392,7 +498,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       suite here, not an extra."
 
    :from-the-sibling-project
-   "../AGENTS.md is the same author's larger project and its :project-knowledge is worth reading
+   "../smart-boundary/AGENTS.md is the sibling component, the same author's larger project and its :project-knowledge is worth reading
     before repeating an experiment. What transfers is method, not fact: schemas at every crossing,
     seams checked in the code and not merely declared, a store that must be closed, `only assert
     what can fail`, and a knowledge section written in the past tense about things actually
@@ -458,6 +564,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     picture and invisible in a map literal. Needs graphviz; it is a human check, not a test"}
    :on {:looks-right {:target :integration-suite}
         :wrong       {:target :implement}}}
+  ;; NOTE 2026-08-31: (check/draw! shape {:save {:filename f :format :dot}}) writes the graphviz
+  ;; SOURCE with no graphviz installed — only other formats shell out to `dot`. So the drawing can
+  ;; be asserted about even where it cannot be rendered, and `dot` is needed only to LOOK at it.
 
   :integration-suite
   {:entry {:action "clojure -M:dev:test integration — the gate before a commit: a real datahike
