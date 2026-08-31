@@ -317,27 +317,82 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       event, and that is sometimes the wrong place. This is the first thing to revisit.
     - It costs nothing to defer: an edge already carries an attribute map, so a guard is a key in
       it and not a change of shape. What it will cost when it comes is the compiler (an ORDERED
-      search over a node's out-edges) and the checker (a considerably harder question)."}
+      search over a node's out-edges) and the checker (a considerably harder question)."
+
+   :parallel-is-across-instances
+   "DECIDED 2026-08-31. `Automatically parallel` means ACROSS INSTANCES and nothing else: events
+    partitioned by instance, one sequential reduction each, run at once. Orthogonal regions inside
+    ONE machine are OUT — that is a statechart and not this, and the shape would have to declare
+    which parts of a state a transition touches before any of it were safe.
+    - WHY ONE MACHINE CANNOT PARALLELISE, and it is a DATA DEPENDENCY rather than anything about
+      manifold: compile selects the handler with (idx [(:id state) (:id event)]), so the handler for
+      event n+1 is unknowable until event n has produced its state. No scheduler breaks that chain.
+      A stream library buys backpressure and non-blocking composition here, and not parallelism.
+    - THE NEAR MISS THAT MAKES THE OPPOSITE SOUND TRUE: handler EXECUTION needs only the event, by
+      :a-handler-never-sees-the-state. It is handler SELECTION that needs the state. So the
+      expensive part is parallelisable in principle and unreachable in practice, because you cannot
+      call what you have not yet chosen.
+    - THE TRADE NOBODY HAD WRITTEN DOWN. Were transitions keyed BY EVENT ALONE — which is what the
+      README's `each transitions (by event only ...)` can be read as saying — then every handler
+      would be known from its event, a parallel map over the stream would be sound, and only the
+      merge and the enter-validation would stay sequential. Keying on [state, event] bought
+      A -submit-> B alongside C -submit-> D, which :the-event-catalogue-is-denormalised is built
+      around, and it was paid for in EXACTLY that parallelism. Keep the keying; know the price."
+
+   :what-is-persisted
+   "DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
+    produced — audit and trace, which is what the features list names.
+    - IT WAS NEVER REALLY OPEN, and both authorities already said so. The README says it in its own
+      words — `a machines states, events, transitions become history` — and :a-shape-is-code forces
+      it: a shape built at load time, whose handlers are closures and whose schemas are compiled, is
+      not something a database reloads a machine FROM. What a store holds is what HAPPENED.
+    - So SHAPE VERSIONING IS OUT OF v1 and stays out, with the question it drags behind it: which
+      shape an instance mid-flight belongs to. Nothing in the store needs a shape identity."
+
+   :an-instance-has-an-identity
+   "DECIDED 2026-08-31. An instance is identified by a FIXED FIELD, and it is written by the
+    CONSTRUCTORS and not by hand — a caller says which machine they mean and never spells the key.
+    - IT IS ON THE EVENT AS WELL AS THE STATE, and the EVENT is the half that is load-bearing.
+      Routing an incoming event to the right reduction is a decision made BEFORE any state is in
+      hand, so the partition key cannot be read off a state. A state carries it so that a stored row
+      says what it belongs to; an event carries it so that there is something to partition on.
+    - IT IS A THIRD IDENTITY AND IT GETS A THIRD NAME. :id on a state is which NODE it is in and :id
+      on an event is its TYPE; see :a-state-has-an-id. A word doing two jobs here would be the bug
+      nobody sees.
+    - WHAT WAS TURNED DOWN: a key-fn handed to the async layer, leaving the core ignorant that
+      instances exist at all. It is the more decoupled design and it is not the one chosen — a fixed
+      field the constructors own is simpler to document, and it makes a state self-describing to the
+      store with no second argument travelling beside it."
+
+   :a-handler-may-answer-later
+   "DECIDED 2026-08-31. A handler MAY answer a DEFERRED rather than a plain map, so an instance
+    waiting on I/O does not hold a thread. That is what a stream library is actually for, and with
+    parallelism living across instances it is what stops one slow handler starving the pool.
+    - HOW, WITHOUT PUTTING MANIFOLD UNDER THE CORE. compile never learns what a deferred is. It is
+      parameterised by HOW A VALUE BECOMES AVAILABLE — a `then`, of a value and a continuation, and
+      a `pure`, of a value already available — and it composes the step out of those two and nothing
+      else. The SYNCHRONOUS DEFAULT is (fn [v f] (f v)) and identity, needs no dependency at all, and
+      reproduces today's step exactly, so (reduce (compile sh) init events) is unchanged and every
+      existing test passes untouched. The async layer passes d/chain and d/success-deferred and
+      requires manifold on its own account.
+    - THIS IS THE GLOBAL RULE APPLIED and not a new idea: `do not thread options through layers we do
+      not own — inject a function that closes over them`. The core requires no manifold, so :layering
+      holds and .compile still knows nothing of streams.
+    - THE COST, said out loud: the step's RETURN TYPE is now the caller's to know. Under the default
+      it is a State and under the async layer it is a deferred State, so the :malli/schema on compile
+      cannot say [:=> [:cat State Event] State] for both. Whether that becomes two schemas or one
+      loosened one is an implementation question for the async target."}
 
   :open-questions
-  ["PARALLEL TRANSITIONS AND A REDUCTION ARE IN TENSION, and this is the first thing to settle
-    because it decides the async layer's whole shape. A reduce over one state is sequential by
-    definition — event n+1 sees what event n did. `Automatically parallel` can therefore only mean
-    ACROSS INSTANCES: events partitioned by machine id, one reduction each, run at once. If it is
-    meant to mean anything else — independent regions inside one machine, orthogonal statechart
-    states — that is a different and much larger feature, and the shape needs to say which parts of
-    a state a transition touches before any of it is safe. Decide, and write the answer here."
-   "WHAT IS PERSISTED: the SHAPE, the HISTORY, or both? They are different needs. History is an
-    append-only log of events and the states they produced, which datahike is exactly right for.
-    A shape in the database is a different claim — it means the machine can be changed without a
-    recompile, and it drags versioning in with it (an instance mid-flight belongs to the shape it
-    started under). The README's rationale mentions storing the machine; the features list only
-    mentions state persistence. Pick one for v1, and prefer history."
-   "WHAT IDENTIFIES AN INSTANCE, as opposed to a state? :id is the STATE's — which node the machine
-    is in. `Automatically parallel` can only mean across instances (see the first question), and a
-    partition by machine needs a second identity that :id is not. It may be a key in the state, it
-    may be outside the state entirely and belong to the async layer alone. Not needed by the first
-    target; needed by the moment there are two machines."]
+  ["WHAT IS THE INSTANCE FIELD CALLED? :an-instance-has-an-identity settles that there IS a fixed
+    field and that the constructors write it; the NAME is still the author's to give. :instance is
+    a placeholder used in conversation on 2026-08-31 and nothing has been written against it. Pick
+    it before the async layer, because every event constructor and every stored row will carry it."
+   "DOES A DEFERRED UNDER THE SYNCHRONOUS DEFAULT THROW? A handler answering a deferred where `then`
+    is (fn [v f] (f v)) merges a deferred INTO A STATE, which then fails its own enter-validation
+    with a message about the wrong thing entirely — a missing key or a bad type, never `this handler
+    is async and this step is not`. Cheap to guard and baffling to debug if it is not. Decide when
+    the async layer is built, and prefer a guard."]
 
   :project-knowledge
   {:status
