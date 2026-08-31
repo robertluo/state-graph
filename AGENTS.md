@@ -479,12 +479,28 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       allows deferreds precisely so a handler can do I/O, and a handler doing I/O can publish to the
       very stream feeding this machine. No schema catches that. It is a rule people follow, and the
       failure mode when they do not is an ordering bug wearing the mask of a logic bug.
-    - THE DOOR, and it is the version that fits this library: an edge or an event DECLARES which
-      events it raises, so the internal flow is IN THE GRAPH and check can see it — including a cycle
-      that raises forever. That turns a runtime hazard into a static question, which is
-      :what-the-graph-buys applied to a third thing. It is a target of its own: a new part in the
-      shape, an internal queue with run-to-completion in the async layer, and a reachability question
-      over EVENTS rather than states. Not built.
+    - AN EXTERNAL EVENT IS THE ULTIMATE SOURCE OF A TRANSITION, said by the author on 2026-08-31 and
+      worth keeping as the principle: the world moves the machine. An INTERNAL event is not a second
+      kind of cause, it is a convenience, and the thing it buys is HANDLER REUSE — that is the whole
+      motivation and it is smaller than `cascades` makes it sound.
+    - THE DOOR, NARROWED. The raise belongs to the STATE — arriving somewhere is what has
+      consequences — and not to the edge or the event. Two reasons that arrive there separately: the
+      programming model is simpler, since a handler still answers a PATCH and the state applies it
+      and only then raises; and an entry raise is UNCONDITIONAL, so the raise-driven relation is a
+      plain graph and a cycle in it PROVES the machine can raise for ever, where a raise conditional
+      on a handler could only ever be reported as possible. That second one is the difference between
+      a fault `problems` may report and a warning it may not.
+    - WHAT IS TURNED DOWN IS THE HANDLER KNOWING. A handler answering both a patch and a set of
+      events to raise undoes :a-handler-answers-a-map-and-declares-it — the answer stops being a map
+      merged into the state, so :out no longer describes it and the static check loses its subject.
+      Reuse does not need it: the state can raise what the handler never mentioned.
+    - AND IT IS NOT DESIGNED, deliberately, 2026-08-31. The handler's signature is UNCHANGED and
+      nothing is owed. If internal events prove common enough in a shape written in anger, design it
+      then, starting from the state-raises lean above. Whoever does should weigh one thing this
+      conversation raised and did not settle: AN INTERNAL RAISE IS A SECOND EVENT SOURCE, and
+      :one-ordered-stream-per-instance pushed source-merging onto the CALLER precisely because the
+      machine has no clock. A queue inside the machine is the machine doing that merging, on an order
+      somebody has to choose.
     - WHAT WAS TURNED DOWN: a handler answering both a delta and events to raise, {:data {...}
       :raise [...]}. Least ceremony to write, and it undoes what
       :a-handler-answers-a-map-and-declares-it bought — the answer stops being a map merged into the
@@ -532,7 +548,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       an island, and still obvious."}
 
   :open-questions
-  []
+  ["ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
+    the handler's signature is unchanged in the meantime, so nothing is blocked by it. The motivation
+    is HANDLER REUSE and not cascades for their own sake; the lean is that a state raises and a
+    handler never does, for which the reasons are in :a-handler-causes-nothing. The bar for building
+    it is a real shape asking twice. Three things to settle before any of it: whether the machine may
+    drive itself at all or a caller triggers the next event by hand — the latter costs nothing and
+    hides the flow from check, which is the whole trade; if it may, whether the queue drains
+    breadth-first or depth-first, which is OBSERVABLE in the history and cannot be left to whatever
+    `into` happens to do; and how an audit trail tells what the world did from what the machine did,
+    because a log that conflates them is worse than one that does not have the internal events at
+    all."]
 
   :project-knowledge
   {:status
