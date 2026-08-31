@@ -180,6 +180,100 @@
                       (admits (shape/enter-schema sh (:to t)) p)
                       :undeclared))))
 
+;;; ------------------------------------------------------------------ confluence
+
+(defn- targets
+  "{[state-id event-id] -> target-id}. What compile's index is, with everything the
+   step needs at runtime left out."
+  [sh]
+  (into {} (map (juxt (juxt :from :event) :to)) (shape/transitions sh)))
+
+(defn- declared-out
+  "{event-id -> its :out, or nil}. The event's and not the edge's, so one entry serves
+   every edge that fires it — see shape/EventDef."
+  [sh]
+  (into {} (map (juxt :event :out)) (shape/transitions sh)))
+
+(defn- commutes
+  "The verdict for two events pending in ONE state: :yes, :no or :unknown, and like
+   `admits` it never lies."
+  [tgt out s a b]
+  (let [ta (tgt [s a]), tb (tgt [s b])]
+    (if-not (and ta tb)
+      ;; not both admitted here, so they are not a concurrent pair at all
+      :no
+      (let [x1 (tgt [ta b]), x2 (tgt [tb a])
+            oa (out a), ob (out b)]
+        (cond
+          ;; THE DIAMOND. Either return edge missing, or the two routes landing in
+          ;; different nodes, is a PROOF that completion order is observable.
+          (not (and x1 x2 (= x1 x2))) :no
+          ;; the diamond closes, and now it is only about the patches
+          (not (and oa ob)) :unknown
+          (some (set (mu/keys ob)) (mu/keys oa)) :unknown
+          :else :yes)))))
+
+(defn confluence
+  "One verdict per pair of events that can be PENDING AT ONCE in one state — :yes, :no
+   or :unknown — and, like `subsumption`, it publishes every one of them so the check's
+   own COVERAGE is readable rather than merely its complaints.
+
+   THE QUESTION IT ANSWERS is the async layer's only hard one. A handler may answer a
+   deferred, so a second event can arrive while the first is in flight, and a machine is
+   in one state at a time. Applying them IN ORDER OF COMPLETION is sound exactly where
+   the order cannot be observed.
+
+   `BOTH ADMITTED` IS NOT THAT CONDITION, and it is the tempting wrong answer. Both
+   admitted means each is individually legal here, not that they COMMUTE:
+   idle -start-> running beside idle -cancel-> cancelled has both legal, and if start
+   lands first the cancel meets a state with no cancel edge and is DISCARDED.
+
+   WHAT IS PROVEN, each from a lookup and never a traversal:
+   - :no where THE DIAMOND FAILS — [s a] -> ta, [s b] -> tb, and either [ta b] or [tb a]
+     missing, or the two landing in different nodes. Completion order is then observable
+     in where the machine ends up, which is as observable as it gets.
+   - :unknown where the diamond closes but the patches cannot be shown to commute:
+     an event with no :out declared, or two whose :out share a key. Sharing a key is not
+     a PROOF of conflict — the values might coincide — so it is not reported as one.
+   - :yes where the diamond closes and the :out key sets are DISJOINT, so the merges
+     commute whatever the values are.
+
+   The intermediate states need no check of their own: if [ta b] is an edge at all then
+   `subsumption` has already asked whether ta admits what b produces.
+
+   SELF-LOOPS ARE WHERE THIS PAYS, though nothing here is special-cased for them. Both
+   events self-loops means ta = tb = x = s and the diamond closes trivially; measured
+   over this project's fixtures, a pair where either event LEAVES the state has never
+   once closed. Which is unsurprising: different events going to different places is
+   what a state machine is for."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (let [tgt (targets sh)
+        out (declared-out sh)
+        here (fn [s] (sort (for [[[f e] _] tgt :when (= f s)] e)))]
+    (for [s (sort (shape/states sh))
+          :let [es (here s)]
+          a es b es
+          :when (neg? (compare a b))]
+      {:in s :pair [a b] :verdict (commutes tgt out s a b)})))
+
+(defn commuting
+  "{state-id #{#{event-a event-b}}} — only the pairs PROVEN to commute, as plain data a
+   runtime layer can look up and a person can print.
+
+   This is the whole of what the async layer needs from a shape, and it is why that layer
+   still knows nothing of shapes: it is handed this VALUE, the same way it is handed a
+   compiled step. A state with no such pair is absent rather than empty.
+
+   A PAIR THAT CANNOT BE CONCURRENT IS NOT A FAULT, so none of this reaches `problems`.
+   It is a pair that has to wait, and waiting is the default."
+  {:malli/schema [:=> [:cat shape/Shape] [:map-of shape/Id [:set [:set shape/Id]]]]}
+  [sh]
+  (reduce (fn [m {:keys [in pair verdict]}]
+            (cond-> m (= :yes verdict) (update in (fnil conj #{}) (set pair))))
+          {}
+          (confluence sh)))
+
 ;;; --------------------------------------------------------------------- problems
 
 (defn problems

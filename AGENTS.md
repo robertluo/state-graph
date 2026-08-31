@@ -591,7 +591,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       that can have changed, and that is re-looked-up at application time as any other step is.
     - THE COST, ACCEPTED by the author: where concurrency is taken, HISTORY ORDER STOPS MATCHING
       ARRIVAL ORDER. Persistence is an audit trail, so the log has to represent that honestly rather
-      than pretend to a sequence that did not happen."}
+      than pretend to a sequence that did not happen.
+    - THE CHECK IS BUILT, 2026-08-31: check/confluence publishes a verdict per pending pair per
+      state, and check/commuting reduces it to {state #{#{a b}}} — the proven pairs, as PLAIN DATA
+      the async layer is handed the way it is handed a compiled step, which is how that layer still
+      knows nothing of shapes. THE GENERAL DIAMOND IS WHAT GOT IMPLEMENTED and not the self-loop
+      shortcut, because it costs the same four lookups and answering :no for `not both self-loops`
+      would have been a LIE — a general diamond can close. Self-loops remain where it pays; nothing
+      is special-cased for them.
+    - AND THE INTERMEDIATE STATES NEEDED NO CHECK, which fell out rather than being solved: if
+      [ta b] is an edge at all then `subsumption` has already asked whether ta admits what b
+      produces. One of the three conditions was already paid for."}
 
   :open-questions
   ["ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
@@ -621,9 +631,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     `initial` and never spelled again after.
     THE TRAP CHECK LANDED the same day too — see :a-trap-is-what-a-cycle-hides — so the structural
     checks are now reachability, dead ends, TRAPS and subsumption.
-    34 tests, 131 assertions, green; clj-kondo clean; all 25 public fns carry a :malli/schema, which
-    the instrument! count of exactly 25 confirms better than a grep can. THE COMMIT GATE IS A REAL
-    GATE: 32 tests unit, 2 ^:integration. The integration suite NEEDS GRAPHVIZ — see
+    THE CONFLUENCE CHECK LANDED 2026-08-31 as well — see :two-events-in-flight-at-once — so the
+    static checks are reachability, dead ends, traps, subsumption AND confluence. The async layer
+    itself is still NOT BUILT and manifold is still not a dependency.
+    36 tests, 143 assertions, green; clj-kondo clean; all 27 public fns carry a :malli/schema, which
+    the instrument! count of exactly 27 confirms better than a grep can. THE COMMIT GATE IS A REAL
+    GATE: 34 tests unit, 2 ^:integration. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
     NOT BUILT, and named so nobody assumes otherwise: the FACADE (robertluo.state-graph) does not
     exist, so an application requires the namespaces directly; async and store are untouched."

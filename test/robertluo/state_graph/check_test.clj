@@ -128,6 +128,42 @@
   (is (= :no (->> (check/subsumption (ts/broken))
                   (filter #(= :bad (:event %))) first :verdict))))
 
+;;; ------------------------------------------------------------------ confluence
+
+(deftest confluence-licenses-only-what-it-can-prove
+  (let [v (into {} (map (juxt :pair :verdict)) (check/confluence (ts/form)))]
+    (testing "yes: both self-loops, both :out declared, key sets disjoint"
+      (is (= :yes (v [:email :name]))))
+
+    (testing "unknown: the diamond closes, the patches cannot be shown to commute"
+      (is (= :unknown (v [:both :name])) "their :out both write :name")
+      (is (= :unknown (v [:both :email])) "and both write :email")
+      (is (= :unknown (v [:name :touch])) ":touch declared no :out at all")
+      (testing "a shared key is NOT reported as a proof of conflict, because the two
+                values might coincide and nothing here can know"
+        (is (not= :no (v [:both :name])))))
+
+    (testing "no: the diamond fails, so completion order decides where the machine ends
+              up — :submit leaves :filling and there is no way back"
+      (is (= :no (v [:name :submit])))
+      (is (= :no (v [:submit :touch]))))))
+
+(deftest commuting-is-plain-data-the-async-layer-can-hold
+  ;; Why it is a VALUE and not a closure: the async layer is handed this the way it is
+  ;; handed a compiled step, so it still knows nothing of shapes — and a person can print
+  ;; it, which a closure would not allow.
+  (is (= {:filling #{#{:name :email}}} (check/commuting (ts/form))))
+
+  (testing "and the shapes that started this argument measure ZERO, which is the finding
+            and not a gap in the fixtures"
+    (is (= {} (check/commuting (ts/counter))))
+    (is (= {} (check/commuting (ts/trapped))))
+    (is (= {} (check/commuting (ts/broken)))))
+
+  (testing "none of it reaches problems — a pair that cannot be concurrent is not a
+            fault, it is a pair that waits, and waiting is the default"
+    (is (empty? (check/problems (ts/form))))))
+
 ;;; --------------------------------------------------------------------- problems
 
 (deftest structural-problems-are-data-and-only-the-proven-ones

@@ -137,6 +137,28 @@
    (shape/transition :awake :sleep :asleep)
    (shape/transition :asleep :wake :awake)))
 
+(defn form
+  "The one fixture here holding a pair that COMMUTES — none of the others has one, and
+   that zero is what :confluence-was-measured-not-guessed records. :name and :email are
+   self-loops on :filling writing DISJOINT keys, so no completion order can be observed.
+   The rest are the other verdicts: :both overlaps them, :touch declares no :out, and
+   :submit leaves with no way back."
+  []
+  (shape/shape
+   (shape/state :filling [:map] {:initial true})
+   (shape/state :submitted [:map] {:final true})
+   (shape/event :name   [:map [:v :string]] (fn [e] {:name (:v e)})  [:map [:name :string]])
+   (shape/event :email  [:map [:v :string]] (fn [e] {:email (:v e)}) [:map [:email :string]])
+   (shape/event :both   [:map [:v :string]] (fn [e] {:name (:v e) :email (:v e)})
+                [:map [:name :string] [:email :string]])
+   (shape/event :touch  [:map] (constantly {}))
+   (shape/event :submit [:map] (constantly {}))
+   (shape/transition :filling :name :filling)
+   (shape/transition :filling :email :filling)
+   (shape/transition :filling :both :filling)
+   (shape/transition :filling :touch :filling)
+   (shape/transition :filling :submit :submitted)))
+
 (defn counter
   "The canonical example shape, where the schemas DO bite: a counter whose :n the
    events carry, since a handler never sees the state it is changing."
