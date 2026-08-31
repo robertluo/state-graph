@@ -291,6 +291,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - The declaration is OPTIONAL per edge. Absent, the check degrades to a GENERATIVE one —
       generate a state from the source schema and an event from the event schema, run the handler,
       validate the answer against the target — which is this project's testing style anyway.
+    - REVISED 2026-08-31: the declaration is PER EVENT and no longer per edge, so `optional per edge`
+      now reads `optional per event`. See :a-handler-belongs-to-the-event.
     - COST, accepted: a merge cannot REMOVE a key. A state that must drop a field is a state the
       v1 shape cannot express."
 
@@ -307,7 +309,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - WHAT WAS KILLED FIRST, so nobody proposes it again: making the graph bipartite,
       state --> event --> state, is not merely awkward, it is WRONG. Two transitions on :submit
       leaving different states would share one event node and FABRICATE paths the shape never
-      said — A -> submit -> D, when all that was declared was A -> submit -> B and C -> submit -> D."
+      said — A -> submit -> D, when all that was declared was A -> submit -> B and C -> submit -> D.
+    - EXTENDED 2026-08-31: the catalogue now carries the HANDLER and its :out as well as the event's
+      schema, for the same reason and by the same mechanism. See :a-handler-belongs-to-the-event."
 
    :v1-is-deterministic
    "DECIDED 2026-08-30. NO GUARDS. A state and an event have exactly one target, which is what
@@ -332,12 +336,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       :a-handler-never-sees-the-state. It is handler SELECTION that needs the state. So the
       expensive part is parallelisable in principle and unreachable in practice, because you cannot
       call what you have not yet chosen.
-    - THE TRADE NOBODY HAD WRITTEN DOWN. Were transitions keyed BY EVENT ALONE — which is what the
-      README's `each transitions (by event only ...)` can be read as saying — then every handler
-      would be known from its event, a parallel map over the stream would be sound, and only the
-      merge and the enter-validation would stay sequential. Keying on [state, event] bought
-      A -submit-> B alongside C -submit-> D, which :the-event-catalogue-is-denormalised is built
-      around, and it was paid for in EXACTLY that parallelism. Keep the keying; know the price."
+    - REVISED 2026-08-31, SAME DAY, and the conclusion survived a change to its reason. The handler
+      is now the EVENT's and is known without the state — see :a-handler-belongs-to-the-event — so
+      handler SELECTION is no longer what forces the sequence. ADMISSION is: a handler runs only
+      where an edge admits it, and whether this state admits this event cannot be known until the
+      previous step has landed. A parallel map over one machine's stream would have to run handlers
+      SPECULATIVELY, and since deferreds exist so that handlers can do I/O, speculation means real
+      effects for events the machine ignores. That was refused; see
+      :an-ignored-event-is-not-an-error-but-is-not-silent. The price is the same price, charged at a
+      different counter."
 
    :what-is-persisted
    "DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
@@ -381,7 +388,45 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - THE COST, said out loud: the step's RETURN TYPE is now the caller's to know. Under the default
       it is a State and under the async layer it is a deferred State, so the :malli/schema on compile
       cannot say [:=> [:cat State Event] State] for both. Whether that becomes two schemas or one
-      loosened one is an implementation question for the async target."}
+      loosened one is an implementation question for the async target."
+
+   :a-handler-belongs-to-the-event
+   "DECIDED 2026-08-31, by the author, and it is the README's own reading recovered: A HANDLER IS
+    CHOSEN BY THE EVENT ALONE. `Each transitions (by event only, a function handle the event, return
+    value will be applied to a state)` says it, and the first implementation had keyed the handler on
+    [state, event] instead.
+    - WHAT MOVES: the handler and its :out go from the TRANSITION to the EVENT.
+      (event id schema handler) and (event id schema handler out); (transition from event to).
+    - THE TARGET STILL COMES FROM THE GRAPH. Only the HANDLER is the event's; where the machine lands
+      is [state, event] -> to as before, because A -submit-> B beside C -submit-> D is the thing
+      :the-event-catalogue-is-denormalised exists to keep expressible.
+    - WHY IT IS BETTER QUITE APART FROM ANY PARALLELISM, which is the reason to do it: two edges can
+      no longer DISAGREE about a handler, because there is one declaration and not two — a
+      construction-time check is replaced by a shape in which the error cannot be written. And it
+      finishes :a-handler-answers-a-map-and-declares-it: the handler's function schema is
+      [:=> [:cat <the event's schema>] <the event's :out>], so BOTH halves now come from the event
+      definition and nothing at all from the graph.
+    - THE COST, said out loud: A -submit-> B and C -submit-> D SHARE one handler and one :out, where
+      before they could differ. The static check gets harder for it, and rightly — submit's :out must
+      now satisfy B's schema AND D's. Where two edges genuinely need different data, that is two
+      events, which is what :v1-is-deterministic already says about branching."
+
+   :an-ignored-event-is-not-an-error-but-is-not-silent
+   "DECIDED 2026-08-31. An event the current state has no transition for is NOT AN ERROR — the
+    reduction stays total — but the step must SAY it happened, and history is where that is recorded.
+    - WHY NOT AN ERROR: nothing controls the order events arrive in behind a stream, so a :cancel
+      landing after :complete is ordinary traffic and not a defect. A machine that throws on it is a
+      machine every caller needs a policy for.
+    - WHY NOT SILENT EITHER, which is the change: an event that SHOULD have transitioned and did not
+      looks exactly like one that was correctly ignored, and no static check can see a runtime fact.
+      Persistence is history, so an audit trail is precisely the place this belongs.
+    - THE HANDLER DOES NOT RUN. No edge means no :to, so there is no enter-schema to validate against
+      and nothing to apply the data TO. The data is not merged — it is never computed.
+    - AND THAT IS WHAT MAKES IT SAFE, because the alternative is worse than it looks. Malli maps are
+      OPEN BY DEFAULT, so merging a handler's answer into a state with no edge for it would produce a
+      state carrying keys that state never declared AND PASSING ITS OWN ENTER-VALIDATION. Verified;
+      see :what-the-design-conversation-verified. `Able to apply, but wrong` was the author's phrase
+      for it and it is the sharpest hazard this design had."}
 
   :open-questions
   ["WHAT IS THE INSTANCE FIELD CALLED? :an-instance-has-an-identity settles that there IS a fixed
@@ -392,7 +437,19 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     is (fn [v f] (f v)) merges a deferred INTO A STATE, which then fails its own enter-validation
     with a message about the wrong thing entirely — a missing key or a bad type, never `this handler
     is async and this step is not`. Cheap to guard and baffling to debug if it is not. Decide when
-    the async layer is built, and prefer a guard."]
+    the async layer is built, and prefer a guard."
+   "HOW DOES THE STEP SAY AN EVENT WAS IGNORED?
+    :an-ignored-event-is-not-an-error-but-is-not-silent settles that it must; the mechanism is open.
+    IDENTICAL? IS NOT IT, and that was checked: a self-loop whose handler answers {} returns the very
+    same object, because merge with {} and assoc of a value already present both answer `this`. So
+    `ignored` and `transitioned and changed nothing` cannot be told apart that way.
+    Prefer a THIRD INJECTED FUNCTION beside the `then` and `pure` of :a-handler-may-answer-later — an
+    `ignored` of a state and an event, defaulting to (fn [state _] state), which the store layer
+    replaces with one that records. It costs nothing in the default, it needs no change to the step's
+    return type, and it is the same global rule twice: inject a function that closes over them.
+    Metadata on the returned state was the other candidate and is worse — merge and assoc PRESERVE
+    metadata, so a stale ::ignored would ride along into every later state unless each success took
+    it off again."]
 
   :project-knowledge
   {:status
@@ -517,6 +574,21 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - KAOCHA'S FOCUS-META, from :what-target-1-taught, IS RESOLVED: with one ^:integration test in
       the tree the two suites finally differ — 24 tests unit, 1 integration — and `-M:dev:test` no
       longer runs everything twice."
+
+   :what-the-design-conversation-verified
+   "VERIFIED BY RUNNING on 2026-08-31, while settling the open questions and before anything was
+    written down. Neither is about a target; both decided a design.
+    - MALLI MAPS ARE OPEN BY DEFAULT. (m/validate [:map [:n :int]] {:n 1 :total 5}) is TRUE, and only
+      {:closed true} refuses it. This is what makes `able to apply, but wrong` SILENT rather than
+      loud: a handler's answer merged into a state that has no edge for that event would validate
+      against that state's own schema while carrying keys it never declared. It is the reason the
+      data is discarded on a miss rather than merged. See
+      :an-ignored-event-is-not-an-error-but-is-not-silent.
+    - A FIRED TRANSITION CAN RETURN AN IDENTICAL STATE, so identical? cannot signal `ignored`. For
+      s = {:id :a :n 1}, all three of (merge s {}), (assoc s :id :a) and (assoc (merge s {}) :id :a)
+      are identical? to s — Clojure's map assoc answers `this` when the value is already there. A
+      self-loop whose handler answers {} is therefore indistinguishable from an event nobody handled.
+      Checked because it was about to be recommended as a free signal."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is
