@@ -16,6 +16,37 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
  {:project "robertluo.state-graph"
   :one-line "A finite state machine whose SHAPE is a graph — so a graph library can draw it,
              check it and store it, and a compiler can turn it into an ordinary Clojure function."
+  :why-it-exists
+  "SAID BY THE AUTHOR 2026-09-01, and it is the frame everything else here sits in: THIS LIBRARY
+   EXISTS FOR THE SIBLING COMPONENT'S AGENT WORKFLOWS. smart-boundary needs a different concrete
+   workflow per scenario, and the two ways to write that in ordinary code are both bad — a lot of
+   long, nearly identical code, or worse, a configuration format pretending to unify them at the
+   surface. A state machine is the third way.
+   - COMPLEX IS NOT DIFFICULT. What those workflows need is GLUE, and glue is what a machine
+     replaces. The argument is about VOLUME rather than cleverness, which is why it is convincing.
+   - MACHINES COMPOSE, and nesting made that easier still — see :a-machine-can-nest-in-a-node.
+     Across scenarios most parts are the SAME and only the ASSEMBLY differs: a state, an event
+     with its handler, and a whole shape are all plain values, so an assembly is
+     (apply shape (concat parts wiring)) and one child nests into two parents with nothing to
+     alias. MEASURED rather than assumed, with one edge worth knowing before anybody designs a
+     parts library — see :what-the-parts-library-showed.
+   - A WORKFLOW MOSTLY IN DATA IS STORABLE AND DRAWABLE, which is what the README claims for the
+     graph and what the agent case actually needs: a person has to be able to SEE the workflow an
+     agent is running.
+   - AUDITABILITY AND STATIC CHECKING ARE THE POSITION. For an agent workflow the two questions
+     that matter are `what happened` and `could this ever have worked`; the transition results
+     answer the first and `problems` answers the second, before anything runs.
+   - THE PARALLELISM CLAIM, SAID CAREFULLY. `The first FSM that supports parallelism` is not the
+     claim to make in public: Harel statecharts have had orthogonal regions since 1987, every
+     workflow engine runs steps at once, and :parallel-is-across-instances puts orthogonal regions
+     deliberately OUT of scope — so it argues against this project's own design. What is
+     defensible is narrower and stronger. ONE CALL RUNS THOUSANDS OF INSTANCES AT ONCE, each
+     serialised, with real backpressure. A HANDLER MAY ANSWER A DEFERRED, so an instance waiting
+     on a model call holds no thread, which is the property that decides whether an agent workflow
+     scales at all. And CONCURRENCY CAN BE PROVEN: check/confluence answers statically which
+     pending pairs may be applied in order of completion, and no other FSM library appears to
+     answer that question at all. Raised in the same conversation and not disputed."
+
   :source-of-truth
   "README.md is the specification and this file is its reading. Where the two disagree the README
    wins and this file is wrong — say so and fix it.
@@ -830,6 +861,19 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     because a log that conflates them is worse than one that does not have the internal events at
     all."
 
+   "MUST THE COMBINING-KEY DOOR OPEN FOR AGENT WORKFLOWS? Raised 2026-09-01 by :why-it-exists
+    and deliberately not answered, and it is the sharpest thing standing between this library and
+    its stated purpose. An agent workflow's handler IS the model call, and a prompt normally needs
+    the conversation SO FAR — which :a-handler-never-sees-the-state puts out of reach, a handler
+    getting the event and nothing else. So the CALLER must read the state, which it has on every
+    result, and put the context onto the next event: and that is the glue code this whole rationale
+    exists to delete, reappearing as prompt assembly one layer out.
+    THE DOOR IS ALREADY NAMED in :a-handler-never-sees-the-state — let a NODE'S SCHEMA declare how
+    a key COMBINES, :messages by conj, so a handler still answers {:messages [one]} and the
+    accumulation is DATA ON THE NODE rather than a closure, which keeps the decoupling AND the
+    static check. For a general FSM that is optional. For this library's stated purpose it may not
+    be, and that is the question. Settle it BEFORE smart-boundary draws the arrow, not after."
+
    "IS THE Context's :ignored STILL EARNING ITS PLACE? Raised 2026-09-01 by building the facade and
     deliberately not answered. Its stated job was that the store layer would replace it with one that
     records, and there is no store layer: the stream door reports a miss as :fired false, taken from
@@ -1147,6 +1191,20 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       :show/:browse true. `:render true` implies show, serve, browse and live-reload all false,
       which is what makes `clojure -X:notebook` headless. :exec-fn scicloj.clay.v2.api/make! with
       :exec-args is why the alias needs no build namespace and no extra file."
+
+   :what-the-parts-library-showed
+   "MEASURED BY RUNNING on 2026-09-01, checking the author's `most parts are shared, only the
+    assembly differs` against the code instead of agreeing with it.
+    - SHARING IS FREE AND COMPLETE. A vector of states and a vector of events, handlers and all,
+      assemble into two different machines by concat plus different transitions, and both check
+      clean. ONE CHILD SHAPE NESTS INTO TWO UNRELATED PARENTS with nothing to alias — a shape is
+      an immutable value — and a reduction through either lands the child correctly.
+    - BUT A SHARED CATALOGUE MUST BE SELECTED FROM AND NOT SPLATTED IN, and this bites on the
+      first assembly that uses fewer events than the catalogue holds: :unused-event REFUSES the
+      shape, seen as [{:problem :unused-event :id :retry}]. The check is right — an event no
+      transition fires IS dead code in that machine — so a parts library wants to be a MAP KEYED
+      BY ID that each assembly selects from, and never a vector to concat wholesale. Whoever
+      builds the agent workflows should know that on day one rather than day three."
 
    :what-nesting-taught
    "VERIFIED BY RUNNING on 2026-09-01, building {:machine <a shape>}.
