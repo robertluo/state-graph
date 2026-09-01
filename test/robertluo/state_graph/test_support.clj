@@ -7,8 +7,12 @@
             [robertluo.state-graph.shape :as shape]))
 
 (def namespaces
+  "Every namespace whose :malli/schema metadata the fixture collects. THE FACADE IS IN HERE
+   and contributes exactly one schema — `run`, the one function it really adds; its
+   re-exports carry none on purpose and are guarded by the vars they delegate to."
   '[robertluo.state-graph.shape robertluo.state-graph.compile
-    robertluo.state-graph.check robertluo.state-graph.async])
+    robertluo.state-graph.check robertluo.state-graph.async
+    robertluo.state-graph])
 
 (defn instrumented
   "A fixture that makes the :malli/schema metadata actually do something. mi/collect!

@@ -100,9 +100,17 @@
                  (group-by :instance (:states got))))
         "each machine reduced its OWN events and none of anybody else's")
 
-    (testing ":done waits for every machine, so a state in flight when the events run out
-              is still a state"
-      (is (= #{"a" "b"} (set (map :instance (:done got))))))))
+    (testing ":done IS KEYED BY INSTANCE and waits for every machine, so a state in flight
+              when the events run out is still a state"
+      (is (= {"a" {:id :done :instance "a" :n 5}
+              "b" {:id :done :instance "b" :n 100}}
+             (:done got))))))
+
+(deftest fan-answers-an-empty-done-where-no-event-ever-arrived
+  ;; There is no machine until an event names one, so there is nothing to report on.
+  (let [sh (ts/counter)]
+    (is (= {:states [] :done {}}
+           (collect (a/fan (c/compile sh a/context) (fn [k] (c/initial sh k {})) (fed [])))))))
 
 (deftest an-unnamed-event-is-its-own-machine
   ;; A caller who never names anything still works, and the partition is the one machine.
@@ -111,6 +119,20 @@
                             (fed [{:id :start :seed 2} {:id :stop}])))]
     (is (= [{:id :running :n 2} {:id :done :n 2}] (:states got))
         "and no :instance key appears, because nobody supplied one")))
+
+;;; -------------------------------------------------------------------- result
+
+(deftest what-goes-on-the-output-is-the-callers-to-decide
+  ;; The injection that lets a layer above put something richer than a state: whether an
+  ;; event FIRED is shape knowledge, and this layer has none — so it is handed a maker and
+  ;; asks no questions. It sees the state applied TO, the event, and the state that came back.
+  (let [sh (ts/counter)
+        got (collect (a/drive (c/compile sh a/context) (c/initial sh {})
+                              (fed [{:id :start :seed 1} {:id :stop}])
+                              (fn [state event state'] [(:id state) (:id event) (:id state')])))]
+    (is (= [[:idle :start :running] [:running :stop :done]] (:states got)))
+    (is (= {:id :done :n 1} (:done got))
+        ":done is the final STATE and never a result — the state is the accumulator")))
 
 ;;; --------------------------------------------------------------- the ordering
 

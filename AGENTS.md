@@ -18,10 +18,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
              check it and store it, and a compiler can turn it into an ordinary Clojure function."
   :source-of-truth
   "README.md is the specification and this file is its reading. Where the two disagree the README
-   wins and this file is wrong — say so and fix it. Nothing is implemented yet: src/robertluo/
-   state_graph and test/robertluo/state_graph exist and are EMPTY, so everything below marked
-   PROPOSED is a design not yet paid for, and everything marked GAP is a thing the repository
-   promises and does not have."
+   wins and this file is wrong — say so and fix it.
+   REWRITTEN 2026-09-01 TO THE FINISHED SHAPE, at the author's instruction, so the README now
+   documents the library that EXISTS rather than the one to build: every example in it was run
+   against the code before it was written down. What that changes for a reader of this file is that
+   PROPOSED is no longer a category — everything is built — and a divergence is now a bug in one of
+   the two files rather than a gap in the repository. The README still wins.
+   THE README ALSO CARRIES THE LIMITS, deliberately: no guards, no state-dependent update, a merge
+   cannot remove a key, no internal events, no persistence, and the licensed concurrency not taken.
+   A user meeting one of those should meet it in the README and not in a surprise."
 
   :constraints
   {:tests-clojure-test true
@@ -39,7 +44,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    :repl-discover-cmd "clj-nrepl-eval --discover-ports"
    :repl-eval-cmd "clj-nrepl-eval -p <port>"
    :repl-eval-reload :per-namespace-in-dependency-order
-   :deps {:datahike "0.8.1861" :ubergraph "0.9.0" :malli "0.20.1" :test.check "1.1.1"
+   :deps {:ubergraph "0.9.0" :malli "0.20.1" :manifold "0.4.3" :test.check "1.1.1"
           :dev {:nrepl "1.3.0" :kaocha "1.91.1392"}}
    :inherited-from "../smart-boundary/AGENTS.md — the SIBLING COMPONENT robertluo.smart-boundary, in the same
                     monorepo. Its house rules
@@ -77,18 +82,21 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     clojure.test, run by kaocha. A test that opens a database or a socket is marked ^:integration
     and is NOT in the fast loop"
    "ONLY ASSERT WHAT CAN FAIL. Do not re-test what a library promises — that ubergraph adds an
-    edge, that malli validates, that datahike stores a datom — and do not re-test our own code
-    through a second door"
+    edge, that malli validates, that manifold delivers what was put on a stream — and do not
+    re-test our own code through a second door. A FACADE RE-EXPORT IS THAT SECOND DOOR: the
+    delegation is not worth a test, and what the facade adds is"
    "A GENERATIVE TEST NEEDS AN INDEPENDENT INVARIANT. A property that recomputes the expected
     answer the way the implementation computes it agrees with every bug it contains: it catches a
     wrong implementation and never a wrong understanding. For an FSM the honest invariants are
     structural — a reduction over events lands only in states the graph admits, a state entered
     validates against its own schema, replaying a prefix and then the rest equals replaying the
     whole — and those hold whatever the handlers do"
-   "EVERY STORE A TEST OPENS IS RELEASED IN A `finally`. `finally` is release and is NOT the
+   "EVERYTHING A TEST OPENS IS RELEASED IN A `finally`. `finally` is release and is NOT the
     forbidden try/catch. In the sibling project one un-closed Datalevin environment kept the JVM
-    alive after the suite had finished, because its executor threads are not daemons; whether
-    datahike does the same is UNVERIFIED — assume it does until it has been measured"
+    alive after the suite had finished, because its executor threads are not daemons. NOTHING HERE
+    OPENS A DATABASE ANY MORE (see :nothing-is-persisted-here), so what this now governs is files
+    and streams — and a STREAM has a second obligation the rule does not cover: a deref of a
+    machine that never resolves hangs the suite, so every deref in a stream test is BOUNDED"
    "COMMIT GATE: clojure -M:dev:test integration passes. The fast suite is for every save"
    "THIS FILE IS DATA, SO CHECK IT BY PARSING IT. An unterminated string is INVISIBLE to a bracket
     balance — it shifts which quotes pair with which and leaves every { and } matched — so a
@@ -100,22 +108,23 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     predates any of this; it is that component's to fix.)"]
 
   :layering
-  ["The bottom two are BUILT as described (2026-08-30). Everything above them is still PROPOSED,
-    and the point of writing it down first is that the arrows are cheap to change today and
-    expensive next month.
+  ["EVERY LAYER IS NOW BUILT, 2026-09-01, and the store that was in this list is GONE — see
+    :nothing-is-persisted-here. What is left is four namespaces and one arrow through them.
 
-    robertluo.state-graph          — THE FACADE: the vocabulary a user needs, and the only require
-                                     an application should have. Constructors for a shape, `compile`,
-                                     and re-exports of the two defaults so that one require is enough
+    robertluo.state-graph          — BUILT 2026-09-01. THE FACADE: the vocabulary a user needs, and
+                                     the only require an application should have. Nine functions —
+                                     state, event, transition, shape; problems, draw!; compile,
+                                     initial; run — being the constructors, the checks, and the two
+                                     doors. Requires everything below it, `check` included, which is
+                                     what one require costs. See
+                                     :the-facade-is-a-vocabulary-and-two-doors
     robertluo.state-graph.async    — BUILT 2026-08-31. A DEFAULT, not the core: manifold streams.
-                                     Takes a compiled step FUNCTION and a way to make a first state,
-                                     both as VALUES, and knows nothing of shapes, schemas or graphs.
-                                     `drive` is one machine, serialised; `fan` partitions on
-                                     :instance and runs one per machine, concurrently. Both answer
-                                     {:states :done}, two different things under two names
-    robertluo.state-graph.store    — A DEFAULT, not the core: datahike. Takes states and events as
-                                     DATA and answers history — audit and trace. Knows nothing of
-                                     shapes; the schema is the caller's
+                                     Takes a compiled step FUNCTION, a way to make a first state and
+                                     a way to make an OUTPUT VALUE, all as VALUES, and knows nothing
+                                     of shapes, schemas or graphs. `drive` is one machine,
+                                     serialised; `fan` partitions on :instance and runs one per
+                                     machine, concurrently. Both answer {:states :done}, two
+                                     different things under two names
     robertluo.state-graph.compile  — shape -> (fn [state event] state'). The only namespace that
                                      turns data into a function, and the only one both defaults are
                                      above in spirit and below in the arrow: they take its OUTPUT
@@ -130,9 +139,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
                                      REFERENTIAL checks — the ones answerable from the parts alone.
                                      Requires ubergraph and malli only
 
-    The two defaults sit BELOW the facade rather than beside it because of the nesting rule — a
-    child may not require its parent — and it costs nothing, since neither needs the facade's
-    vocabulary: what they need is a function and some data, handed over as values."]
+    The default sits BELOW the facade rather than beside it because of the nesting rule — a
+    child may not require its parent — and it costs nothing, since it does not need the facade's
+    vocabulary: what it needs is a function and some data, handed over as values."]
 
   :layering-rule
   "A namespace NESTED under another is BELOW it: robertluo.state-graph.shape requiring
@@ -171,13 +180,22 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    "(compile shape) -> a pure function of a state and an event answering the next state. The
     lifecycle of an instance is then (reduce step initial events), and that is the whole runtime:
     no object, no atom, no protocol. Everything else in this library is a way of getting events
-    into that reduction or getting states out of it — which is exactly why a transducer is the
-    async layer and a log is the persistence layer, and why neither of them is the core."
+    into that reduction or getting RESULTS out of it — which is exactly why a stream is a layer
+    above and not the core, and why `run` is a caller this library ships rather than a second kind
+    of machine. See :the-caller-owns-the-lifecycle."
 
    :the-defaults-are-batteries
-   "Async and persistence are DEFAULTS. Someone with their own stream library or their own database
-    must be able to use the compiled function directly and lose nothing. So neither may be
-    required by the facade's core path, and neither may take a shape as an argument."
+   "Async is a DEFAULT. Someone with their own stream library must be able to use the compiled
+    function directly and lose nothing, so it may not take a shape as an argument — and it does not:
+    it is handed a step, a way to make a first state and a way to make an output value, all as
+    VALUES.
+    - REVISED 2026-09-01, twice over. Persistence is no longer a default because it is no longer
+      anything at all, see :nothing-is-persisted-here. And `neither may be required by the facade's
+      core path` did NOT survive the facade being built: robertluo.state-graph requires .async, so
+      requiring the facade loads manifold. What the rule was protecting survives one level down —
+      robertluo.state-graph.compile requires no manifold and never will — and that is the honest
+      statement of it. See :the-facade-is-a-vocabulary-and-two-doors, where `check` costs the same
+      way for the same reason."
 
    :two-kinds-of-check-and-two-places-for-them
    "DECIDED 2026-08-31, when target 2 was built. shape/problems is REFERENTIAL — answerable from
@@ -363,7 +381,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       :two-events-in-flight-at-once."
 
    :what-is-persisted
-   "DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
+   "SUPERSEDED 2026-09-01 by :nothing-is-persisted-here — NOTHING is persisted BY THIS LIBRARY, and
+    the store namespace was never built. What survives below is the answer to a different and still
+    live question: what a CALLER should keep, and why a shape is not part of it.
+
+    DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
     produced — audit and trace, which is what the features list names.
     - IT WAS NEVER REALLY OPEN, and both authorities already said so. The README says it in its own
       words — `a machines states, events, transitions become history` — and :a-shape-is-code forces
@@ -623,7 +645,108 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       phase (run the handler, check it against its own :out) and an APPLY phase (merge, write :id and
       :instance, validate on enter). Which is exactly the shape :a-handler-causes-nothing already
       leans towards for chained events — a handler answers a patch, a state applies it — so one
-      decision may pay for both."}
+      decision may pay for both."
+
+   :the-caller-owns-the-lifecycle
+   "DECIDED 2026-09-01, and the question DISSOLVED rather than being answered. The author asked who
+    owns an instance: the CALLER, handed a seq of events and reducing over it, or a REACTIVE machine
+    taking an event stream and answering a stream of states.
+    - THEY ARE THE SAME OWNERSHIP, and reading `pump` is what settles it: the state lives in a
+      d/loop ACCUMULATOR exactly as it lives in reduce's. There is no cell holding it and no object;
+      the atom `fan` keeps holds per-instance STREAMS and never a state. So the reactive machine is
+      not a second design, it is the same reduction with the loop shipped — and `run` is A CALLER
+      THIS LIBRARY SHIPS.
+    - SO THE FACADE NAMES BOTH AND CHOOSES NEITHER, which is not a fence-sit. The reduction is the
+      README's own headline sentence, the step is what a caller with core.async or a transducer or a
+      plain fold needs, and :the-defaults-are-batteries requires that such a caller lose nothing.
+    - WHAT REACTIVE-ONLY WOULD HAVE COST, said out loud because it was the tempting answer: manifold
+      would then be on the ONLY path there is, and the one rule the batteries have is that it must
+      not be.
+    - IT IS ALSO A PROPERTY AND NOT A SPEECH. `the-two-doors-agree` generates a shape and a seq of
+      events and asserts that (map :state) off the stream equals the states the reduction passes
+      through. That is the only thing that can refute any of the above."
+
+   :the-facade-is-a-vocabulary-and-two-doors
+   "BUILT 2026-09-01. NINE FUNCTIONS: state, event, transition, shape to build a machine; problems
+    and draw! to look at it; compile and initial for the reduction; run for the stream. The author
+    asked for the fewest, so each collapse below was argued for rather than assumed.
+    - ONE STREAM DOOR AND NOT TWO. `fan` already subsumes `drive` — one partition IS one machine —
+      so `run` builds the initial-of function out of the shape and a caller never spells :instance.
+      `drive` stays public in .async for somebody who has already partitioned, one consumer per
+      instance being the obvious case.
+    - THE WART, ACCEPTED: fan's :done became a MAP keyed by instance, so a caller who named nothing
+      finds their machine under nil. A vector would have said the same thing while making the caller
+      guess whose entry was whose, and the instance is the one name `fan` has in hand.
+    - `problems` IS OPT-IN AND `shape` DOES NOT RUN IT. Fewest-functions argued for a strict
+      constructor and no `problems` at all, and it is wrong for one decisive reason: A SHAPE YOU
+      CANNOT BUILD IS A SHAPE YOU CANNOT DRAW, and the whole argument for this library is that a
+      half-finished machine is worth looking at. The `broken` and `trapped` fixtures would become
+      unconstructible, which is the check on the idea.
+    - RE-EXPORTS ARE DELEGATING defns AND NOT def ALIASES, measured rather than assumed — see
+      :what-the-facade-taught, where an alias skipped its guard entirely. And they carry NO
+      :malli/schema of their own: the contract belongs to the namespace that owns the function, one
+      declaration and not two, and a copy at the facade could only drift. `run` is the one function
+      the facade really adds, so it is the one that has a schema — which is also why the instrument
+      count went to 31 and not to 39.
+    - THE FACADE REQUIRES `check`, and that breaks the property :layering claimed for it: that an
+      application shipping a working shape never loads a graph algorithm. Taken knowingly. It is a
+      load-time cost paid by a require and never by a step, the checks and the drawing are the reason
+      the library exists, and a caller who minds requires robertluo.state-graph.compile directly —
+      the same symmetry the batteries have, where the facade is the convenience and the namespaces
+      are the truth.
+    - WHAT WAS TURNED DOWN: a `fold` doing the whole reduction in one call. It gives strictly LESS
+      than `compile` — a step goes in a transducer and a fold does not — while hiding the thing the
+      README names as a feature."
+
+   :the-output-is-a-transition-and-not-a-state
+   "DECIDED 2026-09-01, by the author, and forced by :nothing-is-persisted-here. `run` puts a RESULT
+    on :states and not a bare state: the :event, the :state it produced, whether it :fired, and
+    :instance where there is one.
+    - THE ARGUMENT IS THAT THE CALLER STORES NOW. A state does not say what caused it, and an event
+      nobody handled produces a state EQUAL to the one before it — so from a stream of states alone
+      no consumer can build the history this library has just declined to keep. A result reads back
+      down with (map :state) whenever states are all somebody wants, and the other direction does
+      not exist.
+    - THE OBJECTION THAT KILLED A RICH RETURN FOR THE STEP DOES NOT APPLY TO A STREAM, which is why
+      this is consistent with :how-the-step-says-a-thing-was-ignored rather than a reversal of it.
+      That entry refused an outcome value because (reduce step init events) must answer STATES or the
+      README's headline sentence dies. A STREAM IS NOT AN ACCUMULATOR: `pump` holds the state itself
+      and what it PUTS is free to be richer. The reduction still answers states; only the stream
+      carries results.
+    - :fired IS THE HALF NOTHING ELSE CAN ANSWER, and it needs a lookup and not a comparison — an
+      ignored event answers the state unchanged, and a fired self-loop whose handler answers {}
+      answers a state `identical?` to the old one, already verified in
+      :what-the-design-conversation-verified. Hence compile/admits?, the step's own lookup published,
+      over ONE private `entry` that both it and the step call, so the two cannot drift.
+    - HOW IT REACHES THE STREAM WITHOUT PUTTING A SHAPE UNDER async: a third injected function,
+      `result`, of the state applied to, the event, and the state that came back, defaulting to
+      (fn [_ _ state] state). That default is exactly what the layer put before, so every existing
+      drive test is untouched — and this is the Context pattern and the global rule again, do not
+      thread options through a layer we do not own, hand it a function that closes over them.
+    - :instance IS DERIVED FROM THE STATE and not read off the event, so there is one source for it,
+      and it is absent where a caller named nothing.
+    - THE COST, said out loud: :states is no longer a stream of states, so a consumer who wants only
+      states writes (map :state). That is the cheaper half of the trade, and it is paid by the
+      consumer who needs less."
+
+   :nothing-is-persisted-here
+   "DECIDED 2026-09-01, by the author. THIS LIBRARY STORES NOTHING: it outputs what happened, and
+    what becomes of that is the caller's. It AMENDS THE README rather than merely contradicting it,
+    because :source-of-truth would otherwise make this file the wrong one.
+    - WHAT WENT: datahike left deps.edn, where it had been a dependency nothing used;
+      robertluo.state-graph.store left :layering, never having been built; and the README's
+      persistence feature now says what the library does instead. Its `audition` and `trace`
+      sub-bullets STAYED, because those are still what the output is FOR.
+    - WHAT IT COST, and it is the one thing this decision broke: an audit trail must know which event
+      produced which state, and a stream of bare states cannot say. That is what forced
+      :the-output-is-a-transition-and-not-a-state, which is this same decision seen from the output
+      end.
+    - AND WHAT IT DID NOT COST. :what-is-persisted argued that HISTORY and not the shape is what a
+      store holds, and that argument is untouched — it is now advice for whoever writes the store,
+      outside this library. Shape versioning stays out, along with the question it drags behind it.
+    - THE `finally` RULE KEEPS ITS FORCE with no database in the tree; what it governs here is files
+      and streams. A stream adds an obligation a store never had, though: a deref that never resolves
+      hangs the suite rather than leaking a resource, so every deref in a stream test is BOUNDED."}
 
   :open-questions
   ["ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
@@ -636,7 +759,16 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     breadth-first or depth-first, which is OBSERVABLE in the history and cannot be left to whatever
     `into` happens to do; and how an audit trail tells what the world did from what the machine did,
     because a log that conflates them is worse than one that does not have the internal events at
-    all."]
+    all."
+
+   "IS THE Context's :ignored STILL EARNING ITS PLACE? Raised 2026-09-01 by building the facade and
+    deliberately not answered. Its stated job was that the store layer would replace it with one that
+    records, and there is no store layer: the stream door reports a miss as :fired false, taken from
+    compile/admits? and not from any callback. What is left for it is a caller who folds BY HAND and
+    wants to hear about a miss — real, and possibly not worth a key in the Context. If it goes, that
+    caller closes over admits? themselves, `index` and `admits?` both being public for exactly this.
+    Nothing is blocked either way; it is three lines of surface, and the bar for removing it is a
+    second reader asking what it is for."]
 
   :project-knowledge
   {:status
@@ -658,14 +790,21 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     AND SO DID THE ASYNC LAYER, the same day: robertluo.state-graph.async, manifold 0.4.3, `drive`
     and `fan`. It serialises always; the licensed concurrency is a GAP with a reason, recorded in
     :two-events-in-flight-at-once.
-    43 tests, 156 assertions, green; clj-kondo clean; all 29 public fns carry a :malli/schema, which
-    the instrument! count of exactly 29 confirms better than a grep can. THE COMMIT GATE IS A REAL
-    GATE: 40 tests unit, 3 ^:integration.
-    NOT BUILT still: the FACADE (robertluo.state-graph) and the STORE (datahike), which remains a
-    dependency nothing uses. The integration suite NEEDS GRAPHVIZ — see
+    AND THE FACADE LANDED 2026-09-01, which is the last layer: robertluo.state-graph, nine
+    functions, one require. Two doors on one machine — (reduce (compile sh) (initial sh {}) events)
+    and (run sh {} events) — and :states now carries a TRANSITION RESULT rather than a bare state,
+    because the same day decided that this library stores nothing and the caller does. See
+    :the-facade-is-a-vocabulary-and-two-doors, :the-caller-owns-the-lifecycle,
+    :the-output-is-a-transition-and-not-a-state and :nothing-is-persisted-here.
+    THE STORE IS NOT COMING. datahike is out of deps.edn and robertluo.state-graph.store is out of
+    :layering; neither was ever built.
+    56 tests, 176 assertions, green — 52 unit and 4 ^:integration, so THE COMMIT GATE IS A REAL
+    GATE; clj-kondo clean; 31 public fns carry a :malli/schema and the instrument! count of exactly
+    31 confirms it better than a grep can. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
-    NOT BUILT, and named so nobody assumes otherwise: the FACADE (robertluo.state-graph) does not
-    exist, so an application requires the namespaces directly; async and store are untouched."
+    NOTHING IS UNBUILT. What is left is not a layer but a licence not taken: async/drive serialises
+    always, and the concurrency `check/commuting` proves to be safe is a GAP with a reason, recorded
+    in :two-events-in-flight-at-once."
 
    :gaps-in-the-repository
    "Found by reading deps.edn against README.md, and every one of them will bite on first use:
@@ -680,9 +819,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       which IS the <ns>_test.clj convention, so it is not configured. An empty tree warns
       `No tests were found` and exits 0.
     - `clojure -M:dev` DOES NOT START A REPL. The :dev alias is :extra-paths and :extra-deps with
-      no :main-opts; the alias with the main-opts is :nrepl. The README's development note says
-      -M:dev and is wrong: it is `clojure -M:dev:nrepl` (and :dev is wanted, or the test path and
-      kaocha are not on the classpath).
+      no :main-opts; the alias with the main-opts is :nrepl. It is `clojure -M:dev:nrepl` (and :dev
+      is wanted, or the test path and kaocha are not on the classpath). THE README SAYS THIS
+      CORRECTLY — checked 2026-09-01; this entry claimed otherwise and was itself the stale one.
+    - DATAHIKE WAS A DEPENDENCY NOTHING USED, and it is now not a dependency: removed 2026-09-01
+      with the store, see :nothing-is-persisted-here. Nothing in the tree requires it.
     - kaocha is in :dev and not in :test, so the runner is `clojure -M:dev:test`, never
       `clojure -M:test`."
 
@@ -836,6 +977,34 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       NOP lines on stderr, as the sibling project already did. Noise, not a fault, and worth knowing
       before someone hunts it."
 
+   :what-the-facade-taught
+   "VERIFIED BY RUNNING on 2026-09-01, building robertluo.state-graph.
+    - A def ALIAS BYPASSES malli INSTRUMENTATION, which is why every re-export is a delegating defn.
+      mi/instrument! replaces the VAR's root binding, so a value captured by (def state shape/state)
+      is the raw function for ever: handed a bad argument it answers happily where the var throws.
+      Measured both ways, on the same call in the same session.
+    - AND THE NEAR MISS THAT WOULD HAVE HIDDEN IT, which is the half worth keeping: the alias
+      APPEARED guarded when called at its 2-arity, and only the 3-arity gave the game away. The
+      reason is that a defn whose body calls ITSELF goes through the var, so the 2-arity's delegation
+      landed in the instrumented wrapper. That is the same fact :what-the-handler-move-taught records
+      from the other side, and testing only the 2-arity would have licensed aliases everywhere.
+    - THE INSTRUMENT COUNT IS 31 — yesterday's 29 plus compile/admits? and the facade's `run`. It is
+      also exactly the number of public fns carrying a :malli/schema, counted the independent way
+      through ns-publics, so it still doubles as the check that none was forgotten. The facade's
+      eight delegations carry none by design and are absent from both counts.
+    - THE TWO DOORS AGREE, as a property rather than an example: for a generated shape and a
+      generated event sequence, (map :state) off the stream results equals the states the reduction
+      passes through. Worth more than any number of examples about the record's shape, and the only
+      thing that can refute :the-caller-owns-the-lifecycle.
+    - fan's :done RESOLVES {} WHERE NO EVENT EVER ARRIVED, which fell out of keying it by instance
+      rather than being designed, and is right: there is no machine until an event names one, so
+      there is nothing to report on. The initial state is not a transition and never appears on
+      :states either.
+    - THE FORMATTER AND THIS REPOSITORY DISAGREE about a prop/for-all body — a PostToolUse hook
+      aligns it under the binding vector, where every existing suite indents it four spaces. The hook
+      fires on the file-writing tools and not on a shell heredoc, which is how the existing style was
+      restored."
+
    :confluence-was-measured-not-guessed
    "MEASURED BY RUNNING on 2026-08-31, over this project's own fixtures, when the question was whether
     two events pending in one state may be applied in completion order. `Commute by default` was
@@ -877,10 +1046,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - ubergraph 0.9.0 — the shape. Multigraph and digraph in one library, attributes on nodes and
       edges, and viz-graph for drawing. Drawing needs graphviz (`dot`) INSTALLED, so any test that
       renders is ^:integration at best and probably not a test at all.
-    - datahike 0.8.1861 — history. It is a datalog database, not a graph library; a graph goes in
-      it as datoms perfectly well, and its being immutable and time-travelling is the actual reason
-      it fits an audit trail. Its connection is a resource: opened in a fixture, released in a
-      `finally`.
+    - manifold 0.4.3 — the async default, and nothing below that layer requires it. Its Deferred
+      is a clojure.lang.IDeref, which is what lets the pure core deref one without depending on
+      manifold at all; d/chain takes a plain value as happily as a deferred; and s/connect is
+      ASYNCHRONOUS, which cost a lost state once — see :what-the-async-layer-taught. It drags in
+      slf4j-api with no binding, hence three NOP lines on stderr.
+    - NO DATABASE. datahike was here for history and is gone: this library stores nothing and the
+      caller stores what it outputs. See :nothing-is-persisted-here.
     - malli 0.20.1 — the shapes of states, events and every function signature. See the
       :reload-all rule; it is the one dependency that punishes a careless REPL.
     - test.check 1.1.1 — it is in :deps and not :dev on purpose: generative tests are the unit
@@ -958,8 +1130,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   ;; be asserted about even where it cannot be rendered, and `dot` is needed only to LOOK at it.
 
   :integration-suite
-  {:entry {:action "clojure -M:dev:test integration — the gate before a commit: a real datahike
-    store on disk, real streams, real clocks. Kaocha randomizes order, so a test depending on
+  {:entry {:action "clojure -M:dev:test integration — the gate before a commit: real files on
+    disk, real streams, real clocks, and graphviz actually shelled out to. Kaocha randomizes order, so a test depending on
     another having run first is a bug in the test. Every store opened is released in a `finally`,
     and a suite that passes and then hangs is a store left open"}
    :on {:passes {:target :review}
@@ -970,7 +1142,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   {:entry {:action "Verify the hard constraints: (1) nREPL was the only evaluator (2) no bare
     try/catch — a `finally` for release is not one (3) malli shapes all data AND every function
     (4) tests are clojure.test in test/, one file per namespace, split unit and ^:integration
-    (5) dependencies point down only (6) the pure core has no manifold and no datahike in it"}
+    (5) dependencies point down only (6) the pure core has no manifold in it, and no namespace
+    names one above it even in a comment (7) a facade re-export is a delegating defn and never a
+    def alias, or malli stops guarding it"}
    :on {:all-checkout {:target :retrospect}
         :issue-found  {:target :implement
                        :guard "Fix the identified issue"}}}
@@ -978,7 +1152,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   :retrospect
   {:entry {:action "Reflect on the session:
     - What went wrong? What assumption was incorrect?
-    - What was LEARNED about ubergraph, datahike, manifold or malli that a docstring would not
+    - What was LEARNED about ubergraph, manifold or malli that a docstring would not
       have told you? Record it in :project-knowledge in the past tense, with what was seen
     - Close any :open-questions the work answered; add the ones it raised
     - Add a :global-rule only for a mistake made more than once"}

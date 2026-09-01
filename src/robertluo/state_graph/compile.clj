@@ -4,10 +4,9 @@
 
    The lifecycle of an instance is (reduce (compile shape) (initial shape data) events)
    and that is the whole runtime: no object, no atom, no protocol. Everything above
-   this is a way of getting events into that reduction or states out of it — which is
-   why a stream is the async layer and a log is the persistence layer, and why neither
-   of them is the core. Both take the STEP FUNCTION as a value, so neither requires
-   this namespace and neither ever learns what a shape is.
+   this is a way of getting events into that reduction or results out of it — which is
+   why a stream is a layer above and not the core. Such a layer takes the STEP FUNCTION
+   as a value, so it requires neither this namespace nor a shape.
 
    Requires the shape and malli. It knows nothing of streams or databases."
   (:refer-clojure :exclude [compile])
@@ -39,8 +38,12 @@
             whatever container the caller works in — (fn [v f] (f v)) here, d/chain there.
    :pure    a value already available, put into that same container.
    :ignored a state and an event no edge admits, answering the state. The default is
-            SILENT; the store layer replaces it with one that records, which is the only
-            way an event that should have transitioned and did not becomes visible."
+            SILENT, and a caller folding by hand replaces it to hear about a miss.
+
+            IT IS NO LONGER THE ONLY WAY, and no longer the one that matters. Nothing
+            here stores anything, so a layer above reports a miss as DATA on the same
+            output as everything else — and it gets that fact from `admits?`, not from
+            here, because a callback cannot be put on a stream."
   [:map [:then {:optional true} fn?]
         [:pure {:optional true} fn?]
         [:ignored {:optional true} fn?]])
@@ -81,6 +84,28 @@
                          :event-schema schema
                          :enter-schema (shape/enter-schema sh to)}])))
 
+(defn- entry
+  "What the step needs for this state and this event, or nil where no edge admits it.
+   ONE definition of the lookup, because `admits?` publishes the same answer and two
+   readings of it could drift into disagreeing."
+  [idx state event]
+  (idx [(:id state) (:id event)]))
+
+(defn admits?
+  "Whether this state has a transition for this event — the step's own lookup, answered
+   WITHOUT taking the step.
+
+   WHAT IT IS FOR: a layer above needs to report whether an event fired, and the step
+   cannot tell it. An event nobody handled answers the state UNCHANGED, and a fired
+   self-loop whose handler answers {} answers a state that is `identical?` to the old
+   one — verified, which is why this is a lookup and not a comparison.
+
+   Takes the INDEX and not the shape, so that a caller computes it once. `index` is
+   public for exactly this reason."
+  {:malli/schema [:=> [:cat :map State Event] :boolean]}
+  [idx state event]
+  (some? (entry idx state event)))
+
 (defn compile
   "The shape as an ordinary Clojure function of a state and an event.
 
@@ -106,7 +131,7 @@
          idx (index sh)]
      (fn step [state event]
        (if-let [{:keys [to handler out event-schema enter-schema]}
-                (idx [(:id state) (:id event)])]
+                (entry idx state event)]
          (let [ctx {:from (:id state) :event (:id event) :to to}]
            (conform! event-schema event (assoc ctx :crossing :event))
            (then (handler event)
