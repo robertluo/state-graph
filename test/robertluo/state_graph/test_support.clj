@@ -149,8 +149,13 @@
    :submit leaves with no way back."
   []
   (shape/shape
-   (shape/state :filling [:map] {:initial true})
-   (shape/state :submitted [:map] {:final true})
+   ;; :name and :email are DECLARED here, because a node holds what it declares and these
+   ;; events write them. Before the merge was projected on entry a bare [:map] kept them
+   ;; anyway, which made this fixture demonstrate a write the runtime silently undid.
+   (shape/state :filling [:map [:name {:optional true} :string]
+                               [:email {:optional true} :string]] {:initial true})
+   (shape/state :submitted [:map [:name {:optional true} :string]
+                                 [:email {:optional true} :string]] {:final true})
    (shape/event :name   [:map [:v :string]] (fn [e] {:name (:v e)})  [:map [:name :string]])
    (shape/event :email  [:map [:v :string]] (fn [e] {:email (:v e)}) [:map [:email :string]])
    (shape/event :both   [:map [:v :string]] (fn [e] {:name (:v e) :email (:v e)})

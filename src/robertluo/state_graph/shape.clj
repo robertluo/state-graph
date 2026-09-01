@@ -84,7 +84,8 @@
    It also completes the claim: the handler is a [:=> [:cat <this :schema>] <this :out>],
    BOTH HALVES off this map and nothing at all off the graph."
   [:map [::kind [:= :event]] [:id Id] [:schema MapSchema] [:handler fn?]
-        [:out {:optional true} MapSchema]])
+        [:out {:optional true} MapSchema]
+        [:sees {:optional true} MapSchema]])
 
 (def TransDef
   "An edge: which event moves the machine from where to where, and nothing else. What
@@ -104,18 +105,33 @@
   ([id schema opts] (into {::kind :state :id id :schema (m/schema schema)} opts)))
 
 (defn event
-  "An event: an id, the malli schema of its DATA, the HANDLER that answers it, and
-   optionally the schema of what that handler answers.
+  "An event: an id, the malli schema of its DATA, the HANDLER that answers it, optionally
+   the schema of what that handler answers, and optionally {:sees <a map schema>}.
 
-   The handler takes THE EVENT ALONE — never the state it is about to change — and
-   answers a map that is merged into the state. The :id rides in the value at runtime for
-   the same reason a state's does: the step function matches an edge on it."
+   The handler takes THE EVENT ALONE and answers a map that is merged into the state. The
+   :id rides in the value at runtime for the same reason a state's does: the step function
+   matches an edge on it.
+
+   :sees IS A VIEW, and it is the one way anything inside the machine reads the state it is
+   changing. Declared, never automatic — too broad a visibility from the inside is a
+   security problem — and DECLARED HERE RATHER THAN ON THE NODE on purpose: a handler names
+   what it needs BY SHAPE, so it stays reusable across every state that satisfies the view,
+   which is stronger reuse than seeing nothing at all. Where a view is declared the handler
+   takes TWO arguments, (handler event seen), and `seen` is the state projected onto the
+   view's keys and validated against it — so a handler sees exactly what was declared and
+   never the rest of the state.
+
+   The function schema stays complete either way:
+   [:=> [:cat <this :schema> <this :sees>] <this :out>], both halves off this map."
   {:malli/schema [:function [:=> [:cat Id MapSchema fn?] EventDef]
-                            [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]]}
-  ([id schema handler] (event id schema handler nil))
-  ([id schema handler out]
+                            [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]
+                            [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]}
+  ([id schema handler] (event id schema handler nil nil))
+  ([id schema handler out] (event id schema handler out nil))
+  ([id schema handler out opts]
    (cond-> {::kind :event :id id :schema (m/schema schema) :handler handler}
-     (some? out) (assoc :out (m/schema out)))))
+     (some? out) (assoc :out (m/schema out))
+     (:sees opts) (assoc :sees (m/schema (:sees opts))))))
 
 (defn transition
   "An edge: from a state, on an event, to a state. Three keywords and no functions —
@@ -221,7 +237,7 @@
   (when-let [ps (seq (apply problems parts))]
     (throw (ex-info "The shape has problems" {:problems (vec ps)})))
   (let [{:keys [state event transition]} (group-by ::kind parts)
-        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out]))) event)]
+        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :sees]))) event)]
     (-> (uber/multidigraph)
         (uber/add-nodes-with-attrs*
          (for [s state] [(:id s) (select-keys s [:schema :initial :final :machine])]))

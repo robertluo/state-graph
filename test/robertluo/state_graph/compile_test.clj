@@ -310,3 +310,67 @@
            (if (:sub end)
              (contains? kid-nodes (:id (:sub end)))
              (nil? (shape/machine g (:id end))))))))
+
+;;; ------------------------------------------------------- what a node holds
+
+(deftest a-node-holds-what-it-declares-and-nothing-else
+  ;; The merge is PROJECTED onto the target's declared keys on entry, so data stops flowing
+  ;; through states that never mentioned it. This is what bounds visibility BY ABSENCE.
+  (let [g (shape/shape
+           (shape/state :one [:map [:x :int]] {:initial true})
+           (shape/state :two [:map [:y :int]] {:final true})
+           (shape/event :next [:map] (constantly {:y 1}) [:map [:y :int]])
+           (shape/transition :one :next :two))
+        step (c/compile g)]
+    (is (= {:id :one :x 7} (c/initial g {:x 7 :undeclared :dropped}))
+        "the FIRST state is projected too, or it would be the one state holding what it never
+         declared")
+    (is (= {:id :two :y 1} (step (c/initial g {:x 7}) {:id :next}))
+        ":x came this far and no further, :two having never mentioned it")))
+
+(deftest projection-keeps-what-the-machinery-owns
+  (let [g (shape/shape
+           (shape/state :a [:map] {:initial true})
+           (shape/state :b [:map] {:machine (child)})
+           (shape/event :go [:map] (constantly {}) [:map])
+           (shape/transition :a :go :b))
+        step (c/compile g)]
+    (is (= {:id :b :instance "run-1" :sub {:id :unpaid}}
+           (step (c/initial g "run-1" {}) {:id :go}))
+        ":instance and :sub survive a projection that drops everything undeclared")))
+
+;;; ------------------------------------------------------------ a declared view
+
+(deftest a-handler-sees-exactly-what-was-declared
+  ;; The security property, and the reason a view is declared rather than automatic: the state
+  ;; holds a token, the handler asked for a goal, and the token never reaches it.
+  (let [seen (atom [])
+        g (shape/shape
+           (shape/state :briefed  [:map [:goal :string] [:token :string]] {:initial true})
+           (shape/state :answered [:map [:goal :string] [:token :string] [:answer :string]]
+                        {:final true})
+           (shape/event :ask [:map [:q :string]]
+                        (fn [e v] (swap! seen conj v) {:answer (str (:goal v) "/" (:q e))})
+                        [:map [:answer :string]]
+                        {:sees [:map [:goal :string]]})
+           (shape/transition :briefed :ask :answered))
+        end ((c/compile g) (c/initial g {:goal "ship it" :token "s3cret"}) {:id :ask :q "how"})]
+    (is (= [{:goal "ship it"}] @seen)
+        "one key, and not the one next to it")
+    (is (= "ship it/how" (:answer end))
+        "and the handler could actually use it, which is the point")))
+
+(deftest a-view-is-a-seam-and-is-checked-at-runtime-too
+  ;; The static check proves what it can; this holds in production, and it is the difference
+  ;; between a diagnosis and a nil turning up inside somebody's handler.
+  (let [g (shape/shape
+           (shape/state :a [:map [:goal {:optional true} :string]] {:initial true})
+           (shape/state :b [:map] {:final true})
+           (shape/event :go [:map] (fn [_ _v] {}) [:map] {:sees [:map [:goal :string]]})
+           (shape/transition :a :go :b))
+        step (c/compile g)]
+    (is (= {:id :b} (step (c/initial g {:goal "there"}) {:id :go}))
+        "the optional key was there, so the view held")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a valid sees"
+                          (step (c/initial g {}) {:id :go}))
+        "and when it was not, the crossing says so rather than the handler finding a nil")))

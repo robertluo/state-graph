@@ -243,3 +243,49 @@
            (shape/event :e [:map] (constantly {}) [:map])
            (shape/transition :p :e :q))]
     (is (str/includes? (check/dot g) "⊞ 3 states"))))
+
+;;; ---------------------------------------------------------- declared views
+
+(deftest views-answers-whether-a-state-can-provide-what-a-handler-asks-to-see
+  ;; `admits` again, with the view as the target and the source node's schema as what is
+  ;; produced — and sound ONLY because a node now holds exactly what it declares.
+  (let [g (shape/shape
+           (shape/state :rich [:map [:goal :string] [:token :string]] {:initial true})
+           (shape/state :thin [:map [:goal {:optional true} :string]])
+           (shape/state :end  [:map] {:final true})
+           (shape/event :ok      [:map] (fn [_ _] {}) [:map] {:sees [:map [:goal :string]]})
+           (shape/event :maybe   [:map] (fn [_ _] {}) [:map] {:sees [:map [:goal :string]]})
+           (shape/event :nothing [:map] (constantly {}) [:map])
+           (shape/transition :rich :ok      :thin)
+           (shape/transition :thin :maybe   :end)
+           (shape/transition :rich :nothing :end))]
+    (is (= #{{:from :rich :event :ok      :verdict :yes}
+             {:from :thin :event :maybe   :verdict :no}
+             {:from :rich :event :nothing :verdict :undeclared}}
+           (set (check/views g)))
+        "an OPTIONAL key is :no — a view a handler is handed cannot rest on a maybe")
+    (is (= [{:from :thin :event :maybe :problem :view-unavailable}]
+           (filterv #(= :view-unavailable (:problem %)) (check/problems g)))
+        "and only the proven one is a fault")))
+
+(deftest a-view-makes-a-read-write-hazard-that-write-sets-cannot-see
+  ;; BERNSTEIN, not disjoint writes, and this test is the reason the condition changed. :sum
+  ;; reads :n and writes :total; :set writes :n. The WRITE sets are disjoint, so the pair was
+  ;; licensed until a handler could read — and the two orders answer differently, which is a
+  ;; flake nobody chose rather than a race anybody wanted.
+  (let [g (shape/shape
+           (shape/state :s [:map [:n :int] [:total :int]] {:initial true})
+           (shape/event :sum [:map] (fn [_ seen] {:total (* 2 (:n seen))})
+                        [:map [:total :int]] {:sees [:map [:n :int]]})
+           (shape/event :set [:map [:to :int]] (fn [e] {:n (:to e)}) [:map [:n :int]])
+           (shape/transition :s :sum :s)
+           (shape/transition :s :set :s))
+        step (c/compile g)
+        init (c/initial g {:n 1 :total 0})]
+    (is (= [{:in :s :pair [:set :sum] :verdict :unknown}] (check/confluence g))
+        ":unknown and not :no — an overlap is not a PROOF that the values differ")
+    (is (= {} (check/commuting g))
+        "so no licence, which is what matters: only :yes licenses anything")
+    (is (not= (reduce step init [{:id :sum} {:id :set :to 9}])
+              (reduce step init [{:id :set :to 9} {:id :sum}]))
+        "and the order really is observable — :total 2 one way, 18 the other")))

@@ -187,6 +187,29 @@
                       (admits (shape/enter-schema sh (:to t)) p)
                       :undeclared))))
 
+(defn views
+   "Every declared VIEW and whether the state it reads can provide it — one verdict per edge
+   whose event declares :sees, as PLAIN DATA. :undeclared where an event declares none.
+
+   IT IS `admits` AGAIN, with the view as the TARGET and the source node's schema as what is
+   PRODUCED, and it needed no new machinery for the same reason nesting needed none: the
+   question `does this schema guarantee that one` was already answered here.
+
+   SOUND ONLY BECAUSE A NODE HOLDS WHAT IT DECLARES. Before the merge was projected on entry,
+   a node's schema was a LOWER BOUND on what it held — a key could arrive from a state three
+   transitions back — so :no would have proven nothing and this check would have condemned
+   shapes that run. See :internal-visibility-is-declared-and-not-automatic.
+
+   A source that only OPTIONALLY has the key is :no, and that is right: a view a handler is
+   handed cannot rest on a maybe."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (for [{:keys [from event sees]} (shape/transitions sh)]
+    {:from from :event event
+     :verdict (if sees
+                (admits sees (shape/enter-schema sh from))
+                :undeclared)}))
+
 ;;; ------------------------------------------------------------------ confluence
 
 (defn- targets
@@ -201,23 +224,44 @@
   [sh]
   (into {} (map (juxt :event :out)) (shape/transitions sh)))
 
+(defn- declared-sees
+  "{event-id -> its :sees, or nil} — what each event's handler READS. Same denormalisation
+   as `declared-out`, and needed for the same question: two patches commute only if neither
+   reads what the other writes."
+  [sh]
+  (into {} (map (juxt :event :sees)) (shape/transitions sh)))
+
 (defn- commutes
   "The verdict for two events pending in ONE state: :yes, :no or :unknown, and like
-   `admits` it never lies."
-  [tgt out s a b]
+   `admits` it never lies.
+
+   THE PATCH CONDITION IS BERNSTEIN'S, not merely disjoint writes, and it stopped being
+   merely disjoint writes the day a handler could READ — see
+   :internal-visibility-is-declared-and-not-automatic. Two patches commute only if neither
+   writes what the other writes AND neither READS what the other WRITES: a handler that
+   computed :total from the :n another handler is changing has a patch that goes stale, and
+   the write sets alone cannot see it. Measured: before this, a pair whose writes were
+   {:total} and {:n} was licensed while one of them read :n, and the two orders answered
+   :total 2 and :total 18."
+  [tgt out sees s a b]
   (let [ta (tgt [s a]), tb (tgt [s b])]
     (if-not (and ta tb)
       ;; not both admitted here, so they are not a concurrent pair at all
       :no
       (let [x1 (tgt [ta b]), x2 (tgt [tb a])
-            oa (out a), ob (out b)]
+            oa (out a), ob (out b)
+            ;; an event with no view reads nothing, so a shape with no views is unaffected
+            reads (fn [e] (if-let [v (sees e)] (set (mu/keys v)) #{}))
+            writes (fn [o] (set (mu/keys o)))]
         (cond
           ;; THE DIAMOND. Either return edge missing, or the two routes landing in
           ;; different nodes, is a PROOF that completion order is observable.
           (not (and x1 x2 (= x1 x2))) :no
           ;; the diamond closes, and now it is only about the patches
           (not (and oa ob)) :unknown
-          (some (set (mu/keys ob)) (mu/keys oa)) :unknown
+          (some (writes ob) (writes oa)) :unknown
+          (some (writes ob) (reads a)) :unknown
+          (some (writes oa) (reads b)) :unknown
           :else :yes)))))
 
 (defn confluence
@@ -242,8 +286,10 @@
    - :unknown where the diamond closes but the patches cannot be shown to commute:
      an event with no :out declared, or two whose :out share a key. Sharing a key is not
      a PROOF of conflict — the values might coincide — so it is not reported as one.
-   - :yes where the diamond closes and the :out key sets are DISJOINT, so the merges
-     commute whatever the values are.
+   - :yes where the diamond closes and BERNSTEIN'S CONDITIONS hold on the patches: neither
+     event writes what the other writes, and neither READS what the other writes. Disjoint
+     writes alone was the condition until a handler could read a declared view, and it was
+     then unsound — a patch computed from what the other event changes goes stale.
 
    The intermediate states need no check of their own: if [ta b] is an edge at all then
    `subsumption` has already asked whether ta admits what b produces.
@@ -257,12 +303,13 @@
   [sh]
   (let [tgt (targets sh)
         out (declared-out sh)
+        sees (declared-sees sh)
         here (fn [s] (sort (for [[[f e] _] tgt :when (= f s)] e)))]
     (for [s (sort (shape/states sh))
           :let [es (here s)]
           a es b es
           :when (neg? (compare a b))]
-      {:in s :pair [a b] :verdict (commutes tgt out s a b)})))
+      {:in s :pair [a b] :verdict (commutes tgt out sees s a b)})))
 
 (defn commuting
   "{state-id #{#{event-a event-b}}} — only the pairs PROVEN to commute, as plain data a
@@ -302,6 +349,11 @@
           (for [id (traps sh) :when (not (ends id))] {:problem :trap :id id})
           (for [{:keys [verdict] :as v} (subsumption sh) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :target-refuses)))
+          ;; A handler asking to see what the state it reads cannot provide. PROVEN, like
+          ;; every other fault here — and provable only because a node now holds exactly
+          ;; what it declares.
+          (for [{:keys [verdict] :as v} (views sh) :when (= :no verdict)]
+            (-> v (dissoc :verdict) (assoc :problem :view-unavailable)))
           ;; A NESTED MACHINE IS CHECKED AS AN ORDINARY SHAPE, which is most of why
           ;; nesting cost so little: every check above is about one graph, and a child is
           ;; one. :within names the path of nodes it was found under, so a fault three

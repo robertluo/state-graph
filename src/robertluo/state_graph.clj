@@ -8,6 +8,10 @@
    A NODE MAY NEST A WHOLE MACHINE — {:machine sh} on a state — which is how a big problem
    stays readable. See `state`.
 
+   WHAT ANYTHING INSIDE THE MACHINE MAY SEE IS DECLARED, never automatic. A node holds exactly
+   the keys its schema names, and a handler reads only through a view its event declares —
+   {:sees <a map schema>} on `event`, which is also how a machine accumulates.
+
    TWO DOORS, ONE MACHINE, AND THE CALLER OWNS THE LIFECYCLE IN BOTH. That is the whole
    answer to who owns it, and the doors are not two designs:
 
@@ -85,9 +89,15 @@
   "A state: an id, the malli schema of its DATA, and optionally {:initial true},
    {:final true} or {:machine <a shape>}. Exactly one state in a shape is the initial one.
 
-   The schema describes the map WITHOUT :id, :instance and :sub — what a state is called,
-   which run it belongs to, and what a nested machine is doing are the machine's to say and
-   never a handler's.
+   THE SCHEMA IS WHAT THIS NODE HOLDS, not a lower bound on it: the merge is projected onto
+   these keys on entry, so anything a state does not declare is dropped at its door. Data that
+   must survive several states is declared by each of them, and dropping a field is declaring
+   one fewer. That is also what bounds what anything INSIDE the machine can see — a state that
+   never held a secret cannot leak one.
+
+   It describes the map WITHOUT :id, :instance and :sub — what a state is called, which run it
+   belongs to, and what a nested machine is doing are the machine's to say and never a
+   handler's.
 
    {:machine sh} NESTS A WHOLE MACHINE IN THIS NODE. While the parent sits here, that child
    gets every event FIRST and this node's own edges get only what the child does not know —
@@ -102,11 +112,24 @@
   "An event: an id, the malli schema of its DATA, the HANDLER that answers it, and
    optionally the schema of what that handler answers.
 
-   The handler takes THE EVENT ALONE — never the state it is about to change — and answers
-   a map that is merged into the state. Declaring that map's schema is what lets `problems`
-   prove, without running anything, that a target will not admit what a handler produces."
+   BY DEFAULT the handler takes THE EVENT ALONE — nothing of the state it is about to change —
+   and answers a map that is merged into the state. Declaring that map's schema is what lets
+   `problems` prove, without running anything, that a target will not admit what a handler
+   produces.
+
+   {:sees <a map schema>} as a fifth argument gives the handler a VIEW, and it is the only way
+   anything inside the machine reads the state: declared, never automatic, and narrowed to
+   exactly the keys named. The handler then takes two arguments, (handler event seen).
+   Declaring it on the EVENT rather than the node is what keeps the handler reusable — it names
+   what it needs by shape, not by node — and `problems` proves whether the states it reads can
+   actually provide it.
+
+   A VIEW IS ALSO HOW A MACHINE ACCUMULATES, and the policy stays ordinary code: read the old
+   value, answer the new one, cap or summarise it however the task wants. That is why nothing
+   in the shape combines keys for you — a combine could only ever grow."
   ([id schema handler] (shape/event id schema handler))
-  ([id schema handler out] (shape/event id schema handler out)))
+  ([id schema handler out] (shape/event id schema handler out))
+  ([id schema handler out opts] (shape/event id schema handler out opts)))
 
 (defn transition
   "An edge: from a state, on an event, to a state. What handles the event belongs to the

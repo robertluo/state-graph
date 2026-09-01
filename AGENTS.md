@@ -323,7 +323,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       otherwise think it does: THE STEP may depend on the state as much as it likes, and
       already does — the edge lookup, the merge, :id and :instance written afterwards. So a
       NESTED machine, whose child step needs the child's current state, sits inside the
-      compiler and not inside a handler. See :a-machine-can-nest-in-a-node. The event is a map
+      compiler and not inside a handler. See :a-machine-can-nest-in-a-node.
+    - AND IT IS NOW `NEVER THE STATE` RATHER THAN `NEVER ANYTHING`, 2026-09-01: an event may
+      declare {:sees <a map schema>}, and its handler is then handed the state PROJECTED onto
+      those keys and validated against them, as a second argument. The reason this entry gives
+      survives intact, which is why it was allowed: the view is declared on the EVENT, so a
+      handler still names what it needs BY SHAPE and stays reusable across every state that
+      satisfies it, and its function schema is still complete off the event definition alone —
+      [:=> [:cat <schema> <sees>] <out>]. What a handler may never do is read what was not
+      declared. See :internal-visibility-is-declared-and-not-automatic. The event is a map
     and may carry whatever data the change needs; what it may not do is reach into the state.
     - THE REASON IS DECOUPLING: one handler serves many events and many source states, and states
       and events then evolve independently. Reuse is the visible payoff.
@@ -339,7 +347,90 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       every event, so a derived total is a QUERY rather than a state field. And when it must live
       in the state, the move that keeps this decoupling is to let the NODE'S SCHEMA declare how a
       key COMBINES (:n by +), so the handler still answers {:n 1} and the accumulation is DATA ON
-      THE NODE rather than a closure. Not built; it is the door and it is open."
+      THE NODE rather than a closure.
+    - AND THAT COST IS LIFTED WHERE A VIEW IS DECLARED, 2026-09-01: :total after :add-item CAN see
+      the old total, and a counter can count, by declaring {:sees [:map [:total :int]]} and
+      answering {:total (+ ...)}. The dependence is then visible in the shape rather than hidden in
+      a closure, which is the whole difference. What stays true is the DEFAULT — a handler with no
+      view answers from the event alone and is reusable everywhere.
+    - THAT DOOR IS SHUT, 2026-09-01, by the author who had named it here on 2026-08-30, and the
+      reason is worth more than the door was: A COMBINE IS A MECHANISM WITH NO POLICY. It can only
+      ever GROW. What a task wants is the last n, or a summary, or one field from three steps back,
+      and `:messages by conj` expresses none of those — while in the domain this library was built
+      for, THE PILE IS THE COST, context being metered. So the accumulation question was the wrong
+      question, and the right one is who may SEE what: :internal-visibility-is-declared-and-not-automatic."
+
+   :internal-visibility-is-declared-and-not-automatic
+   "BUILT 2026-09-01, both halves, the same day it was designed — and the design below stands as
+    written, with what the building taught recorded at the end of it.
+    THE QUESTION, PUT BY THE AUTHOR 2026-09-01. From OUTSIDE, an
+    observer sees every transition and can have the whole history — that is what the results
+    stream is. From INSIDE, can an observer — a handler, or another state — get at information?
+    And the constraint that decides the shape of any answer: IT IS THE CONSTRUCTOR OF THE MACHINE
+    WHO DECIDES, never the library automatically, because too broad a data visibility from the
+    inside brings security problems easily.
+    - WHAT WAS WITHDRAWN FIRST, so the design is not read as answering it: `an agent handler must
+      see the accumulated context` is too strong — plenty of steps are input to output and want
+      nothing from the past — and the combining-key door is refused outright, see
+      :a-handler-never-sees-the-state. Accumulation was the wrong axis.
+    - THERE ARE TWO HALVES AND ONLY ONE MECHANISM WOULD SERVE BOTH. READING: may a handler see
+      anything. HOLDING: what does a state keep, which is the same question because a state that
+      holds everything makes every read a read of everything.
+    - THE READ HALF: A VIEW DECLARED ON THE EVENT.
+      (event id schema handler out {:sees <a map schema>}), and the step passes the projection as a
+      SECOND ARGUMENT — (handler event seen) — where a view is declared and (handler event) where
+      none is, so nothing existing changes.
+      DECLARED ON THE EVENT AND NOT ON THE NODE, because that is what keeps the original reason
+      intact: the handler names what it needs BY SHAPE rather than by node, so it stays reusable
+      across every state that satisfies the view. That is STRONGER reuse than today's `sees
+      nothing`, not weaker — a handler needing a goal cannot be written at all right now.
+      AND THE FUNCTION SCHEMA STAYS COMPLETE: [:=> [:cat <the event's schema> <the view>] <out>],
+      both halves still off the event definition and nothing off the graph.
+    - THE CHECK COSTS NOTHING, WHICH IS THE STRONGEST ARGUMENT FOR THIS SHAPE. `admits` already
+      answers it, with the view as TARGET and the source state's schema as PRODUCED. Measured
+      2026-09-01, all four verdicts: a state carrying the key and more answers :yes; a state
+      without it :no; a state whose key is the wrong type :no; and A STATE THAT ONLY OPTIONALLY HAS
+      IT ALSO :no, which is right — a view that must be there cannot rest on a maybe. So `this
+      handler asks to see what this state cannot provide` becomes a PROVEN fault, before anything
+      runs.
+    - THE HOLD HALF: PROJECT AT THE DOOR. A node holds exactly what it declares — the merged value
+      is projected onto the keys of its enter-schema on entry. VISIBILITY IS THEN BOUNDED BY
+      ABSENCE rather than by permission, which is stronger than any read rule, and it dissolves
+      `a merge cannot remove a key` at the same time. It is one call in the step.
+      IT IS ALSO THE ANSWER TO `OR ANOTHER STATE`: a state seeing another state's data IS the
+      merge, today unconditional and undeclared, and under projection it is exactly what the
+      node's schema says. One mechanism, both halves.
+    - HOW BROAD IT IS TODAY, measured rather than argued: a node whose schema is [:map [:y :int]]
+      declares (:id :instance :y) and RECEIVES {:x 7 :id :b :y 1}, the :x having come from the
+      state before it, and it validates because malli maps are open. The tutorial shows the same
+      thing as a review's :notes sitting in a published manuscript. So a handler needs no read
+      capability to see stale or sensitive data — it is already in the state it is about to change.
+    - THE EVENT SIDE ALONE DOES NOT GIVE THE SECURITY PROPERTY, and this is where the author's
+      constraint bites hardest: a view declared by the event is least privilege BY THE HANDLER'S
+      OWN WORD, and a careless or shared handler declares {:sees [:map [:token :string]]} and gets
+      it. If a state holds a credential, the DATA OWNER needs the say — the node declares what it
+      EXPOSES, the event declares what it NEEDS, and the check verifies need is within exposure.
+      Two declarations, one handshake, and the default on both sides is DENY, which is exactly
+      today's behaviour and costs nothing to keep.
+    - WHAT MAKES PROJECTION A DECISION AND NOT A ONE-LINER, both said out loud: it is BREAKING,
+      since every node must then declare every key it carries forward — cheap before release and
+      expensive after — and A BARE [:map] STOPS MEANING `anything` AND STARTS MEANING `nothing`,
+      which every generative fixture in this suite relies on. Whether projection is opt-in per node,
+      shape-wide, or a `:keeps` declaration separate from the schema is the open question that goes
+      with it.
+    - PROJECTION WAS TAKEN, and the three-way open question that went with it is closed by
+      MEASUREMENT rather than argument: projecting always cost exactly ONE test in the whole suite,
+      an async fixture whose state schema was a bare [:map] while its handler set :mark. It was
+      under-declared, and the fix made it honest; the `form` fixture wanted the same correction.
+      Opt-in-per-node and a separate :keeps declaration existed only to avoid a cost that turned
+      out not to be there, so neither was built.
+    - AND THE ORDER WAS FORCED, which the design did not see: THE VIEW CHECK IS ONLY SOUND UNDER
+      PROJECTION. While a node's schema was a LOWER BOUND on what it held, a key could arrive from
+      three transitions back, so `admits` answering :no proved nothing and `problems` would have
+      condemned shapes that run — against its own promise to report only PROVEN faults. Holding had
+      to land before reading, and the two halves hold each other up.
+    - WHAT IS STILL NOT BUILT is the node-side EXPOSURE, the half that carries the security property
+      against a careless handler. It is additive, and it waits for a real shape to ask."
 
    :a-handler-answers-a-map-and-declares-it
    "DECIDED 2026-08-30. A handler's return value is a MAP, MERGED into the state — and the edge
@@ -359,7 +450,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - REVISED 2026-08-31: the declaration is PER EVENT and no longer per edge, so `optional per edge`
       now reads `optional per event`. See :a-handler-belongs-to-the-event.
     - COST, accepted: a merge cannot REMOVE a key. A state that must drop a field is a state the
-      v1 shape cannot express."
+      v1 shape cannot express.
+    - THAT COST IS PAID OFF, 2026-09-01, and from the other end than the one it was stated at: the
+      merge is PROJECTED onto the target node's declared keys on entry, so dropping a field is
+      declaring one fewer and a state is exactly what its schema says. What it costs instead is that
+      carrying a key across several states is EXPLICIT, each of them declaring it. See
+      :internal-visibility-is-declared-and-not-automatic."
 
    :the-event-catalogue-is-denormalised
    "DECIDED 2026-08-30, and FORCED by ubergraph rather than chosen — see :ubergraph-0-9-0. An
@@ -666,6 +762,14 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       :a-handler-belongs-to-the-event. A handler answers from the event alone, so what it computed
       while the machine was in S is still exactly right in T; it is only whether T admits the event
       that can have changed, and that is re-looked-up at application time as any other step is.
+    - THAT CLAIM NOW HAS AN EXCEPTION, 2026-09-01, and it is the one thing views cost: A HANDLER
+      THAT READS CAN HAVE A STALE PATCH. If it computed from a key the other event changes, what it
+      answers was right in S and is wrong in T. So the patch condition stopped being `disjoint :out
+      key sets` and became BERNSTEIN'S — neither writes what the other writes, and neither READS
+      what the other writes. MEASURED, and the old condition really did license a bad pair: writes
+      of {:total} and {:n} are disjoint while :sum reads :n, and the two orders answer :total 2 and
+      :total 18. check/commutes was fixed the same hour and the pair is now :unknown. An event with
+      no view reads nothing, so no shape written before views is affected.
     - THE COST, ACCEPTED by the author: where concurrency is taken, HISTORY ORDER STOPS MATCHING
       ARRIVAL ORDER. Persistence is an audit trail, so the log has to represent that honestly rather
       than pretend to a sequence that did not happen.
@@ -861,18 +965,22 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     because a log that conflates them is worse than one that does not have the internal events at
     all."
 
-   "MUST THE COMBINING-KEY DOOR OPEN FOR AGENT WORKFLOWS? Raised 2026-09-01 by :why-it-exists
-    and deliberately not answered, and it is the sharpest thing standing between this library and
-    its stated purpose. An agent workflow's handler IS the model call, and a prompt normally needs
-    the conversation SO FAR — which :a-handler-never-sees-the-state puts out of reach, a handler
-    getting the event and nothing else. So the CALLER must read the state, which it has on every
-    result, and put the context onto the next event: and that is the glue code this whole rationale
-    exists to delete, reappearing as prompt assembly one layer out.
-    THE DOOR IS ALREADY NAMED in :a-handler-never-sees-the-state — let a NODE'S SCHEMA declare how
-    a key COMBINES, :messages by conj, so a handler still answers {:messages [one]} and the
-    accumulation is DATA ON THE NODE rather than a closure, which keeps the decoupling AND the
-    static check. For a general FSM that is optional. For this library's stated purpose it may not
-    be, and that is the question. Settle it BEFORE smart-boundary draws the arrow, not after."
+   "IS THE NODE-SIDE EXPOSURE NEEDED, OR IS THE EVENT-SIDE VIEW ENOUGH? What is left of
+    :internal-visibility-is-declared-and-not-automatic after both halves were built on 2026-09-01.
+    A view declared by the EVENT is least privilege by the handler's own word: a careless or shared
+    handler declares {:sees [:map [:token :string]]} and is handed the token. The remedy is for the
+    data owner to have the say — the node declares what it EXPOSES, the event what it NEEDS, and the
+    check verifies the one is within the other — and it is ADDITIVE, default deny on both sides being
+    exactly today's behaviour.
+    WHY IT WAS NOT BUILT WITH THE REST: projection already bounds visibility by ABSENCE, which is the
+    stronger guarantee and covers the case that matters most, a state that never held the secret
+    being unable to leak it. Exposure only helps where a state MUST hold something a handler in the
+    same machine must not read. Whether an agent workflow really has that shape is the question, and
+    a real one asking for it is the bar.
+    RETIRED, and kept here for one line only because the file's own rule is that an answered question
+    left in the list gets asked again: `is projection taken before release` was answered by taking
+    it, and `how is a bare [:map] handled` by measuring — it holds nothing but its :id, and that cost
+    one under-declared fixture."
 
    "IS THE Context's :ignored STILL EARNING ITS PLACE? Raised 2026-09-01 by building the facade and
     deliberately not answered. Its stated job was that the store layer would replace it with one that
@@ -916,9 +1024,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     child taking every event first and the parent's edges being the escape. It needed no new
     rules — see :a-machine-can-nest-in-a-node — and no new facade function, being an option on
     `state`.
-    68 tests, 193 assertions, green — 66 unit and 2 ^:integration, so THE COMMIT GATE IS A REAL
-    GATE; clj-kondo clean; 34 public fns carry a :malli/schema and the instrument! count of exactly
-    34 confirms it better than a grep can. The integration suite is DOWN to two, and that is the
+    AND INTERNAL VISIBILITY IS DECLARED, 2026-09-01, both halves in one go: A NODE HOLDS WHAT IT
+    DECLARES — the merge is projected onto its keys on entry, which killed the `a merge cannot
+    remove a key` limit — and AN EVENT MAY DECLARE {:sees <a map schema>}, whose handler is handed
+    that projection and nothing else. check/views proves whether a state can provide what a handler
+    asks to read, and it is `admits` again with no new machinery. See
+    :internal-visibility-is-declared-and-not-automatic.
+    73 tests, 202 assertions, green — 71 unit and 2 ^:integration, so THE COMMIT GATE IS A REAL
+    GATE; clj-kondo clean; 35 public fns carry a :malli/schema and the instrument! count of exactly
+    35 confirms it better than a grep can. The integration suite is DOWN to two, and that is the
     right direction: `check/dot` made the graphviz-source test need no file, so it moved into the
     fast loop, leaving only what needs a real clock and a real `dot`. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
@@ -1205,6 +1319,39 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       transition fires IS dead code in that machine — so a parts library wants to be a MAP KEYED
       BY ID that each assembly selects from, and never a vector to concat wholesale. Whoever
       builds the agent workflows should know that on day one rather than day three."
+
+   :what-visibility-taught
+   "VERIFIED BY RUNNING on 2026-09-01, building both halves of
+    :internal-visibility-is-declared-and-not-automatic.
+    - THE BREAKING CHANGE COST ONE TEST, and measuring it before recommending it is what settled a
+      three-way design question that argument had not. Projecting the merge onto a node's declared
+      keys broke exactly one of 68 tests: an async fixture whose state was a bare [:map] while its
+      handler set :mark. Two others wanted the same correction on inspection — the `form` fixture
+      wrote :name and :email into a state that declared neither, so the runtime had been quietly
+      undoing what the fixture existed to demonstrate. THE GENERATIVE FIXTURES NEEDED NOTHING, which
+      was the surprise: gen-shape's handlers all answer {}, so there was never anything to drop.
+    - `views` IS `admits` AGAIN, with the view as TARGET and the source node's schema as PRODUCED,
+      and the four verdicts were checked before the check was written: a state with the key and more
+      is :yes, without it :no, with it at the wrong type :no, and WITH IT ONLY OPTIONALLY also :no —
+      which is the one that matters, a view a handler is handed being unable to rest on a maybe.
+      Two structural checks now come free off one subsumption function, which is the argument for
+      having written it at all.
+    - AND THE SOUNDNESS DEPENDENCY RAN THE OTHER WAY FROM THE DESIGN, found by asking what the check
+      would answer before building it: the READ half's check is only sound because the HOLD half
+      exists. A node's schema used to be a lower bound on what it held, so a key could arrive from
+      three transitions back and :no proved nothing. Reading was the interesting half and holding was
+      the one that had to land first.
+    - A VIEW COSTS NOTHING WHERE IT IS NOT DECLARED, which is what let this land in a release
+      candidate: a handler with no :sees keeps its single argument, so the arity is decided by the
+      event definition and nothing written before this learns that views exist.
+    - AND IT BROKE A SOUNDNESS CLAIM TWO ENTRIES AWAY, which is the finding worth most here: adding
+      a read made check/commutes UNSOUND, because it compared WRITE sets only. A pair whose writes
+      are {:total} and {:n} is disjoint while one of them READS :n, and the two orders answer
+      :total 2 and :total 18 — an order-dependent flake the check would have licensed. The
+      condition is now Bernstein's, and the lesson is the one this project keeps relearning: a new
+      capability is not local, and the place to look is whatever OTHER check reasoned about what
+      handlers could touch. Found by asking `does this actually solve the problem it was built
+      for`, not by a test that already existed."
 
    :what-nesting-taught
    "VERIFIED BY RUNNING on 2026-09-01, building {:machine <a shape>}.

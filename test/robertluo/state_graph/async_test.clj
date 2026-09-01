@@ -143,7 +143,10 @@
   ;; not serialised the fast event could overtake, and nothing takes from `events` while a
   ;; handler is still in flight.
   (let [sh (shape/shape
-            (shape/state :s [:map] {:initial true})
+            ;; :mark IS DECLARED, because a node holds what it declares and this one holds a
+            ;; mark. Under a bare [:map] the projection on entry would drop it — which is the
+            ;; whole point of projecting, and this fixture was simply under-declared before.
+            (shape/state :s [:map [:mark {:optional true} :keyword]] {:initial true})
             (shape/event :slow [:map] (fn [_] (d/future (Thread/sleep 150) {:mark :slow}))
                          [:map [:mark :keyword]])
             (shape/event :fast [:map] (constantly {:mark :fast}) [:map [:mark :keyword]])

@@ -38,13 +38,15 @@ Three definitions and no more.
 
 - A **state** is a node, shaped by a malli schema and **validated on enter**. Entering is
   the only moment a state's schema can be checked, and it is the moment a bad transition
-  becomes visible. The schema describes the state's own data; `:id` (which node it is in)
-  and `:instance` (which run it belongs to) are the machine's to write and are added for
-  you. Exactly one state is `{:initial true}`.
-- An **event** is shaped by a malli schema too, and it **carries its handler**. The handler
-  takes *the event alone* — never the state it is about to change — and answers a map that
-  is **merged into** the state. It may also declare that map's schema, which is what makes
-  the static check above possible.
+  becomes visible. A node **holds exactly what it declares**: the schema is not a lower
+  bound, it is the whole of the state's own data, and anything not named in it is dropped on
+  entry. `:id` (which node it is in) and `:instance` (which run it belongs to) are the
+  machine's to write and are added for you. Exactly one state is `{:initial true}`.
+- An **event** is shaped by a malli schema too, and it **carries its handler**. By default the
+  handler takes *the event alone* — nothing of the state it is about to change — and answers a
+  map that is **merged into** the state. It may also declare that map's schema, which is what
+  makes the static check above possible, and a `{:sees …}` **view** where it does need to read
+  the state. See below.
 - A **transition** is an edge: from a state, on an event, to a state. Two different events
   may join the same pair of states, so the shape is a multi-digraph.
 - A state may **nest a whole machine** — `{:machine sh}` — which is how a machine big enough
@@ -200,6 +202,58 @@ The limit, said plainly: **the escape is unconditional.** Nothing stops `:ship` 
 payment is half done, because that would be a guard and v1 has none. Deciding *when* is the
 producer's job — and the child's state is on every result, so a producer can see it.
 
+## Reading the state: a declared view
+
+A handler takes the event alone, which is what keeps it reusable across states. When it does
+need something from the state it is changing, the **event declares what it may see** — never
+the library, and never the whole state:
+
+```clojure
+(sg/event :ask [:map [:q :string]]
+          (fn [event seen] {:answer (llm (:goal seen) (:q event))})
+          [:map [:answer :string]]
+          {:sees [:map [:goal :string]]})
+```
+
+The handler is handed the state projected onto the view's keys and validated against it — so
+a state holding `{:goal "ship it" :token "s3cret"}` gives the handler `{:goal "ship it"}` and
+nothing else. **Declared on the event, not on the node**, which is what keeps the handler
+reusable: it names what it needs *by shape*, so it works in every state that satisfies the
+view. Without `:sees` the handler keeps its single argument.
+
+And it is **provable**. `problems` reports `:view-unavailable` when a state a handler reads
+cannot guarantee the view — including the case where the key is merely *optional* there,
+because a view cannot rest on a maybe:
+
+```clojure
+(sg/problems bad)
+;=> [{:from :a :event :go :problem :view-unavailable}]
+```
+
+That check is sound only because a node holds exactly what it declares. Two halves of one
+question: what a state *holds* bounds what anything inside can *see*, and the security
+property comes from the data not being there rather than from a rule saying don't look.
+
+### Accumulating
+
+A view is also how a machine accumulates, and the **policy stays ordinary code** — which is
+why there is no combining-key mechanism in the shape. Read the old value, answer the new one:
+
+```clojure
+(sg/event :say [:map [:text :string]]
+          (fn [event seen]
+            {:messages (vec (take-last 2 (conj (:messages seen) (:text event))))})
+          [:map [:messages [:vector :string]]]
+          {:sees [:map [:messages [:vector :string]]]})
+
+;; four :say events
+;=> {:id :talking :messages ["three" "four"]}
+```
+
+Cap it, summarise it, drop the oldest entry, keep everything — the handler decides, because it
+is a function. A counter that must see its own total is the same pattern with one key. What the
+*shape* decides is who may read what, and which nodes carry it at all.
+
 ## Two doors, one machine
 
 A shape compiles to an ordinary function of a state and an event. **The caller owns the
@@ -276,10 +330,15 @@ Said plainly, because each is a design decision and not an oversight.
   compiled step a lookup and every static check answerable. Branching is spelled as two
   different events, which pushes the decision onto whoever produces the event — and it is
   why a nested machine's escape is unconditional.
-- **No state-dependent update.** A handler sees only the event, which is what lets it be
-  reused across states and checked as an ordinary function. A total that must see the old
-  total is a query over history, not a field.
-- **A merge cannot remove a key.** A state that must drop a field is not expressible.
+- **State-dependent update must be declared.** By default a handler answers from the event
+  alone, which is what keeps it reusable. To compute from what the state already holds it
+  declares a `{:sees …}` view — so the dependence is visible in the shape, narrowed to the
+  keys named, and checkable. Two consequences: a state a view reads must *guarantee* those
+  keys, and a handler that reads can never be licensed to run concurrently with one that
+  writes what it read.
+- **A state cannot hand a key onward silently.** Since a node holds only what it declares,
+  data that should survive several states must be declared by each of them. Dropping a field
+  is free — declare one fewer — but carrying one is explicit.
 - **A handler may not raise another event.** With no internal events there is no queue to
   drain and no run-to-completion to implement; a cascade is the caller feeding the next
   event.
@@ -287,7 +346,9 @@ Said plainly, because each is a design decision and not an oversight.
   yours.
 - **Concurrency within one machine is proven but not taken.** `check/confluence` and
   `check/commuting` compute which pairs of pending events could safely be applied in
-  completion order; `sg/run` serialises always, and says so rather than pretending.
+  completion order — the diamond must close, and the patches must satisfy Bernstein's
+  conditions: neither writes what the other writes, and neither *reads* through a view what
+  the other writes. `sg/run` serialises always, and says so rather than pretending.
 
 ## The API
 

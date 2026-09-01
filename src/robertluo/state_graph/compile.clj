@@ -10,7 +10,8 @@
 
    Requires the shape and malli. It knows nothing of streams or databases."
   (:refer-clojure :exclude [compile])
-  (:require [robertluo.state-graph.shape :as shape]))
+  (:require [malli.util :as mu]
+            [robertluo.state-graph.shape :as shape]))
 
 (def State
   "A state is a map that says which node it is in, and optionally which RUN it belongs
@@ -88,8 +89,8 @@
   {:malli/schema [:=> [:cat shape/Shape] :map]}
   [sh]
   {:edges (into {}
-                (for [{:keys [from event to handler out schema]} (shape/transitions sh)]
-                  [[from event] {:to to :handler handler :out out
+                (for [{:keys [from event to handler out sees schema]} (shape/transitions sh)]
+                  [[from event] {:to to :handler handler :out out :sees sees
                                  :event-schema schema
                                  :enter-schema (shape/enter-schema sh to)}]))
    :machines (into {}
@@ -131,9 +132,10 @@
    and throw. That trap is recorded in AGENTS.md and this is the shape that avoids it."
   [sh instance data]
   (let [id (shape/initial-id sh)
-        child (shape/machine sh id)]
-    (conform! (shape/enter-schema sh id)
-              (cond-> (assoc data :id id)
+        child (shape/machine sh id)
+        schema (shape/enter-schema sh id)]
+    (conform! schema
+              (cond-> (-> (select-keys data (mu/keys schema)) (assoc :id id))
                 (some? instance) (assoc :instance instance)
                 child (assoc :sub (enter child nil {})))
               {:crossing :enter :to id})))
@@ -182,26 +184,44 @@
                  (fn [sub'] (assoc state :sub sub')))
 
            :else
-           (if-let [{:keys [to handler out event-schema enter-schema]}
+           (if-let [{:keys [to handler out sees event-schema enter-schema]}
                     (entry idx state event)]
              (let [ctx {:from (:id state) :event (:id event) :to to}]
                (conform! event-schema event (assoc ctx :crossing :event))
-               (then (handler event)
+               ;; A VIEW IS A SEAM AND IS CHECKED HERE TOO. The static check proves what it
+               ;; can from the schemas; this holds in production and gives the diagnosis
+               ;; `the state did not provide the view` rather than a nil inside a handler.
+               ;; A handler with no view declared keeps its one argument, so nothing that
+               ;; existed before this learns that views exist.
+               (then (if sees
+                       (handler event (conform! sees
+                                                (select-keys state (mu/keys sees))
+                                                (assoc ctx :crossing :sees)))
+                       (handler event))
                      (fn [answer]
                        ;; :out is validated only where it is declared. Its real job is the
                        ;; STATIC check; here it buys a better diagnosis — `the handler is
                        ;; wrong` rather than `the state is wrong` one line later.
                        (when out (conform! out answer (assoc ctx :crossing :out)))
-                       ;; :id, :instance AND :sub go on AFTER the merge. A handler cannot
-                       ;; move the machine sideways past the edge that decides where it
-                       ;; lands, cannot move it to another run, and cannot reach into a
+                       ;; A NODE HOLDS WHAT IT DECLARES AND NOTHING ELSE. The merge is
+                       ;; PROJECTED onto the keys of the target's enter-schema, so data
+                       ;; stops flowing through states that never mentioned it. That is
+                       ;; what bounds internal visibility BY ABSENCE — a handler cannot see
+                       ;; what the state it is changing does not hold — and it is what makes
+                       ;; the view check sound: a declared schema is now what a node HAS
+                       ;; rather than a lower bound on it. It also removes `a merge cannot
+                       ;; remove a key`: dropping a field is declaring one fewer.
+                       ;; The cost, said out loud: a bare [:map] node holds nothing but its
+                       ;; :id, so a state that carries data must say which.
+                       ;;
+                       ;; :id, :instance AND :sub go on AFTER the projection. A handler
+                       ;; cannot move the machine sideways past the edge that decides where
+                       ;; it lands, cannot move it to another run, and cannot reach into a
                        ;; nested machine. Identity is never a handler's to say.
-                       ;; :sub is SET where the target nests a machine and DROPPED where it
-                       ;; does not — a merge keeps every key, so a child left behind would
-                       ;; otherwise ride along into a state that never declared it.
                        (conform! enter-schema
                                  (let [sub (subs to)]
                                    (cond-> (-> (merge state answer)
+                                               (select-keys (mu/keys enter-schema))
                                                (assoc :id to)
                                                (into (select-keys state [:instance]))
                                                (dissoc :sub))

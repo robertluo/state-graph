@@ -344,9 +344,11 @@
 
 (deref (:done published) 5000 ::timeout)
 
-;; Note `:notes` still riding along in the published manuscript. A handler's answer is
-;; *merged*, and a merge cannot remove a key — a state that must drop a field is not
-;; expressible in v1. It is in the README's list of limits, and this is what it looks like.
+;; And note what the published manuscript does **not** carry: no `:reviewer`, no `:notes`
+;; from a review round three transitions back, no `:attempt` from the retry. A node holds
+;; exactly what its schema declares and the rest is dropped on entry — so `:published`, which
+;; declares a title, an author and a url, holds a title, an author and a url. That is the
+;; subject of the next section.
 
 ;; ## Nesting: a machine in a node
 ;;
@@ -462,6 +464,101 @@
 ;; and the child's state is on every result, so a producer can see exactly what it needs to
 ;; decide. A door left open, not designed: a node could declare where to go when its child
 ;; finishes, which is the statechart done-transition and needs no event queue here.
+
+;; ## Reading the state, and what a state holds
+;;
+;; Two halves of one question, and it is the question that decides whether a machine is safe to
+;; hand a workflow: **what may something inside the machine see?**
+;;
+;; The first half is what a state *holds*. A node holds exactly what it declares — the merge is
+;; projected onto its schema's keys on the way in — so data stops flowing through states that
+;; never mentioned it:
+
+(def flow
+  (sg/shape
+   (sg/state :one [:map [:x :int]] {:initial true})
+   (sg/state :two [:map [:y :int]] {:final true})
+   (sg/event :next [:map] (constantly {:y 1}) [:map [:y :int]])
+   (sg/transition :one :next :two)))
+
+[(sg/initial flow {:x 7 :undeclared "dropped at the door"})
+ (reduce (sg/compile flow) (sg/initial flow {:x 7}) [{:id :next}])]
+
+;; `:x` came that far and no further, because `:two` never mentioned it. Dropping a field is
+;; free — declare one fewer — and carrying one across several states is explicit, which is the
+;; cost side of the same coin.
+;;
+;; The second half is what a handler may *read*. It takes the event alone, which is what keeps
+;; it reusable; when it genuinely needs something from the state it is changing, **the event
+;; declares what it may see**:
+
+(def briefing
+  (sg/shape
+   (sg/state :briefed  [:map [:goal :string] [:token :string]] {:initial true})
+   (sg/state :answered [:map [:goal :string] [:token :string] [:answer :string]] {:final true})
+
+   (sg/event :ask [:map [:q :string]]
+             (fn [event seen] {:answer (str "asked " (pr-str seen) " about " (:q event))})
+             [:map [:answer :string]]
+             {:sees [:map [:goal :string]]})
+
+   (sg/transition :briefed :ask :answered)))
+
+(reduce (sg/compile briefing)
+        (sg/initial briefing {:goal "ship it" :token "s3cret"})
+        [{:id :ask :q "how"}])
+
+;; **The token never reached the handler.** It is right there in the state, and the handler was
+;; handed `{:goal "ship it"}` — the state projected onto the view and validated against it.
+;; Visibility from the inside is declared, never automatic, and narrowed to the keys named.
+;;
+;; Declared on the *event* rather than the node, which is what keeps the handler reusable: it
+;; names what it needs **by shape**, so it works in any state that satisfies the view. And it is
+;; provable — a handler asking to read what a state cannot guarantee is a fault found before
+;; anything runs, including the case where the key is merely optional there:
+
+(sg/problems
+ (sg/shape (sg/state :a [:map [:goal {:optional true} :string]] {:initial true})
+           (sg/state :b [:map] {:final true})
+           (sg/event :go [:map] (fn [_ _seen] {}) [:map] {:sees [:map [:goal :string]]})
+           (sg/transition :a :go :b)))
+
+;; A view cannot rest on a maybe. And that check is sound only *because* a node holds what it
+;; declares: while a schema was a lower bound on the state, a key could arrive from three
+;; transitions back and `:no` would have proven nothing. The two halves hold each other up.
+;;
+;; ### Accumulating, with a policy
+;;
+;; A view is also how a machine accumulates something — and the policy stays ordinary code,
+;; which a `conj` on the schema could never have expressed. Read the old value, answer the new
+;; one, and keep the last two:
+
+(def convo
+  (sg/shape
+   (sg/state :talking [:map [:messages [:vector :string]]] {:initial true})
+   (sg/state :hung-up [:map [:messages [:vector :string]]] {:final true})
+
+   (sg/event :say [:map [:text :string]]
+             (fn [event seen]
+               {:messages (vec (take-last 2 (conj (:messages seen) (:text event))))})
+             [:map [:messages [:vector :string]]]
+             {:sees [:map [:messages [:vector :string]]]})
+   (sg/event :bye [:map] (constantly {}) [:map])
+
+   (sg/transition :talking :say :talking)
+   (sg/transition :talking :bye :hung-up)))
+
+(reduce (sg/compile convo) (sg/initial convo {:messages []})
+        (for [t ["one" "two" "three" "four"]] {:id :say :text t}))
+
+;; Cap it, summarise it, drop the oldest tool output, keep everything — the handler decides,
+;; because it is a function. What the *shape* decides is who may read what, and which nodes
+;; carry it at all.
+;;
+;; One consequence worth knowing if you ever take the concurrency licence: a handler that reads
+;; can have a **stale patch**. `check/confluence` accounts for it — two pending events commute
+;; only if neither writes what the other writes and neither reads what the other writes — so a
+;; pair like this one is never licensed to run in completion order.
 
 ;; ## Beneath the facade
 ;;
