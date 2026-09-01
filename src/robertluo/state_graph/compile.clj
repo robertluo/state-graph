@@ -15,8 +15,14 @@
 (def State
   "A state is a map that says which node it is in, and optionally which RUN it belongs
    to. The node cannot live only in the graph: the step function has to know whose
-   out-edges to search."
-  [:map [:id shape/Id] [:instance {:optional true} shape/Instance]])
+   out-edges to search.
+
+   :sub IS A NESTED MACHINE'S OWN STATE, present exactly while the node it is in declares
+   one. Machinery's, like :id — written when the node is entered, dropped when it is left,
+   and never a handler's to touch."
+  [:map [:id shape/Id]
+        [:instance {:optional true} shape/Instance]
+        [:sub {:optional true} [:ref #'State]]])
 
 (def Event
   "An event says its own name for the same reason, and the step matches an edge on it.
@@ -74,26 +80,33 @@
     value))
 
 (defn index
-  "{[state-id event-id] -> what the step needs}, computed once. This is what
-   determinism buys: a LOOKUP, where a guard would have made it an ordered search."
+  "Everything the step looks up, computed once — :edges keyed by [state-id event-id],
+   which is what determinism buys, and :machines keyed by the node that nests one.
+
+   RECURSIVE, because nesting is: a child's own index sits under its parent's node, so a
+   step or an `admits?` can descend without recomputing anything."
   {:malli/schema [:=> [:cat shape/Shape] :map]}
   [sh]
-  (into {}
-        (for [{:keys [from event to handler out schema]} (shape/transitions sh)]
-          [[from event] {:to to :handler handler :out out
-                         :event-schema schema
-                         :enter-schema (shape/enter-schema sh to)}])))
+  {:edges (into {}
+                (for [{:keys [from event to handler out schema]} (shape/transitions sh)]
+                  [[from event] {:to to :handler handler :out out
+                                 :event-schema schema
+                                 :enter-schema (shape/enter-schema sh to)}]))
+   :machines (into {}
+                   (for [[id child] (shape/machines sh)]
+                     [id {:shape child :index (index child)}]))})
 
 (defn- entry
   "What the step needs for this state and this event, or nil where no edge admits it.
    ONE definition of the lookup, because `admits?` publishes the same answer and two
    readings of it could drift into disagreeing."
   [idx state event]
-  (idx [(:id state) (:id event)]))
+  (get-in idx [:edges [(:id state) (:id event)]]))
 
 (defn admits?
-  "Whether this state has a transition for this event — the step's own lookup, answered
-   WITHOUT taking the step.
+  "Whether this machine has a transition for this event HERE — the step's own lookup,
+   answered WITHOUT taking the step, and DESCENDING into a nested machine exactly as the
+   step does.
 
    WHAT IT IS FOR: a layer above needs to report whether an event fired, and the step
    cannot tell it. An event nobody handled answers the state UNCHANGED, and a fired
@@ -104,7 +117,26 @@
    public for exactly this reason."
   {:malli/schema [:=> [:cat :map State Event] :boolean]}
   [idx state event]
-  (some? (entry idx state event)))
+  (boolean
+   (or (entry idx state event)
+       (when-let [m (get-in idx [:machines (:id state)])]
+         (admits? (:index m) (:sub state) event)))))
+
+(defn- enter
+  "The state a machine starts in, seeded with a nested machine's own first state wherever
+   the node it starts in declares one. RECURSIVE, so nesting goes as deep as the shapes do.
+
+   PRIVATE, and both arities of `initial` call it: a public 2-arity delegating to a public
+   3-arity goes through the INSTRUMENTED var, which would check this nil against Instance
+   and throw. That trap is recorded in AGENTS.md and this is the shape that avoids it."
+  [sh instance data]
+  (let [id (shape/initial-id sh)
+        child (shape/machine sh id)]
+    (conform! (shape/enter-schema sh id)
+              (cond-> (assoc data :id id)
+                (some? instance) (assoc :instance instance)
+                child (assoc :sub (enter child nil {})))
+              {:crossing :enter :to id})))
 
 (defn compile
   "The shape as an ordinary Clojure function of a state and an event.
@@ -128,28 +160,54 @@
   ([sh] (compile sh nil))
   ([sh context]
    (let [{:keys [then pure ignored]} (merge synchronous context)
-         idx (index sh)]
+         idx  (index sh)
+         ;; Every nested machine compiled ONCE, with the SAME Context, so a child may
+         ;; answer a deferred wherever its parent may. `enter` is what makes its first
+         ;; state, and it is computed here because entering a node is not the moment to
+         ;; discover that a child cannot start.
+         subs (into {}
+                    (for [[id {:keys [shape index]}] (:machines idx)]
+                      [id {:step (compile shape context)
+                           :index index
+                           :first (enter shape nil {})}]))]
      (fn step [state event]
-       (if-let [{:keys [to handler out event-schema enter-schema]}
-                (entry idx state event)]
-         (let [ctx {:from (:id state) :event (:id event) :to to}]
-           (conform! event-schema event (assoc ctx :crossing :event))
-           (then (handler event)
-                 (fn [answer]
-                   ;; :out is validated only where it is declared. Its real job is the
-                   ;; STATIC check; here it buys a better diagnosis — `the handler is
-                   ;; wrong` rather than `the state is wrong` one line later.
-                   (when out (conform! out answer (assoc ctx :crossing :out)))
-                   ;; :id AND :instance go on AFTER the merge. A handler cannot move the
-                   ;; machine sideways past the edge that decides where it lands, and it
-                   ;; cannot move it to another run either. Identity is never a
-                   ;; handler's to say.
-                   (conform! enter-schema
-                             (-> (merge state answer)
-                                 (assoc :id to)
-                                 (into (select-keys state [:instance])))
-                             (assoc ctx :crossing :enter)))))
-         (pure (ignored state event)))))))
+       (let [m (subs (:id state))]
+         (cond
+           ;; INNER FIRST. A nested machine gets every event before this node's own edges
+           ;; do, which is what makes the parent's edges the ESCAPE and needs no guard: a
+           ;; child that has finished admits nothing, so the next event falls straight
+           ;; through to here.
+           (and m (admits? (:index m) (:sub state) event))
+           (then ((:step m) (:sub state) event)
+                 (fn [sub'] (assoc state :sub sub')))
+
+           :else
+           (if-let [{:keys [to handler out event-schema enter-schema]}
+                    (entry idx state event)]
+             (let [ctx {:from (:id state) :event (:id event) :to to}]
+               (conform! event-schema event (assoc ctx :crossing :event))
+               (then (handler event)
+                     (fn [answer]
+                       ;; :out is validated only where it is declared. Its real job is the
+                       ;; STATIC check; here it buys a better diagnosis — `the handler is
+                       ;; wrong` rather than `the state is wrong` one line later.
+                       (when out (conform! out answer (assoc ctx :crossing :out)))
+                       ;; :id, :instance AND :sub go on AFTER the merge. A handler cannot
+                       ;; move the machine sideways past the edge that decides where it
+                       ;; lands, cannot move it to another run, and cannot reach into a
+                       ;; nested machine. Identity is never a handler's to say.
+                       ;; :sub is SET where the target nests a machine and DROPPED where it
+                       ;; does not — a merge keeps every key, so a child left behind would
+                       ;; otherwise ride along into a state that never declared it.
+                       (conform! enter-schema
+                                 (let [sub (subs to)]
+                                   (cond-> (-> (merge state answer)
+                                               (assoc :id to)
+                                               (into (select-keys state [:instance]))
+                                               (dissoc :sub))
+                                     sub (assoc :sub (:first sub))))
+                                 (assoc ctx :crossing :enter)))))
+             (pure (ignored state event)))))))))
 
 (defn initial
   "The first state, ENTERED THROUGH THE SAME VALIDATION as every other one. The shape
@@ -169,10 +227,5 @@
    is checked on every entry rather than once at the door."
   {:malli/schema [:function [:=> [:cat shape/Shape :map] State]
                             [:=> [:cat shape/Shape [:maybe shape/Instance] :map] State]]}
-  ([sh data] (initial sh nil data))
-  ([sh instance data]
-   (let [id (shape/initial-id sh)]
-     (conform! (shape/enter-schema sh id)
-               (cond-> (assoc data :id id)
-                 (some? instance) (assoc :instance instance))
-               {:crossing :enter :to id}))))
+  ([sh data] (enter sh nil data))
+  ([sh instance data] (enter sh instance data)))

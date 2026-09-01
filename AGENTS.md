@@ -99,6 +99,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     and streams — and a STREAM has a second obligation the rule does not cover: a deref of a
     machine that never resolves hangs the suite, so every deref in a stream test is BOUNDED"
    "COMMIT GATE: clojure -M:dev:test integration passes. The fast suite is for every save"
+   "EDITING THIS FILE BY STRING REPLACEMENT? ANCHOR ON A KEY *AND ITS OPENING QUOTE*. A bare
+    `:some-key` matches its own PROSE REFERENCES, of which every decision here has several, and
+    an indented reference contains the same characters as a top-level key — so a replacement
+    aimed at an entry lands INSIDE another entry's string, silently, and the file stops
+    parsing. This cost two repairs on 2026-09-01 alone, both caught by the edn check below and
+    neither visible to a bracket balance."
    "THIS FILE IS DATA, SO CHECK IT BY PARSING IT. An unterminated string is INVISIBLE to a bracket
     balance — it shifts which quotes pair with which and leaves every { and } matched — so a
     balance check passes a file that no reader can read. Two entries were added with no closing
@@ -138,6 +144,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     robertluo.state-graph.shape    — THE BOTTOM: the graph itself. Pure data plus constructors,
                                      ubergraph underneath, the malli schemas of a shape, and the
                                      REFERENTIAL checks — the ones answerable from the parts alone.
+                                     A node may carry a whole SHAPE as its :machine, so the type
+                                     is recursive and every layer above recurses with it.
                                      Requires ubergraph and malli only
 
     The default sits BELOW the facade rather than beside it because of the nesting rule — a
@@ -279,7 +287,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
 
    :a-handler-never-sees-the-state
    "DECIDED 2026-08-30, by the author, and it is the sharpest decision here: a handler takes THE
-    EVENT ALONE — (handler event) — and never the state it is about to change. The event is a map
+    EVENT ALONE — (handler event) — and never the state it is about to change.
+    - WHAT IT DOES NOT FORBID, added 2026-09-01 when nesting was built and a reader will
+      otherwise think it does: THE STEP may depend on the state as much as it likes, and
+      already does — the edge lookup, the merge, :id and :instance written afterwards. So a
+      NESTED machine, whose child step needs the child's current state, sits inside the
+      compiler and not inside a handler. See :a-machine-can-nest-in-a-node. The event is a map
     and may carry whatever data the change needs; what it may not do is reach into the state.
     - THE REASON IS DECOUPLING: one handler serves many events and many source states, and states
       and events then evolve independently. Reuse is the visible payoff.
@@ -700,6 +713,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       the library exists, and a caller who minds requires robertluo.state-graph.compile directly —
       the same symmetry the batteries have, where the facade is the convenience and the namespaces
       are the truth.
+    - NESTING ADDED NOTHING HERE, 2026-09-01, and that is worth recording as a check on the
+      surface: a machine inside a node is an OPTION ON `state`, so the facade is still ten
+      functions. A feature that needs no new door is a feature that fitted.
     - WHAT WAS TURNED DOWN: a `fold` doing the whole reduction in one call. It gives strictly LESS
       than `compile` — a step goes in a transducer and a fold does not — while hiding the thing the
       README names as a feature."
@@ -734,6 +750,53 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - THE COST, said out loud: :states is no longer a stream of states, so a consumer who wants only
       states writes (map :state). That is the cheaper half of the trade, and it is paid by the
       consumer who needs less."
+
+   :a-machine-can-nest-in-a-node
+   "DECIDED AND BUILT 2026-09-01, at the author's asking, and it is the answer to `a state
+    machine is for complex problems`: a node may carry {:machine <a shape>}, and while the
+    parent sits there that child runs inside it. Nine states in one graph is about where one
+    graph stops being readable; nesting keeps every machine the size a person can hold.
+    - IT DOES NOT BREAK :a-handler-never-sees-the-state, and this is the whole reason it was
+      cheap. That rule constrains HANDLERS. The step is state-dependent all over already —
+      it looks the edge up by (:id state), it merges into the state, it writes :id and
+      :instance afterwards — so A CHILD'S STEP BELONGS TO THE COMPILER, exactly as :id does.
+      A handler still only ever sees the event.
+    - INNER FIRST. The child gets every event before the node's own edges do, so the parent's
+      edges are the ESCAPE. The consequence is the mechanism: THE CHILD'S OWN VOCABULARY
+      DECIDES WHO HANDLES AN EVENT — :authorize is the payment's word and the order never
+      sees it; :cancel is not, so it escapes at once. Nothing had to be declared for that.
+    - A FINISHED CHILD STOPS COMPETING, and this is what makes nesting cost the design
+      nothing. A final state admits nothing, so once the child is done every later event falls
+      straight through to the parent. NO GUARDS, no done-event, no internal queue and no
+      run-to-completion — v1's own constraints turned out to give correct hierarchical
+      semantics rather than standing in their way.
+    - :sub IS MACHINERY'S, like :id and :instance. Seeded when the node is entered, DROPPED
+      when it is left — a merge keeps every key, so a child left behind would ride into a
+      state that never declared it — and RESTARTED when the node is re-entered, entering being
+      entering. A handler answering {:sub ...} is overwritten, and a state DECLARING :sub is a
+      :reserved-declared fault.
+    - A CHILD MUST BE ABLE TO START, checked at construction. Entering a node with a machine
+      enters the child at its own initial with NO data, so a child whose first state insists on
+      some could never begin: :machine-cannot-start, and it is REFERENTIAL, answerable from the
+      parts, so a nesting that cannot begin is refused before it exists.
+    - THE CHECKS RECURSE FOR FREE because a child is an ordinary shape and every structural
+      check is about ONE graph. Faults are reported :within [<host node> ...], a PATH because
+      nesting nests. And there is no cross-boundary subsumption question at all: the child's
+      slice is written only by the child's step, so nothing a parent handler declares can
+      touch it.
+    - NESTING CANNOT BE CIRCULAR and needs no check to say so: a shape is an immutable value
+      built out of already-built children, so none can contain itself.
+    - THE COST, said out loud: THE ESCAPE IS UNCONDITIONAL. Nothing stops the parent leaving
+      while the child is half done, because `only when the child has finished` is a GUARD and
+      :v1-is-deterministic has none. Deciding when is the producer's job — the same answer v1
+      gives to branching — and the child's state is on every result, so a producer can see what
+      it needs. Turned down deliberately: making the parent's edges wait for a final child,
+      which would have made ABORT inexpressible, and abort is the commoner need.
+    - THE DOOR, NAMED AND NOT DESIGNED: a node could declare where to go when its child
+      FINISHES — {:machine sh :done :shipped} — which is the statechart done-transition and
+      needs no event queue here, being a deterministic continuation inside one step rather than
+      an event. It is the same lean as :a-handler-causes-nothing (the state raises, not the
+      handler). The bar is a real shape asking for it twice."
 
    :nothing-is-persisted-here
    "DECIDED 2026-09-01, by the author. THIS LIBRARY STORES NOTHING: it outputs what happened, and
@@ -804,9 +867,14 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     :the-output-is-a-transition-and-not-a-state and :nothing-is-persisted-here.
     THE STORE IS NOT COMING. datahike is out of deps.edn and robertluo.state-graph.store is out of
     :layering; neither was ever built.
-    56 tests, 175 assertions, green — 54 unit and 2 ^:integration, so THE COMMIT GATE IS A REAL
-    GATE; clj-kondo clean; 32 public fns carry a :malli/schema and the instrument! count of exactly
-    32 confirms it better than a grep can. The integration suite is DOWN to two, and that is the
+    AND A MACHINE MAY NEST IN A NODE, 2026-09-01, the last thing the author asked for and the
+    answer to `a state machine is for complex problems`: {:machine <a shape>} on a state, the
+    child taking every event first and the parent's edges being the escape. It needed no new
+    rules — see :a-machine-can-nest-in-a-node — and no new facade function, being an option on
+    `state`.
+    68 tests, 193 assertions, green — 66 unit and 2 ^:integration, so THE COMMIT GATE IS A REAL
+    GATE; clj-kondo clean; 34 public fns carry a :malli/schema and the instrument! count of exactly
+    34 confirms it better than a grep can. The integration suite is DOWN to two, and that is the
     right direction: `check/dot` made the graphviz-source test need no file, so it moved into the
     fast loop, leaving only what needs a real clock and a real `dot`. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
@@ -1079,6 +1147,38 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       :show/:browse true. `:render true` implies show, serve, browse and live-reload all false,
       which is what makes `clojure -X:notebook` headless. :exec-fn scicloj.clay.v2.api/make! with
       :exec-args is why the alias needs no build namespace and no extra file."
+
+   :what-nesting-taught
+   "VERIFIED BY RUNNING on 2026-09-01, building {:machine <a shape>}.
+    - THE SUBSUMPTION CHECK HAD TO LEARN ABOUT :sub, and until it did, nesting was broken in a
+      way only the check could see: `produced` composes the source's schema, the declared :out
+      and then the target's :id, and a nesting target's enter-schema REQUIRES :sub — which no
+      handler may write and the step assocs on entry. So every edge into a nested node was
+      condemned :target-refuses. Found by running the checks on the first nested shape ever
+      built, one minute after it worked. THE LESSON IS THE ONE THE ENTRY ALREADY STATED: what
+      the check composes must be what compile composes, and every key the MACHINERY writes has
+      to appear in both places or the check condemns correct shapes.
+    - GRAPHVIZ CLUSTERS ARE NOT REACHABLE THROUGH UBERGRAPH, so a child is not drawn inside its
+      parent. viz-graph builds its own dorothy element list out of nodes and edges, with no hook
+      for a subgraph; the alternatives were generating the dot ourselves — which means copying
+      ubergraph's private dotid and sanitize-attrs — or rewriting the child's dot to prefix
+      every node id, which is a small compiler and a fragile one. What was done instead: the
+      parent MARKS the node (⊞ n states) and the child is asked for its own picture. Two
+      pictures, and the parent says where to look.
+    - THE ORDERING OF A NAMESPACE MATTERS MORE THAN IT LOOKS. `Shape` had to move ABOVE StateDef
+      once a node could hold one — a [:ref #'Shape] would have worked and a plain reference is
+      better — and the referential nesting check needs `enter-schema` and `initial-id`, which
+      live in the reading section BELOW it. Declared rather than moved, and deliberately not
+      reimplemented: what the check asks has to be what runs.
+    - THE GENERATIVE PROPERTY EXTENDED WITHOUT AN ARGUMENT, which is a good sign for the design:
+      nest one generated shape into a node of another and assert that the parent lands in one of
+      ITS nodes and the child in one of the CHILD'S. The two share an event vocabulary — gen-shape
+      names events :e0..:e3 — so the child shadows the parent constantly, which is the
+      interesting half rather than an accident.
+    - AND CLOJURE'S OWN DEREFABLES PROVED THE Context COMPOSES ACROSS THE BOUNDARY, with no
+      manifold on the classpath of the test: a child handler answering a `delay` is dereferenced
+      by the synchronous `then` through two levels of nesting. Same trick as
+      :what-the-handler-move-taught, one layer deeper."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is

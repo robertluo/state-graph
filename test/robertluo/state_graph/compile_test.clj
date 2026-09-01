@@ -191,3 +191,122 @@
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :enter (:crossing (ex-data e))))
         (is (= {:id :b :n "seven"} (:value (ex-data e))))))))
+
+;;; ---------------------------------------------------------------- nesting
+
+(defn- child []
+  (shape/shape
+   (shape/state :unpaid     [:map]                 {:initial true})
+   (shape/state :authorized [:map [:auth :string]])
+   (shape/state :captured   [:map [:auth :string]] {:final true})
+   (shape/event :authorize [:map [:auth :string]] (fn [e] {:auth (:auth e)}) [:map [:auth :string]])
+   (shape/event :capture   [:map]                 (constantly {})           [:map])
+   (shape/transition :unpaid     :authorize :authorized)
+   (shape/transition :authorized :capture    :captured)))
+
+(defn- parent []
+  (shape/shape
+   (shape/state :cart      [:map] {:initial true})
+   (shape/state :paying    [:map] {:machine (child)})
+   (shape/state :shipped   [:map] {:final true})
+   (shape/state :cancelled [:map] {:final true})
+   ;; both handlers TRY TO WRITE :sub, and neither may
+   (shape/event :checkout [:map] (constantly {:sub {:id :hacked}}) [:map])
+   (shape/event :ship     [:map] (constantly {:sub {:id :hacked}}) [:map])
+   (shape/event :cancel   [:map] (constantly {})                   [:map])
+   (shape/transition :cart      :checkout :paying)
+   (shape/transition :paying    :checkout :paying)
+   (shape/transition :paying    :ship     :shipped)
+   (shape/transition :paying    :cancel   :cancelled)))
+
+(deftest a-nested-machine-gets-the-event-first
+  ;; INNER FIRST, and the parent stays where it is while its child moves.
+  (let [g (parent)
+        step (c/compile g)]
+    (is (= [[:cart nil] [:paying :unpaid] [:paying :authorized] [:paying :captured] [:shipped nil]]
+           (mapv (juxt :id (comp :id :sub))
+                 (reductions step (c/initial g {})
+                             [{:id :checkout} {:id :authorize :auth "tok_9"}
+                              {:id :capture} {:id :ship}])))
+        "two events moved the child, and only the third moved the parent")))
+
+(deftest a-child-shields-only-what-it-knows
+  ;; The mechanism that makes the parent's edges the ESCAPE and needs no guard: whether an
+  ;; event reaches the parent is decided by the CHILD'S OWN VOCABULARY.
+  (let [g (parent)
+        step (c/compile g)
+        paying (step (c/initial g {}) {:id :checkout})]
+    (is (= :cancelled (:id (step paying {:id :cancel})))
+        ":cancel is not the child's word, so it escapes at once")
+    (is (= [:paying :authorized] ((juxt :id (comp :id :sub)) (step paying {:id :authorize :auth "t"})))
+        ":authorize is the child's word, so the parent never sees it")))
+
+(deftest a-finished-child-stops-competing
+  ;; The property the whole design rests on: no done-event, no guard, no queue — a final
+  ;; state admits nothing, so every later event falls through to the parent by itself.
+  (let [g (parent)
+        step (c/compile g)
+        captured (reduce step (c/initial g {})
+                         [{:id :checkout} {:id :authorize :auth "t"} {:id :capture}])]
+    (is (= :captured (:id (:sub captured))))
+    (is (= captured (step captured {:id :authorize :auth "again"}))
+        "the child is done and answers unchanged")
+    (is (= :shipped (:id (step captured {:id :ship}))))))
+
+(deftest the-machinery-owns-sub-and-not-the-handler
+  (let [g (parent)
+        step (c/compile g)
+        paying (step (c/initial g {}) {:id :checkout})
+        moved (step paying {:id :authorize :auth "t"})]
+    (is (= {:id :unpaid} (:sub paying))
+        "the handler answered {:sub {:id :hacked}} and was overwritten with the child's first state")
+    (is (= {:id :unpaid} (:sub (step moved {:id :checkout})))
+        "re-entering the node RESTARTS the child, entering being entering")
+    (is (= {:id :shipped} (step moved {:id :ship}))
+        "and leaving drops it — a merge keeps every key, so a child left behind would ride along")))
+
+(deftest the-first-state-seeds-a-nested-machine
+  (let [g (shape/shape
+           (shape/state :only [:map] {:initial true :machine (child)})
+           (shape/state :done [:map] {:final true})
+           (shape/event :fin [:map] (constantly {}) [:map])
+           (shape/transition :only :fin :done))]
+    (is (= {:id :only :sub {:id :unpaid}} (c/initial g {}))
+        "a run starting in a nesting node starts its child too")))
+
+(deftest a-nested-handler-may-answer-later
+  ;; The Context composes ACROSS the nesting boundary: the child is compiled with the same
+  ;; one, so a child handler may answer a derefable wherever a parent's may. Asserted with
+  ;; clojure's own delay, so this needs no manifold to prove.
+  (let [g (shape/shape
+           (shape/state :out [:map] {:initial true})
+           (shape/state :in  [:map] {:machine (shape/shape
+                                               (shape/state :a [:map] {:initial true})
+                                               (shape/state :b [:map [:n :int]] {:final true})
+                                               (shape/event :go [:map] (fn [_] (delay {:n 7}))
+                                                            [:map [:n :int]])
+                                               (shape/transition :a :go :b))})
+           (shape/event :enter [:map] (constantly {}) [:map])
+           (shape/transition :out :enter :in))
+        step (c/compile g)]
+    (is (= {:id :in :sub {:id :b :n 7}}
+           (step (step (c/initial g {}) {:id :enter}) {:id :go})))))
+
+(defspec nesting-keeps-every-state-a-node-the-graph-admits 60
+  ;; The structural invariant, extended through the boundary: whatever arrives, the parent is
+  ;; in one of ITS nodes and its child — when there is one — is in one of the CHILD'S. The
+  ;; generated shapes share an event vocabulary, so the child shadows the parent constantly,
+  ;; which is the interesting half.
+  (prop/for-all [outer ts/gen-shape
+                 inner ts/gen-shape
+                 events (gen/vector ts/gen-event 0 20)]
+    (let [kid (apply shape/shape inner)
+          host (last (ts/parts-of :state outer))
+          g (apply shape/shape (map (fn [p] (if (= p host) (assoc p :machine kid) p)) outer))
+          nodes (set (shape/states g))
+          kid-nodes (set (shape/states kid))
+          end (reduce (c/compile g) (c/initial g {}) events)]
+      (and (contains? nodes (:id end))
+           (if (:sub end)
+             (contains? kid-nodes (:id (:sub end)))
+             (nil? (shape/machine g (:id end))))))))

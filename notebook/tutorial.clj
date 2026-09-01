@@ -348,6 +348,121 @@
 ;; *merged*, and a merge cannot remove a key — a state that must drop a field is not
 ;; expressible in v1. It is in the README's list of limits, and this is what it looks like.
 
+;; ## Nesting: a machine in a node
+;;
+;; The pipeline above is nine states in one graph, and that is roughly where one graph stops
+;; being readable. The answer is not a bigger graph: a state can carry **a whole machine of
+;; its own**, and then each machine stays the size a person can hold.
+;;
+;; Here is a payment, on its own, as an ordinary machine:
+
+(def payment
+  (sg/shape
+   (sg/state :unpaid     [:map]                 {:initial true})
+   (sg/state :authorized [:map [:auth :string]])
+   (sg/state :captured   [:map [:auth :string]] {:final true})
+
+   (sg/event :authorize [:map [:auth :string]] (fn [e] {:auth (:auth e)}) [:map [:auth :string]])
+   (sg/event :capture   [:map]                 (constantly {})           [:map])
+
+   (sg/transition :unpaid     :authorize :authorized)
+   (sg/transition :authorized :capture    :captured)))
+
+(picture payment)
+
+;; And an order that *contains* it. One option on one state is the whole of the syntax:
+
+(def order
+  (sg/shape
+   (sg/state :cart      [:map] {:initial true})
+   (sg/state :paying    [:map] {:machine payment})
+   (sg/state :shipped   [:map] {:final true})
+   (sg/state :cancelled [:map] {:final true})
+
+   (sg/event :checkout [:map] (constantly {}) [:map])
+   (sg/event :ship     [:map] (constantly {}) [:map])
+   (sg/event :cancel   [:map] (constantly {}) [:map])
+
+   (sg/transition :cart   :checkout :paying)
+   (sg/transition :paying :ship     :shipped)
+   (sg/transition :paying :cancel   :cancelled)))
+
+;; `:paying ⊞ 3 states` is the marker for a node that nests one. The child is not drawn
+;; inside its parent — graphviz clusters are not reachable through ubergraph — so a nested
+;; machine is two pictures, and the parent's says where to look:
+
+(picture order)
+
+;; Now watch one order run. The parent's `:id` and the child's sit side by side:
+
+(def order-step (sg/compile order))
+
+(kind/table
+ {:column-names [:event :order :payment]
+  :row-vectors (let [events [{:id :checkout}
+                             {:id :authorize :auth "tok_9"}
+                             {:id :capture}
+                             {:id :ship}]]
+                 (map (fn [e s] [(:id e) (:id s) (-> s :sub :id)])
+                      (cons nil events)
+                      (reductions order-step (sg/initial order {}) events)))})
+
+;; **Inner first.** A nested machine gets every event before the node's own edges do — so
+;; `:authorize` and `:capture` moved the payment while the order stood still in `:paying`,
+;; and only `:ship` moved the order.
+;;
+;; Which means **the child's own vocabulary decides who handles an event**. `:authorize` is
+;; the payment's word, so the order never sees it. `:cancel` is not, so it escapes at once:
+
+(mapv (juxt :id (comp :id :sub))
+      (reductions order-step (sg/initial order {}) [{:id :checkout} {:id :cancel}]))
+
+;; **A finished child stops competing**, and this is the part that makes nesting cost the
+;; design nothing at all. A final state admits nothing — you saw that at the top of this page
+;; — so once the payment is `:captured` every later event falls straight through to the
+;; order. No guards, no done-event, no queue, no run-to-completion:
+
+(let [captured (reduce order-step (sg/initial order {})
+                       [{:id :checkout} {:id :authorize :auth "tok_9"} {:id :capture}])]
+  {:child-is-done (:sub captured)
+   :and-ignores-its-own-events (= captured (order-step captured {:id :authorize :auth "again"}))
+   :so-the-parent-gets-the-next-one (:id (order-step captured {:id :ship}))})
+
+;; `:sub` belongs to the machinery, exactly as `:id` and `:instance` do: it is seeded when the
+;; node is entered, dropped on the way out, restarted if the node is re-entered, and a handler
+;; that answers `{:sub ...}` is simply overwritten. And a child is an ordinary shape, so the
+;; static checks recurse into it and report its faults under the node that hosts it:
+
+(sg/problems
+ (sg/shape (sg/state :p [:map] {:initial true :machine (sg/shape
+                                                       (sg/state :i [:map] {:initial true})
+                                                       (sg/state :a [:map])
+                                                       (sg/state :b [:map])
+                                                       (sg/event :x [:map] (constantly {}) [:map])
+                                                       (sg/event :y [:map] (constantly {}) [:map])
+                                                       (sg/transition :i :x :a)
+                                                       (sg/transition :a :y :b)
+                                                       (sg/transition :b :x :a))})
+           (sg/state :q [:map] {:final true})
+           (sg/event :e [:map] (constantly {}) [:map])
+           (sg/transition :p :e :q)))
+
+;; A child that can never finish is a fault of the child, reported `:within [:p]` — a path,
+;; because nesting nests.
+;;
+;; ### The limit, said plainly
+;;
+;; **The escape is unconditional.** Nothing stops `:ship` firing while the payment is half
+;; done, because that would be a guard and v1 has none:
+
+(mapv (juxt :id (comp :id :sub))
+      (reductions order-step (sg/initial order {}) [{:id :checkout} {:id :ship}]))
+
+;; So deciding *when* is the producer's job — which is the same answer v1 gives to branching,
+;; and the child's state is on every result, so a producer can see exactly what it needs to
+;; decide. A door left open, not designed: a node could declare where to go when its child
+;; finishes, which is the statechart done-transition and needs no event queue here.
+
 ;; ## Beneath the facade
 ;;
 ;; `robertluo.state-graph` is the only namespace an application needs, but it is a

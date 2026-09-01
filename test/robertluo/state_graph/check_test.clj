@@ -210,3 +210,36 @@
         (is (= [-119 80 78 71] magic) "0x89 P N G")
         (is (< 1000 (.length (File. f))) "three states do not render in a few bytes"))
       (finally (.delete (File. f))))))
+
+;;; ---------------------------------------------------------------- nesting
+
+(deftest a-nested-machine-is-checked-as-an-ordinary-shape
+  ;; Most of why nesting cost so little: every structural check is about ONE graph, and a
+  ;; child is one. :within is a PATH, because nesting nests.
+  (let [kid (ts/trapped)
+        g (shape/shape
+           (shape/state :p [:map] {:initial true :machine kid})
+           (shape/state :q [:map] {:final true})
+           (shape/event :e [:map] (constantly {}) [:map])
+           (shape/transition :p :e :q))]
+    (is (empty? (check/problems (shape/shape
+                                 (shape/state :p [:map] {:initial true :machine (ts/counter)})
+                                 (shape/state :q [:map] {:final true})
+                                 (shape/event :e [:map] (constantly {}) [:map])
+                                 (shape/transition :p :e :q))))
+        "a sound child says nothing")
+    (is (= [{:problem :trap :id :limbo :within [:p]}
+            {:problem :trap :id :retrying :within [:p]}]
+           (check/problems g))
+        "and a child's own faults are reported under the node that hosts it")))
+
+(deftest a-node-that-nests-a-machine-says-so-in-the-picture
+  ;; It does not DRAW the child: viz-graph builds its own element list and cannot be handed
+  ;; a graphviz cluster, so the parent marks the node and the child is asked for its own
+  ;; picture. The marker is what stops a nested machine being invisible.
+  (let [g (shape/shape
+           (shape/state :p [:map] {:initial true :machine (ts/counter)})
+           (shape/state :q [:map] {:final true})
+           (shape/event :e [:map] (constantly {}) [:map])
+           (shape/transition :p :e :q))]
+    (is (str/includes? (check/dot g) "⊞ 3 states"))))

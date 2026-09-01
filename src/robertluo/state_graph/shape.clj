@@ -57,12 +57,22 @@
   [:fn {:error/message "should be a malli schema over a map"}
    #(= :map (m/type (m/schema %)))])
 
+(def Shape
+  "The graph. Its innards are ubergraph's business, so what is guarded is what goes in."
+  [:fn uber/ubergraph?])
+
 (def StateDef
   "A node. :schema describes the map WITHOUT its :id — what a state is called is the
-   shape's to say, not the user's."
+   shape's to say, not the user's.
+
+   :machine NESTS A WHOLE MACHINE IN THIS NODE. It is a built Shape, and while the parent
+   sits here that child runs inside it: the compiled step offers every event to the child
+   FIRST and only then to this node's own edges. The child's state lives under :sub, which
+   the machinery writes and a handler may not."
   [:map [::kind [:= :state]] [:id Id] [:schema MapSchema]
         [:initial {:optional true} :boolean]
-        [:final {:optional true} :boolean]])
+        [:final {:optional true} :boolean]
+        [:machine {:optional true} Shape]])
 
 (def EventDef
   "A catalogue entry, and WHERE A HANDLER LIVES. It is consumed at construction and not
@@ -81,10 +91,6 @@
    handles the event is the EVENT's to say — see EventDef. The TARGET is still the
    graph's, because A -submit-> B beside C -submit-> D is what a multidigraph is for."
   [:map [::kind [:= :transition]] [:from Id] [:event Id] [:to Id]])
-
-(def Shape
-  "The graph. Its innards are ubergraph's business, so what is guarded is what goes in."
-  [:fn uber/ubergraph?])
 
 ;;; -------------------------------------------------------------- constructors
 
@@ -122,6 +128,12 @@
 
 (def ^:private def-schema
   {:state StateDef :event EventDef :transition TransDef})
+
+;; The nested-machine check asks a child what its FIRST STATE would have to validate
+;; against, and the two functions that answer live in the reading section below — where
+;; they belong, being the vocabulary and not a check. Declared rather than moved, and
+;; deliberately not reimplemented here: what the check asks has to be what runs.
+(declare enter-schema initial-id)
 
 (defn- names
   "A transition as three plain keywords. A problem may not carry a handler or a
@@ -181,8 +193,18 @@
       ;; entry: :id by the edge, :instance by whoever started the run.
       (for [s state
             k (mu/keys (:schema s))
-            :when (#{:id :instance} k)]
-        {:problem :reserved-declared :id (:id s) :key k})))))
+            :when (#{:id :instance :sub} k)]
+        {:problem :reserved-declared :id (:id s) :key k})
+      ;; 7 — a nested machine must be able to START. Entering a node with one enters that
+      ;; child at its own initial state with NO data, so a child whose first state insists
+      ;; on some is a nesting that could never begin. Answerable from the parts alone,
+      ;; which is why it is here and not in the structural checks.
+      (for [s state
+            :let [child (:machine s)]
+            :when (and child (uber/ubergraph? child))
+            :let [id (initial-id child)]
+            :when (not (m/validate (enter-schema child id) {:id id}))]
+        {:problem :machine-cannot-start :id (:id s) :initial id})))))
 
 ;;; ---------------------------------------------------------------------- shape
 
@@ -202,7 +224,7 @@
         catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out]))) event)]
     (-> (uber/multidigraph)
         (uber/add-nodes-with-attrs*
-         (for [s state] [(:id s) (select-keys s [:schema :initial :final])]))
+         (for [s state] [(:id s) (select-keys s [:schema :initial :final :machine])]))
         (uber/add-directed-edges*
          (for [t transition]
            [(:from t) (:to t)
@@ -228,6 +250,26 @@
   [shape id]
   (boolean (uber/attr shape id :final)))
 
+(defn machine
+  "The machine NESTED in this node, or nil. A child is an ordinary Shape and is checked,
+   compiled and drawn as one — which is what makes nesting cost so little."
+  {:malli/schema [:=> [:cat Shape Id] [:maybe Shape]]}
+  [shape id]
+  (uber/attr shape id :machine))
+
+(defn machines
+  "{node id -> the machine nested in it}, for every node that has one. Empty for a flat
+   shape, and the one thing a layer above needs to ask in order to recurse.
+
+   NESTING CANNOT BE CIRCULAR and needs no check to say so: a shape is an immutable value
+   built out of already-built children, so no shape can contain itself."
+  {:malli/schema [:=> [:cat Shape] [:map-of Id Shape]]}
+  [shape]
+  (into {} (for [id (uber/nodes shape)
+                 :let [m (machine shape id)]
+                 :when m]
+             [id m])))
+
 (defn transitions
   "Every edge as a plain map — :from :event :to, and the event's :schema, :handler and
    :out denormalised onto it. The vocabulary everything above this reads a shape through,
@@ -247,7 +289,8 @@
    async layer, routing between many, that will insist on it."
   {:malli/schema [:=> [:cat Shape Id] MapSchema]}
   [shape id]
-  (mu/merge [:map [:id [:= id]] [:instance {:optional true} Instance]]
+  (mu/merge (cond-> [:map [:id [:= id]] [:instance {:optional true} Instance]]
+              (machine shape id) (conj [:sub [:map [:id Id]]]))
             (uber/attr shape id :schema)))
 
 (defn explain

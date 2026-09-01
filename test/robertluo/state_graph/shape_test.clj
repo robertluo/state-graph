@@ -142,3 +142,23 @@
     (is (= :idle (shape/initial-id g)))
     (is (shape/final? g :done))
     (is (not (shape/final? g :running)))))
+
+;;; ---------------------------------------------------------------- nesting
+
+(deftest a-nested-machine-must-be-able-to-start
+  ;; Entering a node with a machine enters that child at its own initial state with NO
+  ;; data, so a child insisting on some could never begin. Referential — answerable from
+  ;; the parts — which is why it is refused at construction and not at the first event.
+  (let [needy (shape/shape
+               (shape/state :needs [:map [:x :int]] {:initial true})
+               (shape/state :z     [:map [:x :int]] {:final true})
+               (shape/event :g [:map] (constantly {}) [:map])
+               (shape/transition :needs :g :z))]
+    (is (= [{:problem :machine-cannot-start :id :host :initial :needs}]
+           (shape/problems (shape/state :host [:map] {:initial true :machine needy}))))))
+
+(deftest sub-is-the-machinerys-word
+  ;; Like :id and :instance: a state redeclaring it would be describing something written
+  ;; over it on every entry.
+  (is (= [{:problem :reserved-declared :id :s :key :sub}]
+         (shape/problems (shape/state :s [:map [:sub :map]] {:initial true})))))

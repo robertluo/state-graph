@@ -5,6 +5,9 @@
    BUILD a shape out of states, events and transitions; LOOK at it with `problems`, `draw!`
    and `dot`, which is what having a graph buys; then RUN it through one of two doors.
 
+   A NODE MAY NEST A WHOLE MACHINE — {:machine sh} on a state — which is how a big problem
+   stays readable. See `state`.
+
    TWO DOORS, ONE MACHINE, AND THE CALLER OWNS THE LIFECYCLE IN BOTH. That is the whole
    answer to who owns it, and the doors are not two designs:
 
@@ -79,11 +82,19 @@
 ;;; -------------------------------------------------------------- building one
 
 (defn state
-  "A state: an id, the malli schema of its DATA, and optionally {:initial true} or
-   {:final true}. Exactly one state in a shape is the initial one.
+  "A state: an id, the malli schema of its DATA, and optionally {:initial true},
+   {:final true} or {:machine <a shape>}. Exactly one state in a shape is the initial one.
 
-   The schema describes the map WITHOUT :id and :instance — what a state is called, and
-   which run it belongs to, are the machine's to say and never a handler's."
+   The schema describes the map WITHOUT :id, :instance and :sub — what a state is called,
+   which run it belongs to, and what a nested machine is doing are the machine's to say and
+   never a handler's.
+
+   {:machine sh} NESTS A WHOLE MACHINE IN THIS NODE. While the parent sits here, that child
+   gets every event FIRST and this node's own edges get only what the child does not know —
+   so the child's vocabulary decides who handles what, and a child that has finished admits
+   nothing and stops competing. The child's state lives under :sub, seeded on entry, dropped
+   on the way out, and visible on every result. It is an ordinary shape, so it is checked
+   and drawn as one."
   ([id schema] (shape/state id schema))
   ([id schema opts] (shape/state id schema opts)))
 

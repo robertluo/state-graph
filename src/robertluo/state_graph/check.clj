@@ -157,16 +157,23 @@
 
 (defn produced
   "The schema of what a transition actually hands its target: the source state's own
-   schema, the handler's DECLARED answer merged over it, and the target's :id written
-   in last — which is the order `compile` does it in, so what is checked is what runs.
+   schema, the handler's DECLARED answer merged over it, then the machinery's own keys —
+   the target's :id, and :sub where the target nests a machine — written in last, which is
+   the order `compile` does it in, so what is checked is what runs.
+
+   :sub HAS TO BE HERE, and leaving it out was a real fault for as long as nesting existed
+   without it: the target's enter-schema REQUIRES :sub, no handler may write it, and the
+   step assocs the child's first state on entry. A check that did not know that condemned
+   every edge into a nested node as :target-refuses.
 
    nil where the edge declared no :out. That declaration is what this check is FOR:
    without it there is nothing to say about a closure."
   {:malli/schema [:=> [:cat shape/Shape :map] [:maybe shape/MapSchema]]}
   [sh {:keys [from to out]}]
   (when out
-    (-> (mu/merge (uber/attr sh from :schema) out)
-        (mu/assoc :id [:= to]))))
+    (cond-> (-> (mu/merge (uber/attr sh from :schema) out)
+                (mu/assoc :id [:= to]))
+      (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
 
 (defn subsumption
   "One verdict per transition — :yes, :no, :unknown, or :undeclared where the edge
@@ -294,16 +301,33 @@
           ;; itself stays total; this is where the filtering belongs.
           (for [id (traps sh) :when (not (ends id))] {:problem :trap :id id})
           (for [{:keys [verdict] :as v} (subsumption sh) :when (= :no verdict)]
-            (-> v (dissoc :verdict) (assoc :problem :target-refuses)))))))
+            (-> v (dissoc :verdict) (assoc :problem :target-refuses)))
+          ;; A NESTED MACHINE IS CHECKED AS AN ORDINARY SHAPE, which is most of why
+          ;; nesting cost so little: every check above is about one graph, and a child is
+          ;; one. :within names the path of nodes it was found under, so a fault three
+          ;; machines deep still says where it lives — and it is a PATH rather than a node
+          ;; because nesting nests.
+          (for [[id child] (shape/machines sh)
+                p (problems child)]
+            (assoc p :within (into [id] (:within p))))))))
 
 ;;; ---------------------------------------------------------------------- drawing
 
 (defn- node-label
+  "What a person reads on a node: its name, a marker for initial and final, and its schema.
+
+   A NODE THAT NESTS A MACHINE SAYS SO AND DOES NOT DRAW IT. ubergraph's viz-graph builds
+   its own element list out of nodes and edges, with no way to hand it a graphviz CLUSTER,
+   so a child inside its parent's box is not available without generating the dot ourselves
+   or rewriting the child's — both worse than the honest alternative, which is that the
+   parent marks the node and the child is drawn by asking it for its own picture."
   [sh id]
-  (str (name id)
-       (when (= id (shape/initial-id sh)) " ▸")
-       (when (shape/final? sh id) " ◼")
-       "\n" (pr-str (m/form (uber/attr sh id :schema)))))
+  (let [child (shape/machine sh id)]
+    (str (name id)
+         (when (= id (shape/initial-id sh)) " ▸")
+         (when (shape/final? sh id) " ◼")
+         (when child (str " ⊞ " (count (shape/states child)) " states"))
+         "\n" (pr-str (m/form (uber/attr sh id :schema))))))
 
 (defn labelled
   "The shape with its attributes replaced by things a person can read. ubergraph's own

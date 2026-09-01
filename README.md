@@ -47,6 +47,8 @@ Three definitions and no more.
   the static check above possible.
 - A **transition** is an edge: from a state, on an event, to a state. Two different events
   may join the same pair of states, so the shape is a multi-digraph.
+- A state may **nest a whole machine** — `{:machine sh}` — which is how a machine big enough
+  to matter stays readable. See below.
 
 ```clojure
 (require '[robertluo.state-graph :as sg])
@@ -136,6 +138,68 @@ answers nothing useful; `dot` is the same drawing as *data*, for anything that r
 diagrams itself. A notebook, a web page, a docs build: none of them wants a file, and `dot`
 needs no graphviz installed.
 
+## Nesting a machine in a node
+
+A state can carry a machine of its own. While the parent sits there, the child runs inside
+it:
+
+```clojure
+(def payment
+  (sg/shape
+   (sg/state :unpaid     [:map]                 {:initial true})
+   (sg/state :authorized [:map [:auth :string]])
+   (sg/state :captured   [:map [:auth :string]] {:final true})
+
+   (sg/event :authorize [:map [:auth :string]] (fn [e] {:auth (:auth e)}) [:map [:auth :string]])
+   (sg/event :capture   [:map]                 (constantly {})           [:map])
+
+   (sg/transition :unpaid     :authorize :authorized)
+   (sg/transition :authorized :capture    :captured)))
+
+(def order
+  (sg/shape
+   (sg/state :cart      [:map] {:initial true})
+   (sg/state :paying    [:map] {:machine payment})     ; <- a whole machine
+   (sg/state :shipped   [:map] {:final true})
+   (sg/state :cancelled [:map] {:final true})
+
+   (sg/event :checkout [:map] (constantly {}) [:map])
+   (sg/event :ship     [:map] (constantly {}) [:map])
+   (sg/event :cancel   [:map] (constantly {}) [:map])
+
+   (sg/transition :cart   :checkout :paying)
+   (sg/transition :paying :ship     :shipped)
+   (sg/transition :paying :cancel   :cancelled)))
+
+(def step (sg/compile order))
+
+(mapv (juxt :id (comp :id :sub))
+      (reductions step (sg/initial order {})
+                  [{:id :checkout} {:id :authorize :auth "tok_9"}
+                   {:id :capture} {:id :ship}]))
+;=> [[:cart nil] [:paying :unpaid] [:paying :authorized] [:paying :captured] [:shipped nil]]
+```
+
+**Inner first.** A nested machine gets every event before the node's own edges do, so the
+parent's edges are the *escape*. Which means **the child's own vocabulary decides who
+handles an event**: `:authorize` is the child's word and the parent never sees it; `:cancel`
+is not, so it escapes at once.
+
+**A finished child stops competing**, and this is what makes nesting cost the design
+nothing. A final state admits nothing, so once the child is done every later event falls
+straight through to the parent — no guards, no done-event, no queue.
+
+The child's state lives under `:sub`, seeded when the node is entered, dropped on the way
+out, and restarted if the node is re-entered. Like `:id` and `:instance` it is the
+machinery's: a handler that answers `{:sub …}` is simply overwritten. A child is an ordinary
+shape, so `problems` checks it and reports its faults under the node that hosts it
+(`:within [:paying]`), and `dot` marks a nesting node `⊞` — it does not draw the child
+inside its parent, so ask the child for its own picture.
+
+The limit, said plainly: **the escape is unconditional.** Nothing stops `:ship` firing while
+payment is half done, because that would be a guard and v1 has none. Deciding *when* is the
+producer's job — and the child's state is on every result, so a producer can see it.
+
 ## Two doors, one machine
 
 A shape compiles to an ordinary function of a state and an event. **The caller owns the
@@ -210,7 +274,8 @@ Said plainly, because each is a design decision and not an oversight.
 
 - **No guards.** A state and an event have exactly one target, which is what makes the
   compiled step a lookup and every static check answerable. Branching is spelled as two
-  different events, which pushes the decision onto whoever produces the event.
+  different events, which pushes the decision onto whoever produces the event — and it is
+  why a nested machine's escape is unconditional.
 - **No state-dependent update.** A handler sees only the event, which is what lets it be
   reused across states and checked as an ordinary function. A total that must see the old
   total is a query over history, not a field.
@@ -230,7 +295,7 @@ Said plainly, because each is a design decision and not an oversight.
 
 | | |
 |---|---|
-| `state` `event` `transition` `shape` | build a machine |
+| `state` `event` `transition` `shape` | build a machine, nesting where it helps |
 | `problems` `draw!` `dot` | look at it |
 | `compile` `initial` | the reduction |
 | `run` | the stream |

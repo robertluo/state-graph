@@ -149,3 +149,21 @@
   ;; facade could not answer before: a caller who renders diagrams itself — this project's own
   ;; notebook, for one — needs the source as a value and never a file.
   (is (str/starts-with? (sg/dot (ts/counter)) "digraph")))
+
+;;; ---------------------------------------------------------------- nesting
+
+(deftest a-child-moving-is-a-transition-that-fired
+  ;; :fired asks whether the machine handled the event, and a nested machine IS the machine.
+  ;; The parent's :id does not change, so a consumer that compared ids would see nothing —
+  ;; which is the same reason :fired exists at all.
+  (let [child (sg/shape (sg/state :a [:map] {:initial true})
+                        (sg/state :b [:map] {:final true})
+                        (sg/event :go [:map] (constantly {}) [:map])
+                        (sg/transition :a :go :b))
+        sh (sg/shape (sg/state :host [:map] {:initial true :machine child})
+                     (sg/state :done [:map] {:final true})
+                     (sg/event :fin [:map] (constantly {}) [:map])
+                     (sg/transition :host :fin :done))
+        {:keys [results]} (ran sh [{:id :go} {:id :nobody-knows-this} {:id :fin}])]
+    (is (= [[:host :b true] [:host :b false] [:done nil true]]
+           (map (juxt (comp :id :state) (comp :id :sub :state) :fired) results)))))
