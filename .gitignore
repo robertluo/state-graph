@@ -14,6 +14,7 @@
 # LSP
 .lsp/
 
-# datahike. A store is the fact itself rather than a rendering of one, and a
-# directory of growing binary files is no use in a repository.
-*.mdb
+# The rendered notebook. `clojure -X:notebook` writes docs/tutorial.html, which is
+# three quarters of a megabyte of HTML with its JavaScript bundled in — derived from
+# notebook/tutorial.clj, which does travel. Delete this line to publish the page.
+docs/

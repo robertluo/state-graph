@@ -33,6 +33,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    :tests-generative-first true
    :test-tree "test/, one <ns>_test.clj per source namespace"
    :test-runner "kaocha, two suites: unit and integration, separated by a ^:integration meta"
+   :notebook-cmd "clojure -X:notebook"
    :test-cmd-fast "clojure -M:dev:test unit"
    :test-cmd-gate "clojure -M:dev:test integration"
    :eval-mechanism :nrepl-exclusive
@@ -804,7 +805,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     :graphviz-and-the-devenv.
     NOTHING IS UNBUILT. What is left is not a layer but a licence not taken: async/drive serialises
     always, and the concurrency `check/commuting` proves to be safe is a GAP with a reason, recorded
-    in :two-events-in-flight-at-once."
+    in :two-events-in-flight-at-once.
+    AND THERE IS A TUTORIAL, 2026-09-01, this component being a release candidate:
+    notebook/tutorial.clj, a Clay notebook rendered by `clojure -X:notebook` to docs/tutorial.html,
+    which is gitignored because it is derived. It works the facade through in order and ends with a
+    NINE-STATE PUBLISHING PIPELINE — a review cycle, a retry self-loop, one event leaving three
+    states — drawn and then run over a two-instance event log. Every diagram in it is the library's
+    own drawing, rendered client-side, so reading the page needs no graphviz. See
+    :what-the-tutorial-taught, which is where the first real CONSUMER of this API found things the
+    suites could not."
 
    :gaps-in-the-repository
    "Found by reading deps.edn against README.md, and every one of them will bite on first use:
@@ -1021,6 +1030,41 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       places, and that is what a state machine is FOR. It is why :two-events-in-flight-at-once
       serialises by default and licenses only self-loops."
 
+   :what-the-tutorial-taught
+   "VERIFIED BY RUNNING on 2026-09-01, writing notebook/tutorial.clj — the first real CONSUMER of
+    this API rather than another test of it, which is why it found things the suites could not.
+    - kind/graphviz TAKES A VECTOR AND RENDERS IN THE BROWSER. Read from clay 2.0.22's own source
+      before being used: (kind/graphviz [dot-string]) — the value's FIRST element is the source —
+      and clay's item/graphviz interpolates it into a JS template literal that viz.js renders
+      client-side. So a page full of this library's drawings needs NO graphviz installed to read,
+      which is a better answer than a PNG and was not obvious. The one hazard is the template
+      literal: a backtick in a node label would break it, and ours are schema forms, so none.
+    - THE DOT SOURCE IS ONLY REACHABLE THROUGH A FILE, and this is the GAP the tutorial found.
+      ubergraph's viz-graph THREADS the dot string through a cond->, and the :dot branch is
+      (#(spit filename %)) — whose value is nil. So check/draw! with :format :dot writes the source
+      and ANSWERS NOTHING, and a caller who wants the string writes a temp file and slurps it back.
+      That is what the notebook's `dot` helper does, with the file released in a finally. A pure
+      check/dot answering the source would delete that helper and cost five lines; NOT BUILT,
+      because an addition to a library's public surface at RC is the author's call and not a
+      tutorial's. It is the first thing to weigh after this.
+    - `run` GIVES EVERY MACHINE THE SAME STARTING DATA, which async/fan does not — fan takes a
+      function of the instance. Found by trying to write a pipeline whose initial state carried a
+      per-manuscript title, and worked around by moving the title onto the event that STARTS the
+      machine, which is better modelling anyway: a draft is empty and the submission names it. Worth
+      knowing before somebody meets it as a surprise; whether `run` should accept a function is the
+      author's call.
+    - A MERGE CANNOT REMOVE A KEY, AND THE TUTORIAL SHOWS IT RATHER THAN SAYING IT. The published
+      manuscript still carries the :notes from a review round three transitions earlier, visibly, in
+      the :done map. A limit is more convincing as an output than as a bullet.
+    - THE CROSS-INSTANCE INTERLEAVING IS VISIBLE AND IS NOT DETERMINISTIC. In the two-instance log
+      m-2's :withdraw overtook m-1's :confirm, which is the parallelism working — so the notebook
+      says the ROW ORDER is not promised and shows the per-instance paths beside it, which are. A
+      tutorial that asserted the interleaved order would flake.
+    - CLAY'S DEFAULTS, read from clay-default.edn: :base-target-path docs, :format [:html],
+      :show/:browse true. `:render true` implies show, serve, browse and live-reload all false,
+      which is what makes `clojure -X:notebook` headless. :exec-fn scicloj.clay.v2.api/make! with
+      :exec-args is why the alias needs no build namespace and no extra file."
+
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is
     not worth having. graphviz 15.1.0; `dot` was NOT on the path before, and the devenv is shared
@@ -1056,7 +1100,10 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - malli 0.20.1 — the shapes of states, events and every function signature. See the
       :reload-all rule; it is the one dependency that punishes a careless REPL.
     - test.check 1.1.1 — it is in :deps and not :dev on purpose: generative tests are the unit
-      suite here, not an extra."
+      suite here, not an extra.
+    - clay 2.0.22 — the tutorial, and it is in the :notebook ALIAS and not in :deps: a library does
+      not depend on the thing that documents it. It drags kindly in, which is where kind/graphviz
+      comes from."
 
    :from-the-sibling-project
    "../smart-boundary/AGENTS.md is the sibling component, the same author's larger project and its :project-knowledge is worth reading

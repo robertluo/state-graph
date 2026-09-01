@@ -7,6 +7,17 @@ check it, and a compiler can turn it into an ordinary Clojure function.
 robertluo/state-graph {:local/root "../state-graph"}
 ```
 
+## Tutorial
+
+[`notebook/tutorial.clj`](notebook/tutorial.clj) works the whole API through in order and
+ends with a nine-state publishing workflow, drawn and run. It is a
+[Clay](https://scicloj.github.io/clay/) notebook, so it renders to a page with the machines
+as diagrams:
+
+```
+clojure -X:notebook     # writes docs/tutorial.html
+```
+
 ## Rationale
 
 Instead of another Clojure FSM library. A shape that really is a graph can be:
