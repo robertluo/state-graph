@@ -184,20 +184,17 @@
     (is (every? #(contains? (uber/attrs g %) :label)
                 (concat (shape/states g) (uber/edges g))))))
 
-(deftest ^:integration draw-writes-graphviz-source
-  ;; :format :dot is a spit and needs NO graphviz installed; every other format shells
-  ;; out to `dot`. Integration because it writes a file, and that is the honest reason
-  ;; — there is nothing to mock about a filesystem.
-  (let [f (str (Files/createTempFile "state-graph" ".dot" (into-array FileAttribute [])))]
-    (try
-      (check/draw! (ts/counter) {:save {:filename f :format :dot}})
-      (let [src (slurp f)]
-        (is (str/starts-with? src "digraph"))
-        (doseq [n ["idle" "running" "done" "start" "set" "stop"]]
-          (is (str/includes? src n) (str "the drawing names " n)))
-        (is (str/includes? src "doublecircle") ":done is final and the picture says so")
-        (is (not (str/includes? src "$eval")) "no closure reached the label"))
-      (finally (.delete (File. f))))))
+(deftest dot-answers-graphviz-source
+  ;; IN THE FAST LOOP, and it used to be ^:integration: `dot` catches the source in a
+  ;; StringWriter, so there is no file, nothing to release and no graphviz — where the same
+  ;; assertions through `draw!` needed a temp file and a `finally`. The rendering path is
+  ;; what still needs both, and it is the test below.
+  (let [src (check/dot (ts/counter))]
+    (is (str/starts-with? src "digraph"))
+    (doseq [n ["idle" "running" "done" "start" "set" "stop"]]
+      (is (str/includes? src n) (str "the drawing names " n)))
+    (is (str/includes? src "doublecircle") ":done is final and the picture says so")
+    (is (not (str/includes? src "$eval")) "no closure reached the label")))
 
 (deftest ^:integration draw-renders-a-picture
   ;; The only test of the RENDERING path, as opposed to the source: it shells out to

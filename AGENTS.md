@@ -113,8 +113,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     :nothing-is-persisted-here. What is left is four namespaces and one arrow through them.
 
     robertluo.state-graph          — BUILT 2026-09-01. THE FACADE: the vocabulary a user needs, and
-                                     the only require an application should have. Nine functions —
-                                     state, event, transition, shape; problems, draw!; compile,
+                                     the only require an application should have. Ten functions —
+                                     state, event, transition, shape; problems, draw!, dot; compile,
                                      initial; run — being the constructors, the checks, and the two
                                      doors. Requires everything below it, `check` included, which is
                                      what one require costs. See
@@ -668,9 +668,14 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       through. That is the only thing that can refute any of the above."
 
    :the-facade-is-a-vocabulary-and-two-doors
-   "BUILT 2026-09-01. NINE FUNCTIONS: state, event, transition, shape to build a machine; problems
-    and draw! to look at it; compile and initial for the reduction; run for the stream. The author
-    asked for the fewest, so each collapse below was argued for rather than assumed.
+   "BUILT 2026-09-01. TEN FUNCTIONS: state, event, transition, shape to build a machine; problems,
+    draw! and dot to look at it; compile and initial for the reduction; run for the stream. The
+    author asked for the fewest, so each collapse below was argued for rather than assumed.
+    - THE TENTH ARRIVED THE SAME DAY AND FROM A CONSUMER, which is the only good reason to widen an
+      API: `dot` answers the drawing as DATA where `draw!` is the drawing as an effect, and the
+      notebook could not be written without it — see :what-the-tutorial-taught. `draw!` alone cannot
+      serve a renderer that is not graphviz, and every diagram in a page, a docs build or a web app
+      is exactly that.
     - ONE STREAM DOOR AND NOT TWO. `fan` already subsumes `drive` — one partition IS one machine —
       so `run` builds the initial-of function out of the shape and a caller never spells :instance.
       `drive` stays public in .async for somebody who has already partitioned, one consumer per
@@ -799,9 +804,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     :the-output-is-a-transition-and-not-a-state and :nothing-is-persisted-here.
     THE STORE IS NOT COMING. datahike is out of deps.edn and robertluo.state-graph.store is out of
     :layering; neither was ever built.
-    56 tests, 176 assertions, green — 52 unit and 4 ^:integration, so THE COMMIT GATE IS A REAL
-    GATE; clj-kondo clean; 31 public fns carry a :malli/schema and the instrument! count of exactly
-    31 confirms it better than a grep can. The integration suite NEEDS GRAPHVIZ — see
+    56 tests, 175 assertions, green — 54 unit and 2 ^:integration, so THE COMMIT GATE IS A REAL
+    GATE; clj-kondo clean; 32 public fns carry a :malli/schema and the instrument! count of exactly
+    32 confirms it better than a grep can. The integration suite is DOWN to two, and that is the
+    right direction: `check/dot` made the graphviz-source test need no file, so it moved into the
+    fast loop, leaving only what needs a real clock and a real `dot`. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
     NOTHING IS UNBUILT. What is left is not a layer but a licence not taken: async/drive serialises
     always, and the concurrency `check/commuting` proves to be safe is a GAP with a reason, recorded
@@ -856,7 +863,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - multidigraph is the constructor this project wants (allow-parallel? true, undirected? false):
       two events joining one pair of states are two edges, and a plain digraph would keep one.
     - node-with-attrs and edge-with-attrs answer values that build-graph accepts back, which is the
-      supported way to copy or rebuild a graph."
+      supported way to copy or rebuild a graph.
+    - viz-graph ANSWERS NOTHING USEFUL, added 2026-09-01 from its source and then from running it.
+      It threads the dot string through a cond-> whose branches are (#(spit filename %)),
+      dj/save! and dj/show! — so the value is spit's nil for :format :dot and a viewer's for the
+      rest, and the SOURCE is only ever written out. The way to it as a value is to hand :filename
+      a java.io.StringWriter, `spit` accepting any java.io.Writer; that is what check/dot does."
 
    :what-target-1-taught
    "VERIFIED BY RUNNING on 2026-08-30, all of it in this project's own REPL:
@@ -1039,14 +1051,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       client-side. So a page full of this library's drawings needs NO graphviz installed to read,
       which is a better answer than a PNG and was not obvious. The one hazard is the template
       literal: a backtick in a node label would break it, and ours are schema forms, so none.
-    - THE DOT SOURCE IS ONLY REACHABLE THROUGH A FILE, and this is the GAP the tutorial found.
-      ubergraph's viz-graph THREADS the dot string through a cond->, and the :dot branch is
-      (#(spit filename %)) — whose value is nil. So check/draw! with :format :dot writes the source
-      and ANSWERS NOTHING, and a caller who wants the string writes a temp file and slurps it back.
-      That is what the notebook's `dot` helper does, with the file released in a finally. A pure
-      check/dot answering the source would delete that helper and cost five lines; NOT BUILT,
-      because an addition to a library's public surface at RC is the author's call and not a
-      tutorial's. It is the first thing to weigh after this.
+    - THE DOT SOURCE WAS ONLY REACHABLE THROUGH A FILE, which is the GAP the tutorial found and
+      the author closed the same day. ubergraph's viz-graph THREADS the dot string through a cond->,
+      and the :dot branch is (#(spit filename %)) — whose value is nil. So check/draw! with
+      :format :dot writes the source and ANSWERS NOTHING, and the notebook's first version wrote a
+      temp file and slurped it back, with a finally to release it.
+      CLOSED by check/dot, and the mechanism is worth knowing because it needs NO file at all:
+      `spit` calls clojure.java.io/writer on what it is handed, and that ACCEPTS a java.io.Writer, so
+      a StringWriter catches the source in memory. Verified before it was used. No finally either —
+      spit closes the writer it made, and closing a StringWriter is a no-op that keeps the buffer.
+      IT PAID TWICE: the notebook's helper went from eleven lines to four, and the graphviz-source
+      test stopped needing a file, so it left the integration suite for the fast loop.
     - `run` GIVES EVERY MACHINE THE SAME STARTING DATA, which async/fan does not — fan takes a
       function of the instance. Found by trying to write a pipeline whose initial state carried a
       per-manuscript title, and worked around by moving the title onto the event that STARTS the

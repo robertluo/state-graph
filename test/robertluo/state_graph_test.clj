@@ -5,7 +5,8 @@
    robertluo.state-graph.shape's promise, and re-asserting it here would be testing our own
    code through a second door. What IS the facade's own is the TRANSITION RESULT — the
    record it builds, and :fired, which no layer below it can answer."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is use-fixtures]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -143,13 +144,8 @@
            (sg/problems sh))
         "built without complaint, and the fault is there to be asked about")))
 
-(deftest ^:integration the-drawing-is-reachable-from-the-facade
-  ;; :format :dot is a spit and needs no graphviz — every other format shells out to `dot`.
-  ;; This asserts the facade's door to it, not the drawing, which check-test owns.
-  (let [f (str (System/getProperty "java.io.tmpdir") "/sg-facade-" (System/currentTimeMillis) ".dot")]
-    (try
-      (sg/draw! (ts/counter) {:save {:filename f :format :dot}})
-      (let [src (slurp f)]
-        (is (re-find #"digraph" src))
-        (is (not (re-find #"\$eval" src)) "a closure in a picture is the failure mode"))
-      (finally (.delete (java.io.File. f))))))
+(deftest sg-dot-is-the-drawing-as-data
+  ;; The ONE delegation asserted here, and only because it is the answer to a question the
+  ;; facade could not answer before: a caller who renders diagrams itself — this project's own
+  ;; notebook, for one — needs the source as a value and never a file.
+  (is (str/starts-with? (sg/dot (ts/counter)) "digraph")))

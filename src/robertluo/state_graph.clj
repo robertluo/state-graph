@@ -2,8 +2,8 @@
   "THE FACADE: the vocabulary a user needs, and the only require an application should
    have.
 
-   BUILD a shape out of states, events and transitions; LOOK at it with `problems` and
-   `draw!`, which is what having a graph buys; then RUN it through one of two doors.
+   BUILD a shape out of states, events and transitions; LOOK at it with `problems`, `draw!`
+   and `dot`, which is what having a graph buys; then RUN it through one of two doors.
 
    TWO DOORS, ONE MACHINE, AND THE CALLER OWNS THE LIFECYCLE IN BOTH. That is the whole
    answer to who owns it, and the doors are not two designs:
@@ -130,9 +130,17 @@
    better at. An unreachable state is obvious in a drawing and invisible in a map literal.
 
    Needs graphviz, except for {:save {:filename f :format :dot}}, which writes the source
-   and is a plain spit. No :save at all opens a viewer."
+   and is a plain spit. No :save at all opens a viewer. It answers nothing: for the source
+   as a VALUE, ask `dot`."
   ([sh] (check/draw! sh))
   ([sh opts] (check/draw! sh opts)))
+
+(defn dot
+  "The same drawing as GRAPHVIZ SOURCE, as a string — for anything that renders a diagram
+   itself rather than shelling out to graphviz: a notebook, a web page, a docs build. Needs
+   nothing installed."
+  [sh]
+  (check/dot sh))
 
 ;;; ------------------------------------------------------------- the reduction
 

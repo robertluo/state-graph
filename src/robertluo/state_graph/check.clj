@@ -319,13 +319,37 @@
                   sh (shape/states sh))
           (uber/edges sh)))
 
+(defn dot
+  "The shape as GRAPHVIZ SOURCE, as a string — the drawing as DATA, where `draw!` is the
+   drawing as an effect. Both label the graph the same way, so what this answers is exactly
+   what `draw!` would render.
+
+   WHAT IT IS FOR: anything that renders a diagram itself rather than shelling out. A
+   notebook, a web page, a docs build — all of them want the source and none of them wants a
+   file. It needs no graphviz installed, being a `spit` and not a `dot`.
+
+   HOW, and it is worth writing down because ubergraph gives no other way: viz-graph THREADS
+   the source through a cond-> whose :dot branch is (#(spit filename %)), so the value it
+   answers is spit's nil and the string is only ever written OUT. But `spit` calls
+   clojure.java.io/writer on what it is handed, and that accepts a java.io.Writer — so a
+   StringWriter catches the source in memory. Verified. It needs no `finally` either: spit
+   closes the writer it made, and closing a StringWriter is a no-op that keeps the buffer."
+  {:malli/schema [:=> [:cat shape/Shape] :string]}
+  [sh]
+  (let [w (java.io.StringWriter.)]
+    (uber/viz-graph (labelled sh) {:save {:filename w :format :dot}})
+    (str w)))
+
 (defn draw!
   "The shape as a picture, through ubergraph and graphviz.
 
    :save {:filename f :format :dot} writes the GRAPHVIZ SOURCE and needs no graphviz
    installed — it is a spit. Every other format shells out to `dot`, and no :save at
    all opens a viewer. This is an effect and never a test: what a drawing is for is a
-   person looking at it."
+   person looking at it.
+
+   IT ANSWERS NOTHING USEFUL, ubergraph's own return being spit's nil for :dot and a
+   viewer's for the rest. Somebody who wants the source as a VALUE wants `dot`."
   {:malli/schema [:function [:=> [:cat shape/Shape] :any]
                             [:=> [:cat shape/Shape :map] :any]]}
   ([sh] (draw! sh {}))

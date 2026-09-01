@@ -125,12 +125,16 @@ And the same question by the means a person is better at:
 ```clojure
 (sg/draw! signup)                                            ; opens a viewer
 (sg/draw! signup {:save {:filename "signup.png" :format :png}})
-(sg/draw! signup {:save {:filename "signup.dot" :format :dot}}) ; needs no graphviz
+
+(sg/dot signup)                                              ; the same drawing as DATA
+;=> "digraph {\ngraph [layout=dot];\nnew [label=\"new ▸\n:map\"];\n..."
 ```
 
 The drawing marks the initial state, gives a final state a double circle, and labels every
-node with its schema. Rendering shells out to graphviz (`dot`); `:format :dot` is a plain
-spit and needs nothing installed.
+node with its schema. `draw!` is the drawing as an *effect* — it shells out to graphviz and
+answers nothing useful; `dot` is the same drawing as *data*, for anything that renders
+diagrams itself. A notebook, a web page, a docs build: none of them wants a file, and `dot`
+needs no graphviz installed.
 
 ## Two doors, one machine
 
@@ -227,7 +231,7 @@ Said plainly, because each is a design decision and not an oversight.
 | | |
 |---|---|
 | `state` `event` `transition` `shape` | build a machine |
-| `problems` `draw!` | look at it |
+| `problems` `draw!` `dot` | look at it |
 | `compile` `initial` | the reduction |
 | `run` | the stream |
 

@@ -1,7 +1,7 @@
 ;; # robertluo.state-graph — a tutorial
 ;;
 ;; A finite state machine whose **shape is a graph**. This notebook works through the whole
-;; facade — nine functions — and ends with a workflow big enough to be worth drawing.
+;; facade — ten functions — and ends with a workflow big enough to be worth drawing.
 ;;
 ;; Every diagram below is the library's own drawing, rendered in your browser. Reading this
 ;; page needs nothing installed; `sg/draw!` with a real image format needs graphviz.
@@ -61,25 +61,16 @@
                 (sg/transition :a :go :nowhere))
 
 ;; Here is the machine itself. The drawing marks the initial state `▸`, gives a final state
-;; a double circle, and labels every node with its schema.
-
-(defn dot
-  "The shape's graphviz SOURCE, as a string.
-
-   `sg/draw!` is an effect — it opens a viewer or writes a file — and `:format :dot` is the
-   one format needing no graphviz installed, being a plain spit. So the way to a string is
-   through a file, and the file is released in a `finally`."
-  [sh]
-  (let [f (java.io.File/createTempFile "state-graph-" ".dot")]
-    (try
-      (sg/draw! sh {:save {:filename (.getPath f) :format :dot}})
-      (slurp f)
-      (finally (.delete f)))))
+;; a double circle, and labels every node with its schema. One helper, used throughout:
 
 (defn picture
-  "The shape as a diagram on this page."
+  "The shape as a diagram on this page.
+
+   `sg/dot` is the drawing as DATA — the graphviz source, as a string, needing nothing
+   installed — where `sg/draw!` is the drawing as an effect, opening a viewer or writing a
+   file. Clay hands the source to viz.js, which draws it in the browser."
   [sh]
-  (kind/graphviz [(dot sh)]))
+  (kind/graphviz [(sg/dot sh)]))
 
 (picture task)
 
