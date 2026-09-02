@@ -78,11 +78,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    :repl-eval-reload :per-namespace-in-dependency-order
    :deps {:ubergraph "0.9.0" :malli "0.20.1" :manifold "0.4.3" :test.check "1.1.1"
           :dev {:nrepl "1.3.0" :kaocha "1.91.1392"}}
-   :inherited-from "../smart-boundary/AGENTS.md — the SIBLING COMPONENT robertluo.smart-boundary, in the same
-                    monorepo. Its house rules
-                    (dependencies point down, errors are data, only assert what can fail, a store
-                    is closed in a `finally`) hold here too; its :project-knowledge is about
-                    Anthropic, Datalevin and nREPL and is NOT about this project."}
+   :inherited-from "GIT HISTORY, under smart-boundary/AGENTS.md — the sibling component the house
+                    rules came from, removed 2026-09-02 once each component carried its own. The
+                    rules hold here regardless (dependencies point down, errors are data, only
+                    assert what can fail, a store is closed in a `finally`); its :project-knowledge
+                    was about Anthropic, Datalevin and nREPL and was never about this project. Its
+                    living descendants are ../coder/AGENTS.md and ../llm-function/AGENTS.md."}
 
   :global-rules
   ["Do NOT manually repair parenthesis errors — run clj-paren-repair"
@@ -142,8 +143,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     quote on 2026-08-31 and the balance check said fine each time; what caught it was
     clojure.edn/read-string, which answered `Invalid number: 2026-08-31.` because it was reading
     prose as data. Verify with (clojure.edn/read-string (subs s (index-of s \"{:statechart/id\")))
-    and nothing weaker. (../smart-boundary/AGENTS.md does NOT parse — `Duplicate key: a`, and it
-    predates any of this; it is that component's to fix.)"]
+    and nothing weaker. (smart-boundary/AGENTS.md did NOT parse — `Duplicate key: a` — and it
+    predated any of this; the file was removed 2026-09-02 with that component, so the finding is
+    only a reminder that an unparsed AGENTS.md can live for weeks without anybody noticing.)"]
 
   :layering
   ["EVERY LAYER IS NOW BUILT, 2026-09-01, and the store that was in this list is GONE — see
@@ -1448,7 +1450,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       comes from."
 
    :from-the-sibling-project
-   "../smart-boundary/AGENTS.md is the sibling component, the same author's larger project and its :project-knowledge is worth reading
+   "smart-boundary/AGENTS.md, in GIT HISTORY, was the sibling component — the same author's larger
+    project, removed 2026-09-02 — and its :project-knowledge is still worth reading
     before repeating an experiment. What transfers is method, not fact: schemas at every crossing,
     seams checked in the code and not merely declared, a store that must be closed, `only assert
     what can fail`, and a knowledge section written in the past tense about things actually
