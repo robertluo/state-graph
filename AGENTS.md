@@ -933,6 +933,28 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       an event. It is the same lean as :a-handler-causes-nothing (the state raises, not the
       handler). The bar is a real shape asking for it twice."
 
+   :a-node-is-labelled-by-its-id
+   "DECIDED 2026-09-02, at the author's asking — `should not each state just be represented by the
+    :id?` — and the answer is yes, on this library's OWN argument for drawing at all.
+    - THE ARGUMENT THAT SETTLES IT is in :what-the-graph-buys: `an unreachable state is obvious in
+      a picture and INVISIBLE IN A MAP LITERAL`. That is entirely about STRUCTURE — and a schema is
+      precisely the part of a shape a map literal DOES show. So the schema was the least useful
+      thing in the label, and it was the only thing that did not scale.
+    - MEASURED, on the first real consumer: ../coder's workflow builds its states by conj-ing a
+      vocabulary forward, so agent/Brief is inlined into eight of them. Twelve labels, the longest
+      1,183 CHARACTERS, and a dot source of 10,408. `dot -Tpng` printed `graph is too large for
+      cairo-renderer bitmaps`, scaled, and then wrote a ZERO-BYTE FILE — a warning that looks
+      survivable and is not. CHECK THE FILE AND NOT THE EXIT CODE. SVG rendered the same graph
+      fine, which is what made the failure look like a graphviz quirk rather than a label problem.
+    - AFTER: the same shape is 1,007 characters of dot and renders to a 120KB PNG. Labels are
+      `fresh ▸`, `kept ◼` — the name and the markers, and nothing else.
+    - WHAT WAS KEPT AND WHY: ▸ for initial, ◼ for final, ⊞ n states for a nesting node. All three
+      are STRUCTURAL, which is the test this decision now applies to anything wanting into a label.
+    - WHAT WAS NOT BUILT: an option to put the schema back. Nobody has asked for it, the shape is
+      right there to read, and `problems` answers what the schemas IMPLY better than a picture of
+      them ever did. An option is cheap to add the day somebody wants one."
+
+
    :nothing-is-persisted-here
    "DECIDED 2026-09-01, by the author. THIS LIBRARY STORES NOTHING: it outputs what happened, and
     what becomes of that is the caller's. It AMENDS THE README rather than merely contradicting it,

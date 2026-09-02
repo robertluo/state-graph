@@ -180,7 +180,10 @@
 
 (deftest labelled-replaces-what-nobody-can-read
   (let [g (check/labelled (ts/counter))]
-    (is (= "idle ▸\n:map" (uber/attr g :idle :label)))
+    ;; The NAME and the markers, and no schema: a drawing is for the structure, and
+    ;; the schema is the part of a shape a map literal already shows. It also did not
+    ;; scale — see `node-label`.
+    (is (= "idle ▸" (uber/attr g :idle :label)))
     (is (every? #(contains? (uber/attrs g %) :label)
                 (concat (shape/states g) (uber/edges g))))))
 

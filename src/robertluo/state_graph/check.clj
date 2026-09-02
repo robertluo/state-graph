@@ -366,7 +366,16 @@
 ;;; ---------------------------------------------------------------------- drawing
 
 (defn- node-label
-  "What a person reads on a node: its name, a marker for initial and final, and its schema.
+  "What a person reads on a node: its name, and a marker for initial, final and nesting.
+
+   THE SCHEMA IS NOT IN HERE, and it used to be. What a drawing is FOR is the structure —
+   `an unreachable state is obvious in a picture and invisible in a map literal` — and a
+   schema is exactly the part of a shape that a map literal DOES show. So it was the least
+   useful thing in the label and the only thing that did not scale: a consumer whose states
+   accumulate a vocabulary produced a 1,183-character label, at which point `dot -Tpng`
+   prints `graph is too large for cairo-renderer bitmaps` and writes a ZERO-BYTE FILE.
+   A label that breaks the drawing is worse than no label. Read the shape for the schemas;
+   they are right there, and `problems` answers what they imply.
 
    A NODE THAT NESTS A MACHINE SAYS SO AND DOES NOT DRAW IT. ubergraph's viz-graph builds
    its own element list out of nodes and edges, with no way to hand it a graphviz CLUSTER,
@@ -378,8 +387,7 @@
     (str (name id)
          (when (= id (shape/initial-id sh)) " ▸")
          (when (shape/final? sh id) " ◼")
-         (when child (str " ⊞ " (count (shape/states child)) " states"))
-         "\n" (pr-str (m/form (uber/attr sh id :schema))))))
+         (when child (str " ⊞ " (count (shape/states child)) " states")))))
 
 (defn labelled
   "The shape with its attributes replaced by things a person can read. ubergraph's own
