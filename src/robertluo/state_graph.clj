@@ -112,6 +112,13 @@
   "An event: an id, the malli schema of its DATA, the HANDLER that answers it, and
    optionally the schema of what that handler answers.
 
+   GIVEN ONLY AN ID AND A SCHEMA it is a PURE LIFT — the handler answers exactly the keys
+   the schema declares and the :out is that schema, which is what most events are and what
+   the longer form says three times:
+
+     (event :brief [:map [:brief Brief]])       ; handler and :out are the schema's to give
+     (event :green [:map])                      ; an event that carries nothing
+
    BY DEFAULT the handler takes THE EVENT ALONE — nothing of the state it is about to change —
    and answers a map that is merged into the state. Declaring that map's schema is what lets
    `problems` prove, without running anything, that a target will not admit what a handler
@@ -127,6 +134,7 @@
    A VIEW IS ALSO HOW A MACHINE ACCUMULATES, and the policy stays ordinary code: read the old
    value, answer the new one, cap or summarise it however the task wants. That is why nothing
    in the shape combines keys for you — a combine could only ever grow."
+  ([id schema] (shape/event id schema))
   ([id schema handler] (shape/event id schema handler))
   ([id schema handler out] (shape/event id schema handler out))
   ([id schema handler out opts] (shape/event id schema handler out opts)))

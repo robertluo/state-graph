@@ -103,6 +103,35 @@
     (is (m/validate (:schema tick) {:id :set :to 3}))
     (is (not (m/validate (:schema tick) {:id :set :to "three"})))))
 
+(deftest an-event-given-only-a-schema-is-a-pure-lift
+  ;; MOST HANDLERS ARE A select-keys, and the four-argument form said that three times:
+  ;; the schema, a (fn [e] {:k (:k e)}) per key, and an :out that is the schema again. One
+  ;; of the three is the fact.
+  (let [short-form (shape/event :brief [:map [:brief :string]])
+        long-form  (shape/event :brief [:map [:brief :string]]
+                                (fn [e] {:brief (:brief e)})
+                                [:map [:brief :string]])]
+    (is (= {:brief "b"} ((:handler short-form) {:id :brief :brief "b"})))
+    (is (= ((:handler long-form) {:id :brief :brief "b"})
+           ((:handler short-form) {:id :brief :brief "b"}))
+        "the same answer as spelling it out")
+    (is (= (m/form (:out long-form)) (m/form (:out short-form)))
+        "and the same :out, which is what the static check reads"))
+
+  (testing "an event that carries nothing"
+    (is (= {} ((:handler (shape/event :green [:map])) {:id :green}))))
+
+  (testing "and it lifts NEITHER :id NOR :instance, which no state schema declares and the
+            patch check refuses — the lift cannot name them because `mu/keys` does not"
+    (is (= {:brief "b"}
+           ((:handler (shape/event :brief [:map [:brief :string]]))
+            {:id :brief :instance "run-1" :brief "b" :extra 1}))))
+
+  (testing "an OPTIONAL key absent from the event is absent from the patch, which is
+            exactly what a patch schema allows"
+    (is (= {} ((:handler (shape/event :maybe [:map [:x {:optional true} :int]])) {:id :maybe})))
+    (is (= {:x 1} ((:handler (shape/event :maybe [:map [:x {:optional true} :int]])) {:id :maybe :x 1})))))
+
 (deftest one-event-one-handler-however-many-edges
   ;; What moving the handler onto the EVENT bought, and the only thing that can regress
   ;; it. Two edges fire :hop, from different states to different targets, and ONE

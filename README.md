@@ -42,7 +42,9 @@ Three definitions and no more.
   bound, it is the whole of the state's own data, and anything not named in it is dropped on
   entry. `:id` (which node it is in) and `:instance` (which run it belongs to) are the
   machine's to write and are added for you. Exactly one state is `{:initial true}`.
-- An **event** is shaped by a malli schema too, and it **carries its handler**. By default the
+- An **event** is shaped by a malli schema too, and it **carries its handler** — though given
+  only an id and a schema it is a **pure lift**, answering exactly the keys that schema
+  declares, which is what most events are. By default the
   handler takes *the event alone* — nothing of the state it is about to change — and answers a
   **patch**: a map merged into the state, checked against the target's own schema with every
   key optional and the map closed. So saying nothing is always allowed, and naming a key that
@@ -65,11 +67,12 @@ Three definitions and no more.
    (sg/state :bounced [:map [:email :string] [:reason :string]] {:final true})
    (sg/state :closed  [:map [:email :string]]                   {:final true})
 
-   ;;        id       event schema             handler                    what it answers
-   (sg/event :invite [:map [:email :string]]  (fn [e] {:email (:email e)})   [:map [:email :string]])
-   (sg/event :accept [:map [:name :string]]   (fn [e] {:name (:name e)})     [:map [:name :string]])
-   (sg/event :bounce [:map [:reason :string]] (fn [e] {:reason (:reason e)}) [:map [:reason :string]])
-   (sg/event :close  [:map]                   (constantly {}))
+   ;; A PURE LIFT needs only its schema: the handler answers the keys it declares and
+   ;; the :out the static check reads is that same schema.
+   (sg/event :invite [:map [:email :string]])
+   (sg/event :accept [:map [:name :string]])
+   (sg/event :bounce [:map [:reason :string]])
+   (sg/event :close  [:map])
 
    (sg/transition :new     :invite :invited)
    (sg/transition :invited :accept :active)

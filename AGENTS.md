@@ -650,6 +650,31 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       at-least-once transport that redelivers, a partitioned queue where one instance's events span
       partitions. Each is real, and each is the caller's to fix upstream."
 
+   :an-event-given-only-a-schema-is-a-pure-lift
+   "THE AUTHOR'S, 2026-09-03: `the event's 4-arg constructor looks very redandunt.` It is, and
+    the redundancy is exact rather than a matter of taste.
+    - WHAT THE FOUR ARGUMENTS SAID: for a handler that only lifts — which is nearly all of them —
+      the event's SCHEMA, a `(fn [e] {:k (:k e)})` per key, and an `:out` that is the schema
+      AGAIN are one fact written three times. Two of the three are transcription, and
+      transcription is where a shape drifts from itself.
+    - SO `(event :brief [:map [:brief Brief]])` is the whole declaration: `lifting` makes the
+      handler out of `mu/keys`, and the :out is the schema. `(event :green [:map])` is an event
+      that carries nothing. The 3-, 4- and 5-arities stay for a handler that does something a
+      `select-keys` does not.
+    - :id AND :instance ARE NOT LIFTABLE, and it falls out rather than being arranged: they are
+      not in the declared schema, so `mu/keys` does not name them — which is the same reason
+      :an-event-is-the-only-way-a-transition-happens refuses a handler that reaches for them.
+      Two rules, one mechanism.
+    - AN OPTIONAL KEY ABSENT FROM THE EVENT IS ABSENT FROM THE PATCH, which is exactly what a
+      patch schema permits, so the short form composes with the check above rather than fighting
+      it.
+    - WHAT IT MEASURED OUT AT: the README's own example lost four lines and gained a column of
+      nothing; coder's task shape went from 13 lines of events to 5.
+    - AND A CONSUMER'S LINT CACHE HAS TO BE REFRESHED. clj-kondo remembered the old arities of a
+      :local/root dependency and reported ten errors for correct code. `rm -rf .clj-kondo/.cache`
+      in the consumer, or the documented --dependencies --copy-configs refresh. Worth knowing
+      before believing a lint that disagrees with a green suite."
+
    :an-event-is-the-only-way-a-transition-happens
    "THE AUTHOR'S, 2026-09-03, and it makes a rule this library already intended into one it
     ENFORCES: `In a FSM, a state can only transit by an event, so inside a machine, the only way

@@ -104,9 +104,35 @@
   ([id schema] (state id schema nil))
   ([id schema opts] (into {::kind :state :id id :schema (m/schema schema)} opts)))
 
+(defn- lifting
+  "The handler a PURE LIFT needs: the event's own declared keys, and nothing else.
+
+   MOST HANDLERS ARE THIS, and spelling one out says the same thing three times — the
+   event's schema, a `(fn [e] {:k (:k e)})` per key, and an :out that is the schema again.
+   One of those is the fact; the other two are transcription.
+
+   :id AND :instance ARE NOT LIFTED and cannot be: they are not in the declared schema, so
+   `mu/keys` does not name them — which is the same reason the patch check refuses a handler
+   that reaches for them. An event carries its :id at runtime and the machine reads it; a
+   state never holds it."
+  [schema]
+  (let [ks (mu/keys schema)]
+    (fn [event] (select-keys event ks))))
+
 (defn event
   "An event: an id, the malli schema of its DATA, the HANDLER that answers it, optionally
    the schema of what that handler answers, and optionally {:sees <a map schema>}.
+
+   GIVEN ONLY AN ID AND A SCHEMA the event is a PURE LIFT: its handler answers exactly the
+   keys the schema declares and its :out is that schema. Which is what most events are, and
+   what the four-argument form was saying three times —
+
+     (event :brief [:map [:brief Brief]])                          ; this
+     (event :brief [:map [:brief Brief]]                           ; and this are the same
+            (fn [e] {:brief (:brief e)}) [:map [:brief Brief]])
+
+   An event that carries nothing is `(event :green [:map])`. Reach for the longer forms when
+   a handler does something a `select-keys` does not.
 
    The handler takes THE EVENT ALONE and answers a map that is merged into the state. The
    :id rides in the value at runtime for the same reason a state's does: the step function
@@ -123,9 +149,11 @@
 
    The function schema stays complete either way:
    [:=> [:cat <this :schema> <this :sees>] <this :out>], both halves off this map."
-  {:malli/schema [:function [:=> [:cat Id MapSchema fn?] EventDef]
+  {:malli/schema [:function [:=> [:cat Id MapSchema] EventDef]
+                            [:=> [:cat Id MapSchema fn?] EventDef]
                             [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]
                             [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]}
+  ([id schema] (event id schema (lifting (m/schema schema)) schema nil))
   ([id schema handler] (event id schema handler nil nil))
   ([id schema handler out] (event id schema handler out nil))
   ([id schema handler out opts]
