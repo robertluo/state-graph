@@ -48,14 +48,45 @@
            (reduce (c/compile g) (c/initial g {})
                    [{:id :start :seed 0} {:id :set :to 7} {:id :stop}])))))
 
-(deftest the-edge-decides-the-id-and-not-the-handler
-  ;; The handler's answer is MERGED and the target's :id is assoc'd after, so a handler
-  ;; cannot move the machine sideways past the edge that was supposed to decide it.
+(deftest the-edge-decides-the-id-and-a-handler-that-says-otherwise-is-REFUSED
+  ;; AN EVENT IS THE ONLY WAY A TRANSITION HAPPENS. A handler naming :id is asking for a
+  ;; transition it was not given, and it used to be silently overwritten — which made the
+  ;; rule a convention the code quietly repaired rather than one it enforced.
+  ;;
+  ;; IT NEEDS NO SPECIAL CASE. A state schema describes the map WITHOUT :id, :instance or
+  ;; :sub, so naming one is answering a key the state does not declare, and the patch check
+  ;; refuses it for the same reason it refuses a typo.
   (let [g (shape/shape (shape/state :a [:map] {:initial true})
                        (shape/state :b [:map] {:final true})
                        (shape/event :go [:map] (constantly {:id :somewhere-else}))
+                       (shape/transition :a :go :b))
+        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+                                ((c/compile g) (c/initial g {}) {:id :go})))]
+    (is (= :answer (:crossing (ex-data e))))
+    (is (= :malli.core/extra-key (:type (first (:errors (ex-data e))))))
+    (is (= [:id] (:in (first (:errors (ex-data e))))))))
+
+(deftest a-key-the-target-does-not-declare-is-refused-and-not-dropped
+  ;; The general rule the one above is a case of. The merge is projected onto the target's
+  ;; own keys, so an undeclared key never reached the state anyway — it EVAPORATED. A
+  ;; handler computing something the machine throws away is a defect, and silence made it
+  ;; look like a feature.
+  (let [g (shape/shape (shape/state :a [:map] {:initial true})
+                       (shape/state :b [:map [:n :int]] {:final true})
+                       (shape/event :go [:map] (constantly {:n 1 :typo 2}))
+                       (shape/transition :a :go :b))
+        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+                                ((c/compile g) (c/initial g {}) {:id :go})))]
+    (is (= [:typo] (:in (first (:errors (ex-data e))))))))
+
+(deftest a-handler-answers-a-PATCH-so-saying-nothing-is-always-allowed
+  ;; The other half of the patch check: every key OPTIONAL. A handler says what changed,
+  ;; and what it does not mention the state it is changing already holds.
+  (let [g (shape/shape (shape/state :a [:map [:n :int]] {:initial true})
+                       (shape/state :b [:map [:n :int]] {:final true})
+                       (shape/event :go [:map] (constantly {}))
                        (shape/transition :a :go :b))]
-    (is (= {:id :b} ((c/compile g) (c/initial g {}) {:id :go})))))
+    (is (= {:id :b :n 3} ((c/compile g) (c/initial g {:n 3}) {:id :go})))))
 
 (deftest initial-enters-through-the-same-validation-as-every-other-state
   (let [g (ts/counter)]
@@ -87,14 +118,16 @@
       (is (= {:id :done :n 7 :instance "order-4711"}
              (reduce (c/compile g) (c/initial g "order-4711" {}) events))))
 
-    (testing "a handler answering :instance is overruled, like one answering :id"
+    (testing "a handler answering :instance is REFUSED, like one answering :id — moving a
+              run to another run is a transition nobody gave it either"
       (let [sneaky (shape/shape
                     (shape/state :a [:map] {:initial true})
                     (shape/state :b [:map] {:final true})
                     (shape/event :go [:map] (constantly {:instance "somebody-elses"}))
-                    (shape/transition :a :go :b))]
-        (is (= {:id :b :instance "mine"}
-               ((c/compile sneaky) (c/initial sneaky "mine" {}) {:id :go})))))
+                    (shape/transition :a :go :b))
+            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+                                    ((c/compile sneaky) (c/initial sneaky "mine" {}) {:id :go})))]
+        (is (= [:instance] (:in (first (:errors (ex-data e))))))))
 
     (testing "an event may name a run too, and the step does not care — it has only one
               in hand. That key is for the layer that ROUTES, which cannot read it off a
@@ -182,15 +215,29 @@
         (is (= :out (:crossing (ex-data e))))
         (is (= {:n "seven"} (:value (ex-data e))))))
 
-    (testing "a state the target will not admit, where nothing declared :out"
+    (testing "a handler answering a value the target's schema denies, where nothing
+              declared :out — caught as the ANSWER and not as the state, which is the
+              better diagnosis for the same reason :out is"
       (let [bad (shape/shape (shape/state :a [:map] {:initial true})
                              (shape/state :b [:map [:n :int]] {:final true})
                              (shape/event :go [:map] (constantly {:n "seven"}))
                              (shape/transition :a :go :b))
+            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+                                    ((c/compile bad) (c/initial bad {}) {:id :go})))]
+        (is (= :answer (:crossing (ex-data e))))
+        (is (= {:n "seven"} (:value (ex-data e))))))
+
+    (testing "and :enter is still the crossing that catches what only the WHOLE state can
+              be wrong about — a required key nobody supplied, which a patch is allowed
+              not to mention"
+      (let [bad (shape/shape (shape/state :a [:map] {:initial true})
+                             (shape/state :b [:map [:n :int]] {:final true})
+                             (shape/event :go [:map] (constantly {}))
+                             (shape/transition :a :go :b))
             e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"enter"
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :enter (:crossing (ex-data e))))
-        (is (= {:id :b :n "seven"} (:value (ex-data e))))))))
+        (is (= :malli.core/missing-key (:type (first (:errors (ex-data e))))))))))
 
 ;;; ---------------------------------------------------------------- nesting
 
@@ -210,10 +257,9 @@
    (shape/state :paying    [:map] {:machine (child)})
    (shape/state :shipped   [:map] {:final true})
    (shape/state :cancelled [:map] {:final true})
-   ;; both handlers TRY TO WRITE :sub, and neither may
-   (shape/event :checkout [:map] (constantly {:sub {:id :hacked}}) [:map])
-   (shape/event :ship     [:map] (constantly {:sub {:id :hacked}}) [:map])
-   (shape/event :cancel   [:map] (constantly {})                   [:map])
+   (shape/event :checkout [:map] (constantly {}) [:map])
+   (shape/event :ship     [:map] (constantly {}) [:map])
+   (shape/event :cancel   [:map] (constantly {}) [:map])
    (shape/transition :cart      :checkout :paying)
    (shape/transition :paying    :checkout :paying)
    (shape/transition :paying    :ship     :shipped)
@@ -253,13 +299,25 @@
         "the child is done and answers unchanged")
     (is (= :shipped (:id (step captured {:id :ship}))))))
 
-(deftest the-machinery-owns-sub-and-not-the-handler
+(deftest the-machinery-owns-sub-and-a-handler-that-reaches-for-it-is-REFUSED
+  ;; :sub is what a nested machine is doing, and reaching into it is a transition in
+  ;; somebody else's machine. Refused by the patch check, no special case: no state schema
+  ;; declares :sub.
+  (let [reaching (shape/shape
+                  (shape/state :cart   [:map] {:initial true})
+                  (shape/state :paying [:map] {:machine (child)})
+                  (shape/event :checkout [:map] (constantly {:sub {:id :hacked}}) [:map])
+                  (shape/transition :cart :checkout :paying))
+        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+                                ((c/compile reaching) (c/initial reaching {}) {:id :checkout})))]
+    (is (= [:sub] (:in (first (:errors (ex-data e)))))))
+
   (let [g (parent)
         step (c/compile g)
         paying (step (c/initial g {}) {:id :checkout})
         moved (step paying {:id :authorize :auth "t"})]
     (is (= {:id :unpaid} (:sub paying))
-        "the handler answered {:sub {:id :hacked}} and was overwritten with the child's first state")
+        "the machinery seeded the child's first state, the handler having said nothing")
     (is (= {:id :unpaid} (:sub (step moved {:id :checkout})))
         "re-entering the node RESTARTS the child, entering being entering")
     (is (= {:id :shipped} (step moved {:id :ship}))

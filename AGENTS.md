@@ -650,8 +650,48 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       at-least-once transport that redelivers, a partitioned queue where one instance's events span
       partitions. Each is real, and each is the caller's to fix upstream."
 
+   :an-event-is-the-only-way-a-transition-happens
+   "THE AUTHOR'S, 2026-09-03, and it makes a rule this library already intended into one it
+    ENFORCES: `In a FSM, a state can only transit by an event, so inside a machine, the only way
+    of doing transition is to emit an event. And this hidden transition has to be illegal.`
+    - WHAT WAS ALREADY TRUE: a handler could not move the machine. `compile` projected the answer
+      onto the target's keys and then put :id, :instance and :sub on AFTERWARDS, and this file and
+      three docstrings said `identity is the shape's to say`.
+    - WHAT WAS WRONG WITH IT: SILENCE. A handler answering :id was overwritten without a word, so
+      the rule was a convention the code quietly repaired. That is the same shape of fault as a
+      predicate the model cannot see, and this library's own line answers it — `what throws is a
+      crossing that does not hold; those are defects, not facts about the run`.
+    - AND THE AUTHOR BROADENED IT, which is what makes the fix worth having: `the event's returned
+      data should match the state schema`. So the check is not about identity at all. A handler
+      answers a PATCH, and it is conformed against `shape/patch-schema` — the target's own schema
+      with EVERY KEY OPTIONAL and the map CLOSED.
+        optional  a handler says what changed; what it does not mention the state already holds
+        closed    a key the target does not declare never reached the state anyway — `mu/keys`
+                  dropped it one line later — so a handler computing something that EVAPORATES is
+                  a defect, and closing the patch turns a shrug into a refusal
+    - IDENTITY THEN NEEDS NO SPECIAL CASE, and that is the part to keep. A state schema describes
+      the map WITHOUT :id, :instance and :sub, so naming one is answering an undeclared key and is
+      refused by exactly the rule that refuses a typo. One check, three guarantees, and nothing in
+      it mentions identity.
+    - WHERE IT SITS AND WHY: after :out and before :enter. :out is what a handler PROMISES and is
+      optional, existing for the STATIC check; :answer is what the target ADMITS and is not
+      optional. :enter keeps the one thing only a whole state can be wrong about — A REQUIRED KEY
+      NOBODY SUPPLIED, which a patch is allowed not to mention. All three crossings are still
+      distinct and each is asserted.
+    - WHAT IT COST: four tests, every one of which had asserted the silence — a handler's :id
+      overwritten, its :instance overruled, its :sub replaced by the child's first state, and a
+      wrong-typed value caught at :enter rather than at :answer. Rewriting them is the change:
+      each now asserts the refusal, and the suite went 74/205 to 76/217.
+    - AND THE EMISSION HALF STAYS SHUT. The author reasoned to it independently on the same day:
+      `An internal conditional should generate an event to the event queue. However, in our
+      current design, the machine does not own the event queue.` Which is
+      :a-handler-causes-nothing's own argument arrived at from the other end — see it below, and
+      :one-ordered-stream-per-instance for why the queue is the caller's."
+
    :a-handler-causes-nothing
-   "DECIDED 2026-08-31. In v1 A HANDLER MAY NOT CAUSE ANOTHER EVENT. It answers a data map and that is
+   "DECIDED 2026-08-31, and REAFFIRMED by the author 2026-09-03 on the reasoning that the machine
+    does not own an event queue — see :an-event-is-the-only-way-a-transition-happens.
+    In v1 A HANDLER MAY NOT CAUSE ANOTHER EVENT. It answers a data map and that is
     all it does; a cascade is spelled as the caller feeding the next event.
     - WHY IT MATTERS: a handler that raises an event is the classic source of SELF-INFLICTED disorder,
       and it is the reason statecharts have RUN-TO-COMPLETION — one external event processed fully,

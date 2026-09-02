@@ -92,6 +92,7 @@
                 (for [{:keys [from event to handler out sees schema]} (shape/transitions sh)]
                   [[from event] {:to to :handler handler :out out :sees sees
                                  :event-schema schema
+                                 :patch-schema (shape/patch-schema sh to)
                                  :enter-schema (shape/enter-schema sh to)}]))
    :machines (into {}
                    (for [[id child] (shape/machines sh)]
@@ -150,9 +151,12 @@
    handler answering something its own :out denies, or a state that its target's schema
    will not admit. Those are defects, not facts about the run.
 
-   The handler takes THE EVENT ALONE and is the EVENT'S, not the edge's. Its answer is
-   merged into the state and the target's :id is assoc'd AFTER, so a handler that writes
-   :id is simply overwritten: identity is the shape's to say.
+   The handler takes THE EVENT ALONE and is the EVENT'S, not the edge's. Its answer is a
+   PATCH, and it is checked against one: the target's own schema with every key optional
+   and the map closed, so a key that state does not declare is REFUSED. That is what makes
+   AN EVENT THE ONLY WAY A TRANSITION HAPPENS — a handler naming :id, :instance or :sub is
+   naming a key no state schema declares, so identity is refused by the same rule that
+   refuses a typo, and never by a special case. It used to be silently overwritten.
 
    WITH NO CONTEXT the step is synchronous and answers a State, which is what Step says.
    With one, the return type is the CALLER'S to know — a deferred State under manifold —
@@ -184,7 +188,7 @@
                  (fn [sub'] (assoc state :sub sub')))
 
            :else
-           (if-let [{:keys [to handler out sees event-schema enter-schema]}
+           (if-let [{:keys [to handler out sees event-schema patch-schema enter-schema]}
                     (entry idx state event)]
              (let [ctx {:from (:id state) :event (:id event) :to to}]
                (conform! event-schema event (assoc ctx :crossing :event))
@@ -203,6 +207,17 @@
                        ;; STATIC check; here it buys a better diagnosis — `the handler is
                        ;; wrong` rather than `the state is wrong` one line later.
                        (when out (conform! out answer (assoc ctx :crossing :out)))
+                       ;; AND THE ANSWER MUST BE ONE THE TARGET WILL TAKE. `:out` is what a
+                       ;; handler PROMISES and is optional; this is what the state ADMITS
+                       ;; and is not. A patch-schema is the target's own schema with every
+                       ;; key optional and the map closed, so a key the state does not
+                       ;; declare is REFUSED rather than projected away in silence — which
+                       ;; is what it used to be, `mu/keys` dropping it a line below.
+                       ;; IDENTITY NEEDS NO SPECIAL CASE HERE. A state schema describes the
+                       ;; map without :id, :instance or :sub, so a handler naming any of
+                       ;; the three is answering an undeclared key and this is what refuses
+                       ;; it. An event is the only way a transition happens.
+                       (conform! patch-schema answer (assoc ctx :crossing :answer))
                        ;; A NODE HOLDS WHAT IT DECLARES AND NOTHING ELSE. The merge is
                        ;; PROJECTED onto the keys of the target's enter-schema, so data
                        ;; stops flowing through states that never mentioned it. That is

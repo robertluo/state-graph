@@ -44,9 +44,11 @@ Three definitions and no more.
   machine's to write and are added for you. Exactly one state is `{:initial true}`.
 - An **event** is shaped by a malli schema too, and it **carries its handler**. By default the
   handler takes *the event alone* — nothing of the state it is about to change — and answers a
-  map that is **merged into** the state. It may also declare that map's schema, which is what
-  makes the static check above possible, and a `{:sees …}` **view** where it does need to read
-  the state. See below.
+  **patch**: a map merged into the state, checked against the target's own schema with every
+  key optional and the map closed. So saying nothing is always allowed, and naming a key that
+  state does not declare is **refused** rather than quietly dropped. It may also declare that
+  map's schema, which is what makes the static check above possible, and a `{:sees …}` **view**
+  where it does need to read the state. See below.
 - A **transition** is an edge: from a state, on an event, to a state. Two different events
   may join the same pair of states, so the shape is a multi-digraph.
 - A state may **nest a whole machine** — `{:machine sh}` — which is how a machine big enough
@@ -197,7 +199,7 @@ straight through to the parent — no guards, no done-event, no queue.
 
 The child's state lives under `:sub`, seeded when the node is entered, dropped on the way
 out, and restarted if the node is re-entered. Like `:id` and `:instance` it is the
-machinery's: a handler that answers `{:sub …}` is simply overwritten. A child is an ordinary
+machinery's: a handler that answers `{:sub …}` is **refused**. A child is an ordinary
 shape, so `problems` checks it and reports its faults under the node that hosts it
 (`:within [:paying]`), and `dot` marks a nesting node `⊞` — it does not draw the child
 inside its parent, so ask the child for its own picture.
@@ -330,6 +332,12 @@ no clock and no way to know two events were concurrent.
 
 Said plainly, because each is a design decision and not an oversight.
 
+- **An event is the only way a transition happens.** A handler answers a patch and nothing
+  else: it may not name `:id`, `:instance` or `:sub`, and it is refused if it tries — not by a
+  special case but by the patch check, since no state schema declares any of the three.
+  Identity is the shape's to say, and a handler naming where it lands is asking for a
+  transition it was not given. A handler may not raise an event either; a cascade is spelled
+  as the caller feeding the next one.
 - **No guards.** A state and an event have exactly one target, which is what makes the
   compiled step a lookup and every static check answerable. Branching is spelled as two
   different events, which pushes the decision onto whoever produces the event — and it is

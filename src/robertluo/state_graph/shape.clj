@@ -309,6 +309,30 @@
               (machine shape id) (conj [:sub [:map [:id Id]]]))
             (uber/attr shape id :schema)))
 
+(defn patch-schema
+  "What a HANDLER may answer for a state: the state's own schema, EVERY KEY OPTIONAL and
+   the map CLOSED.
+
+   OPTIONAL because a handler answers a PATCH and not a state — it says what changed, and
+   what it does not mention the state it is changing already holds.
+
+   CLOSED because a key this state does not declare is a key the machine THROWS AWAY. The
+   merge is projected onto `mu/keys` of the enter-schema, so an undeclared key never
+   reaches the state whatever the state's own `:closed` says — and a handler computing
+   something that silently evaporates is a defect, not a style. Closing it here is what
+   turns that from a shrug into a refusal.
+
+   AND IT IS WHY IDENTITY NEEDS NO SPECIAL CASE. A state schema describes the map WITHOUT
+   :id, :instance and :sub, so a handler answering any of the three is answering a key the
+   state does not declare, and this refuses it for the same reason it refuses a typo. An
+   event is the only way a transition happens; a handler that names where it lands is
+   asking for one it was not given."
+  {:malli/schema [:=> [:cat Shape Id] MapSchema]}
+  [shape id]
+  (-> (uber/attr shape id :schema)
+      (mu/optional-keys)
+      (mu/update-properties assoc :closed true)))
+
 (defn explain
   "m/explain as PLAIN DATA — one map per error, and forms rather than compiled Schema
    objects, which nobody can read, print or compare. nil when the value is fine.
