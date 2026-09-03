@@ -147,8 +147,9 @@ And the same question by the means a person is better at:
 ;=> "digraph {\ngraph [layout=dot];\nnew [label=\"new ▸\"];\n..."
 ```
 
-The drawing marks the initial state, gives a final state a double circle, and marks a
-nesting node `⊞`. **It does not label a node with its schema**, deliberately: a drawing is
+The drawing marks the initial state, gives a final state a double circle, marks a nesting
+node `⊞`, and draws a completion transition **dashed and unlabelled**. **It does not label a
+node with its schema**, deliberately: a drawing is
 for the *structure* — that is the whole of what a map literal hides — and a schema is
 exactly what a map literal shows. It also did not scale; a machine whose states accumulate a
 vocabulary produced a 1,183-character label, and `dot -Tpng` answers that with a warning and
@@ -215,9 +216,119 @@ shape, so `problems` checks it and reports its faults under the node that hosts 
 (`:within [:paying]`), and `dot` marks a nesting node `⊞` — it does not draw the child
 inside its parent, so ask the child for its own picture.
 
-The limit, said plainly: **the escape is unconditional.** Nothing stops `:ship` firing while
-payment is half done, because that would be a guard and v1 has none. Deciding *when* is the
-producer's job — and the child's state is on every result, so a producer can see it.
+An **escape is an abort**, and it is unconditional: nothing stops `:ship` firing while
+payment is half done, because "only when the child has finished" is a fact about the state
+and not about the event. Aborting is the commoner need, so it stays the default. To have the
+parent *wait* for its child instead, the node says where to go when it **completes** — the
+next section.
+
+## A completion transition: `:done` and `:yield`
+
+A state can say where it goes when it is **finished**, with no event, no handler and no
+patch. Here is `order` again with the same `payment` child, and `:ship` gone — that event
+*was* the producer telling the machine that payment had finished, which is a decision the
+shape can now make itself:
+
+```clojure
+(def order
+  (sg/shape
+   (sg/state :cart      [:map [:total :int]] {:initial true})
+   (sg/state :paying    [:map [:total :int]] {:machine payment
+                                              :done  :shipped
+                                              :yield [:map [:auth :string]]})
+   (sg/state :shipped   [:map [:total :int] [:auth :string]] {:done :closed})
+   (sg/state :closed    [:map [:total :int] [:auth :string]] {:final true})
+   (sg/state :cancelled [:map [:total :int]] {:final true})
+
+   (sg/event :checkout [:map] (constantly {}) [:map])
+   (sg/event :cancel   [:map] (constantly {}) [:map])
+
+   (sg/transition :cart   :checkout :paying)
+   (sg/transition :paying :cancel   :cancelled)))
+```
+
+**One rule, and it is UML's: a state completes when it has nothing left to do.** A state
+with no `:machine` has no activity to finish, so *finishing it is arriving* — `:shipped`
+above is passed straight through and the machine is never observed sitting in it. A state
+*with* a machine completes when that child reaches a final state, which is the statechart
+done-transition: the parent waits, and then goes on.
+
+`:yield` is **what a finished child hands up** — a map schema, projected off the child's own
+final state and merged in before the continuation lands. It needs a `:machine` to harvest
+from and a `:done` to harvest *on*, because completing is the only moment the child is
+guaranteed final, and so the only moment the schema is a guarantee rather than a hope. An
+escape by an ordinary event still yields nothing; it is still an abort.
+
+```clojure
+(def step (sg/compile order))
+
+(mapv (juxt :id (comp :id :sub))
+      (reductions step (sg/initial order {:total 30})
+                  [{:id :checkout} {:id :authorize :auth "tok_9"} {:id :capture}]))
+;=> [[:cart nil] [:paying :unpaid] [:paying :authorized] [:closed nil]]
+```
+
+Look at the last step. **One event, and the machine moved three times**: `:capture`
+finished the child, so `:paying` completed and harvested its `:auth`, so `:shipped` was
+entered — and `:shipped` completes on arrival, so the machine went straight on to
+`:closed`.
+
+```clojure
+(reduce step (sg/initial order {:total 30})
+        [{:id :checkout} {:id :authorize :auth "tok_9"} {:id :capture}])
+;=> {:id :closed :total 30 :auth "tok_9"}
+
+(reduce step (sg/initial order {:total 30}) [{:id :checkout} {:id :cancel}])
+;=> {:id :cancelled :total 30}          ; still an abort, and it yields nothing
+```
+
+The result stream reports **one row per event**, carrying the state the chain ended in. The
+hops in between are a pure function of the shape and the state, so an auditor holding the
+shape can reconstruct them — and an event is the thing a row could *not* be reconstructed
+without.
+
+**It is not a guard.** There is one target and it is unconditional, so determinism is
+untouched and nothing has to be proved disjoint. What that buys is a fault no guard could
+have: a **cycle** among states that complete on entry is refused as `:done-cycle`, because
+an unconditional relation is a plain graph and a cycle in it *proves* the machine would
+continue for ever.
+
+```clojure
+(sg/shape (sg/state :a [:map] {:initial true :done :b})
+          (sg/state :b [:map] {:done :a}))
+;; ExceptionInfo: The shape has problems
+;;   {:problems [{:problem :done-cycle :id :a} {:problem :done-cycle :id :b}]}
+```
+
+Like `:ambiguous` this is **referential**, so it runs inside the constructor and a machine
+that would spin for ever never gets built — ask `shape/problems` of the parts to look
+without throwing. A cycle *through* a nesting node is legal: the events are what break it.
+
+Two states may complete to one target. That is a **merge** and not a join: one arrival
+continues.
+
+The checks come almost free, and the reason is that a completion transition is a **real
+edge**. `reachable`, `dead-ends`, `finishable` and `traps` all walk the graph, so a state
+reached only by completing is reached and a state whose only way out is completing is not a
+dead end — none of the four learned anything. On top of that:
+
+- `subsumption` covers it, and it is **never `:undeclared`**. An event edge can only be
+  checked where the event declared an `:out`, because what a closure answers is otherwise
+  unknowable; a completion carries no closure at all, so what arrives is the state itself
+  and its schema is known exactly.
+- `yields` is `admits` for the third time, with the yield as the target and the child's own
+  final state as what is produced. **Every** final state is asked, because a child may
+  finish in any of them and a yield resting on only some is a yield that is sometimes not
+  there. A `:no` is `:yield-unavailable`.
+- `dot` draws it **dashed and unlabelled**, which is UML's own notation: there is no event
+  to name, and a `:yield` is about the data rather than about where the machine goes.
+
+```clojure
+(check/yields order)
+;=> ({:from :paying :final :captured :verdict :yes})
+```
+
+And `problems` is silent on all of it: `(sg/problems order)` `;=> []`.
 
 ## A conditional transition: a guard is a schema
 
@@ -493,6 +604,37 @@ about **values**; the runtime is what catches the ones about **rare** values.
 > refutes it in a few dozen samples. Most domain merges are not commutative until you make
 > the order total, so expect the licence to widen less than it first appears.
 
+### Fan-out: *n* of one event
+
+A combine also licenses **two events of the same id**, and that is the fan-out case: *n*
+workers each reporting a result send *n* events of one kind into one accumulating state.
+
+```clojure
+(sg/state :gathering [:map [:seen {:combine into :combine/commutes true} [:set :int]]]
+          {:initial true})
+(sg/event :found [:map [:seen [:set :int]]])
+(sg/transition :gathering :found :gathering)          ; a self-loop
+
+(check/commuting gathering)
+;=> {:gathering #{#{:found}}}                          ; a SINGLETON, and that is the licence
+```
+
+Two of one event were refused outright before, on the ground that they run one handler and
+write one set of keys and so conflict by construction. True under a merge; untrue of a key
+whose combine is commutative. `commutes` needed no change to say so — with the two events
+sharing a handler, an `:out` and a target, the diamond closes wherever the target admits the
+event again, and the write-write test then covers *every* key the `:out` writes, so the pair
+is licensed only where all of them combine commutatively.
+
+> **A vector is not an accumulator.** `into` on a vector is order-dependent, so which worker
+> reported first is visible in the answer — `check/laws` refutes it in a handful of samples.
+> **Set union is** what a join wants, or a map keyed by the item.
+
+**The width is not in the shape**, and that is deliberate rather than missing. Who says
+*that is all of them* is whoever dispatched the work, because it is the only party that
+knows *n* — the same answer this library gives to branching and to retry budgets. A graph
+shows structure, and a count is data.
+
 The price, and it is the only one: **`:states` reports a licensed pair in completion order**,
 so two rows may come back swapped against the order they were fed. No state is ever wrong —
 the pair was proved to land in the same one either way — but an audit trail should represent
@@ -512,8 +654,9 @@ Said plainly, because each is a design decision and not an oversight.
 - **A guard reads the event, never the state.** Branching on what the state already holds
   is not expressible: the guard is over the *cause*, and the cause is the event. Where a
   decision depends on the state, whoever produces the event reports it as a fact the guard
-  can read. It is also why a nested machine's escape is unconditional — "only when the
-  child has finished" is a fact about the state.
+  can read. The one fact about the state the shape settles for itself is **completion** —
+  `:done` is not a guard, having a single unconditional target — so "only when the child has
+  finished" is expressible after all, while "only when the total is over 100" is not.
 - **Two edges on one event must be provably disjoint**, so a guard `disjoint` cannot
   separate — two overlapping ranges, a bare predicate — is refused rather than resolved by
   declaration order. There is no order to resolve it with: out-edges are a set.
@@ -531,13 +674,29 @@ Said plainly, because each is a design decision and not an oversight.
 - **A handler may not raise another event.** With no internal events there is no queue to
   drain and no run-to-completion to implement; a cascade is the caller feeding the next
   event.
+- **A completion transition has one target, and a node has one child.** `:done` is
+  unconditional, which is what keeps it out of the guard's way — "complete to `:a` or `:b`
+  depending on the result" is a branch on the state and is not expressible. And `:yield`
+  harvests from the one machine the node nests, so a node that waits for *several*
+  independent children is still out: that is orthogonal regions, and they need a shape to
+  ask for them. A join over plain *events* needs none of this — it is the product lattice,
+  and `confluence` proves it.
+- **A fan-out's width is the driver's, and only two of its reports run at once.** *n*
+  results accumulate into one state through a commutative combine, and two of those reports
+  may land in either order — but not three, the licence being pairwise. Nothing in the shape
+  says how wide the fan is or notices when it is full: "one child per element of this list,
+  joined when all are done" is not a spelling this library has, because the width is a
+  runtime value and counting to it would be a guard over the state. The driver dispatched
+  the work, so the driver says when it is done.
 - **No persistence, and no shape versioning.** The results are the history; storing them is
   yours.
 - **Concurrency within one machine is only ever two events, and only where proven.**
   `check/commuting` is a *pairwise* relation on one state, so two handlers may be in flight
   and never three: a third would need the licence re-established at each intermediate state,
   which is not proven and so is not taken. An unproven pair — a guarded event, an undeclared
-  `:out`, overlapping writes, a nesting node — waits, which is always correct. And nothing
+  `:out`, overlapping writes, a nesting node, a state a completion transition leaves — waits,
+  which is always correct. (A *join* node may complete freely: both orders were proved to
+  arrive at the same state, and a continuation is a pure function of it.) And nothing
   is *declared* concurrent: the shape already says which pairs commute, so there is no
   annotation to get wrong.
 

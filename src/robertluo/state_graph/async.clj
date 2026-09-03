@@ -103,13 +103,20 @@
   "Whether these two events, PENDING IN THIS STATE, were PROVED applicable in order of
    completion. Nothing is inferred here — this is a set lookup of somebody else's proof.
 
-   TWO OF THE SAME EVENT ARE NEVER LICENSED, and it falls out rather than being arranged:
-   `commuting` records pairs of DISTINCT events, and #{:a :a} is a set of one and not a
-   pair. Which is right — two events of one id run one handler and write one set of keys,
-   so they conflict with each other by construction."
+   TWO OF THE SAME EVENT MAY BE LICENSED, since 2026-09-03, and that is the FAN-OUT case:
+   n workers feeding one accumulating state send n events of ONE id. It was refused before
+   on the ground that `two events of one id run one handler and write one set of keys, so
+   they conflict with each other by construction` — true under a merge, and no longer true
+   with a COMMUTATIVE COMBINE on every key that :out writes, which is precisely what
+   `commutes` requires before licensing such a pair.
+   THE ENCODING NEEDED NOTHING — a same-id licence is a SINGLETON in the same set-of-sets,
+   so `commuting` publishes #{:found} beside #{:eval :test} and this lookup asks one question
+   for both. But it must be built with `hash-set` AND NOT WITH #{}: a set LITERAL of two
+   expressions that turn out equal throws `Duplicate key` at RUNTIME, where `hash-set`
+   dedupes. Verified, and it is how this was found — the throw landed inside a d/chain and
+   the machine simply stopped."
   [pairs state a b]
-  (let [ia (:id a) ib (:id b)]
-    (and (not= ia ib) (contains? (get pairs (:id state)) #{ia ib}))))
+  (contains? (get pairs (:id state)) (hash-set (:id a) (:id b))))
 
 (defn- pump
   "Take events, step, put one result per event to `out`. Answers a deferred of the final

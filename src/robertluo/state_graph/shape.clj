@@ -68,11 +68,24 @@
    :machine NESTS A WHOLE MACHINE IN THIS NODE. It is a built Shape, and while the parent
    sits here that child runs inside it: the compiled step offers every event to the child
    FIRST and only then to this node's own edges. The child's state lives under :sub, which
-   the machinery writes and a handler may not."
+   the machinery writes and a handler may not.
+
+   :done IS A COMPLETION TRANSITION — where this state goes when it COMPLETES, with no
+   event, no handler and no patch. A state with no :machine completes ON ENTRY; one with a
+   machine completes when that child reaches a final state. ONE RULE, and it is UML's: a
+   simple state has no activity to finish, so finishing it is arriving.
+
+   :yield IS WHAT A FINISHED CHILD HANDS UP — a map schema, projected off the child's own
+   final state and merged in before the continuation lands. It needs a :machine to harvest
+   from and a :done to harvest ON, because completing is the only moment the child is
+   GUARANTEED final and so the only moment the schema is a guarantee rather than a hope.
+   An escape by an ordinary event is still an ABORT and still yields nothing."
   [:map [::kind [:= :state]] [:id Id] [:schema MapSchema]
         [:initial {:optional true} :boolean]
         [:final {:optional true} :boolean]
-        [:machine {:optional true} Shape]])
+        [:machine {:optional true} Shape]
+        [:done {:optional true} Id]
+        [:yield {:optional true} MapSchema]])
 
 (def EventDef
   "A catalogue entry, and WHERE A HANDLER LIVES. It is consumed at construction and not
@@ -113,7 +126,11 @@
      (state :best [:map [:best {:combine better :combine/commutes true} Impl]])
 
    Without one a key REPLACES, which is what a merge always did. See `combines-of` for why
-   the combine is a closure and the promise is data."
+   the combine is a closure and the promise is data.
+
+   A STATE MAY SAY WHERE IT GOES WHEN IT COMPLETES, with {:done <id>} — no event and no
+   handler, and for a node nesting a machine, {:yield <a map schema>} to harvest the child's
+   result on the way. See StateDef."
   {:malli/schema [:function [:=> [:cat Id MapSchema] StateDef]
                             [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]}
   ([id schema] (state id schema nil))
@@ -377,13 +394,27 @@
 ;; against, and the two functions that answer live in the reading section below — where
 ;; they belong, being the vocabulary and not a check. Declared rather than moved, and
 ;; deliberately not reimplemented here: what the check asks has to be what runs.
-(declare enter-schema initial-id)
+(declare enter-schema initial-id final? states)
 
 (defn- names
   "A transition as three plain keywords. A problem may not carry a handler or a
    compiled schema: an error nobody can print or compare is not data."
   [t]
   [(:from t) (:event t) (:to t)])
+
+(defn- on-entry?
+  "Whether this state COMPLETES ON ENTRY — the only moment at which a :done continuation
+   fires with no event having arrived.
+
+   A state with no nested machine has no activity to finish, so finishing it IS arriving.
+   One with a machine finishes when that child reaches a final state, which normally takes
+   events — EXCEPT where the child's own first state is already final, and then the parent
+   completes on entry too. That exception is not academic: it is precisely what makes a
+   :done cycle through a nesting node infinite, so the cycle check has to know it."
+  [s]
+  (let [child (:machine s)]
+    (or (nil? child)
+        (and (uber/ubergraph? child) (final? child (initial-id child))))))
 
 (defn problems
   "What is wrong with these parts, AS DATA — a vector of maps, empty when nothing is.
@@ -480,7 +511,52 @@
             :when (and child (uber/ubergraph? child))
             :let [id (initial-id child)]
             :when (not (m/validate (enter-schema child id) {:id id}))]
-        {:problem :machine-cannot-start :id (:id s) :initial id})))))
+        {:problem :machine-cannot-start :id (:id s) :initial id})
+      ;; 8 — A COMPLETION TRANSITION, and what it may not be. The STRUCTURAL half of this
+      ;; costs nothing at all: :done is a real EDGE, so `reachable`, `dead-ends`,
+      ;; `finishable` and `traps` see it without being told. What is left is what only the
+      ;; parts can answer.
+      (for [s state :when (and (:done s) (not (state-ids (:done s))))]
+        {:problem :unknown-state :in [(:id s) nil (:done s)] :key :done :id (:done s)})
+      ;; Completing and being FINAL are contradictory: a final state is where a machine
+      ;; stops and :done says where it goes next.
+      (for [s state :when (and (:done s) (:final s))]
+        {:problem :done-and-final :id (:id s)})
+      ;; A state that continues ON ENTRY can never be sitting there when an event arrives,
+      ;; so its own out-edges are dead code — the same fault as :unused-event and reported
+      ;; for the same reason. A NESTING node's edges are its ESCAPE and are not dead: it
+      ;; sits there for as long as its child is unfinished, which is the whole point.
+      (let [departs (set (map :from transition))]
+        (for [s state :when (and (:done s) (on-entry? s) (departs (:id s)))]
+          {:problem :done-with-edges :id (:id s)}))
+      ;; A :done that can NEVER fire, because the child it waits on has no way to finish.
+      (for [s state
+            :let [child (:machine s)]
+            :when (and (:done s) child (uber/ubergraph? child)
+                       (not-any? #(final? child %) (states child)))]
+        {:problem :machine-cannot-finish :id (:id s)})
+      ;; A CYCLE AMONG ENTRY-FIRED CONTINUATIONS IS A PROVEN INFINITE LOOP, and being
+      ;; proven is the whole reason it may be a fault: a completion transition is
+      ;; UNCONDITIONAL, so the relation is a plain functional graph and a cycle in it is
+      ;; not a suspicion about what might happen. A cycle THROUGH a nesting node whose
+      ;; child needs events to finish is legal and is not reported — the events are what
+      ;; break it.
+      (let [chain (into {} (for [s state :when (and (:done s) (on-entry? s))]
+                             [(:id s) (:done s)]))]
+        (for [id (sort (keys chain))
+              :when (loop [at (chain id) seen #{}]
+                      (cond (nil? at) false
+                            (= at id) true
+                            (seen at) false
+                            :else (recur (chain at) (conj seen at))))]
+          {:problem :done-cycle :id id}))
+      ;; 9 — :yield needs something to harvest FROM and a moment to harvest ON. Without
+      ;; the second it is a declaration nothing ever reads, and this library does not keep
+      ;; those: completion is the only moment a child is guaranteed final.
+      (for [s state :when (and (:yield s) (not (:machine s)))]
+        {:problem :yield-without-machine :id (:id s)})
+      (for [s state :when (and (:yield s) (not (:done s)))]
+        {:problem :yield-without-done :id (:id s)})))))
 
 ;;; ---------------------------------------------------------------------- shape
 
@@ -505,7 +581,20 @@
          (for [t transition]
            [(:from t) (:to t)
             (cond-> (assoc (catalogue (:event t)) :event (:event t))
-              (:when t) (assoc :when (:when t)))])))))
+              (:when t) (assoc :when (:when t)))]))
+        ;; A COMPLETION TRANSITION IS A REAL EDGE and not a node attribute, and that is
+        ;; what buys the structural checks for nothing: `reachable`, `dead-ends`,
+        ;; `finishable` and `traps` all WALK THE GRAPH, so a state reached only by
+        ;; completing is reached, and a state whose only way out is completing is not a
+        ;; dead end. Getting that from a node attribute would have meant teaching four
+        ;; traversals about it.
+        ;; IT CARRIES NO :event, and that absence is the whole distinction: `transitions`
+        ;; reads it to leave these out, because an edge fired by an EVENT and an edge fired
+        ;; by ARRIVING are different things to everything above here.
+        (uber/add-directed-edges*
+         (for [s state :when (:done s)]
+           [(:id s) (:done s) (cond-> {:done true}
+                                (:yield s) (assoc :yield (m/schema (:yield s))))])))))
 
 ;;; ------------------------------------------------------------------- reading
 
@@ -548,13 +637,39 @@
              [id m])))
 
 (defn transitions
-  "Every edge as a plain map — :from :event :to, and the event's :schema, :handler and
-   :out denormalised onto it. The vocabulary everything above this reads a shape through,
-   and why nothing above had to learn that the handler moved."
+  "Every edge FIRED BY AN EVENT as a plain map — :from :event :to, and the event's
+   :schema, :handler and :out denormalised onto it. The vocabulary everything above this
+   reads a shape through, and why nothing above had to learn that the handler moved.
+
+   A COMPLETION TRANSITION IS NOT ONE OF THESE, and leaving it out is not an omission. It
+   carries no event, so there is no handler, no guard and no :out to denormalise — and
+   every reader here is asking a question ABOUT EVENTS: what the index looks up, what
+   `coverage` groups, what `commutes` reasons over. See `continuations`, which is where the
+   other kind of edge is read."
   {:malli/schema [:=> [:cat Shape] [:sequential :map]]}
   [shape]
-  (for [e (uber/edges shape)]
+  (for [e (uber/edges shape)
+        :when (uber/attr shape e :event)]
     (into {:from (uber/src e) :to (uber/dest e)} (uber/attrs shape e))))
+
+(defn continuations
+  "{from -> {:to <id>, :yield <schema>}} for every COMPLETION TRANSITION — where a state
+   goes when it COMPLETES, with no event and no handler. Empty for a shape that declares
+   none, which is every shape written before this existed.
+
+   A MAP AND NOT A SEQ, because a state declares at most ONE. :done is a single target and
+   unconditional, so there is no ambiguity to prove away and determinism costs nothing
+   here — which is the difference between this and a guard.
+
+   THE EDGE IS THE ONLY RECORD OF IT. `state` takes :done and :yield, the constructor turns
+   them into an edge, and nothing is left behind on the node: two places saying one thing is
+   how a shape drifts from itself."
+  {:malli/schema [:=> [:cat Shape] [:map-of Id :map]]}
+  [shape]
+  (into {} (for [e (uber/edges shape)
+                 :when (uber/attr shape e :done)
+                 :let [y (uber/attr shape e :yield)]]
+             [(uber/src e) (cond-> {:to (uber/dest e)} y (assoc :yield y))])))
 
 (defn combines
   "{k {:combine f :commutes? bool :schema S}} for a NODE — what its own schema declares

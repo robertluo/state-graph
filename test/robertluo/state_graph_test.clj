@@ -220,3 +220,29 @@
       (is (= (end [e t])
              (reduce (sg/compile sh) (sg/initial sh {}) [e t])
              (reduce (sg/compile sh) (sg/initial sh {}) [t e]))))))
+
+;;; ------------------------------------------------------ a completion transition
+
+(deftest a-completion-transition-is-ONE-result-row-and-not-several
+  ;; THE DESIGN DECISION NOTHING ELSE ASSERTS, and it is about the HISTORY rather than
+  ;; about the machine: one result per EVENT, carrying the state the chain ended in.
+  ;;
+  ;; The intermediate states are not lost information. A continuation is a pure function of
+  ;; the shape and the state, so an auditor holding the shape can reconstruct every hop —
+  ;; and what a row could NOT be reconstructed from is an event, which is why rows are
+  ;; counted by events. See :the-output-is-a-transition-and-not-a-state.
+  ;;
+  ;; IT IS ALSO WHY THE TWO DOORS STILL AGREE. A continuation is resolved inside the step,
+  ;; so the reduction passes through exactly the states the stream reports; had it been
+  ;; emitted by the stream layer instead, the property above would have had to weaken.
+  (let [sh (ts/shipping)
+        {:keys [states done]} (sg/run sh {:total 30} (fed [{:id :authorize :receipt "R-30"}]))
+        results (deref (s/reduce conj [] states) patience ::timeout)]
+    (is (= 1 (count results))
+        "one event, one row — though the machine moved :paying -> :shipped -> :closed")
+    (is (= {:event {:id :authorize :receipt "R-30"}
+            :state {:id :closed :total 30 :receipt "R-30"}
+            :fired true}
+           (first results)))
+    (is (= {nil {:id :closed :total 30 :receipt "R-30"}}
+           (deref done patience ::timeout)))))

@@ -151,7 +151,10 @@
                                     [k (:combine v)]))]))
    :machines (into {}
                    (for [[id child] (shape/machines sh)]
-                     [id {:shape child :index (index child)}]))})
+                     [id {:shape child :index (index child)}]))
+   ;; {from {:to <id> :yield <schema>}} — WHERE A STATE GOES WHEN IT COMPLETES, read once
+   ;; so that the step pays a map lookup and not a walk over every edge.
+   :continuations (shape/continuations sh)})
 
 (defn- candidates
   "Every edge this state has for this event's ID, guards not yet consulted. One reading,
@@ -192,22 +195,109 @@
        (when-let [m (get-in idx [:machines (:id state)])]
          (admits? (:index m) (:sub state) event)))))
 
+(declare enter)
+
+(defn- arrive
+  "A VALUE ARRIVING AT A NODE: projected onto what that node declares, given the node's
+   identity, and seeded with a nested machine's own first state.
+
+   ONE DEFINITION OF IT, called from all three places a machine ever enters a state — the
+   first state of a run, the far end of a transition, and the far end of a COMPLETION
+   TRANSITION. Those differ in what they hand over, never in what arriving MEANS, and three
+   copies of this is exactly how `what the check composes` and `what compile composes` come
+   to disagree.
+
+   A NODE HOLDS WHAT IT DECLARES AND NOTHING ELSE. The value is PROJECTED onto the keys of
+   the node's enter-schema, so data stops flowing through states that never mentioned it.
+   That is what bounds internal visibility BY ABSENCE — a handler cannot see what the state
+   it is changing does not hold — and it is what makes the view check sound: a declared
+   schema is what a node HAS rather than a lower bound on it. It also removes `a merge
+   cannot remove a key`: dropping a field is declaring one fewer. The cost, said out loud:
+   a bare [:map] node holds nothing but its :id, so a state that carries data must say which.
+
+   :id, :instance AND :sub GO ON AFTER THE PROJECTION. A handler cannot move the machine
+   sideways past the edge that decides where it lands, cannot move it to another run, and
+   cannot reach into a nested machine. A child left behind would ride into a state that
+   never declared it, so :sub is dropped and re-seeded rather than carried."
+  [value to enter-schema seed ctx]
+  (conform! enter-schema
+            (cond-> (-> (select-keys value (mu/keys enter-schema))
+                        (assoc :id to)
+                        (into (select-keys value [:instance]))
+                        (dissoc :sub))
+              seed (assoc :sub seed))
+            (assoc ctx :crossing :enter :to to)))
+
+(defn- completed
+  "THE VALUE A COMPLETED STATE HANDS ON, or nil where the state has not completed.
+
+   A state with no nested machine completes ON ENTRY: there is no activity to finish, so
+   finishing it is arriving. One WITH a machine completes when that child sits in a final
+   state of its own — which is the only moment the child's result is guaranteed to be
+   there, and therefore the only moment a :yield can be a guarantee rather than a hope. An
+   escape by an ordinary event is an ABORT and yields nothing, which is the semantics
+   nesting already had and this does not change.
+
+   THE YIELD IS A SEAM AND IS CHECKED HERE, exactly as a :sees view is. The static check
+   proves what it can from the schemas; this holds in production and gives the diagnosis
+   `the child did not provide the yield` rather than letting a nil into the parent."
+  [sh state yield]
+  (let [id (:id state)
+        child (shape/machine sh id)]
+    (cond
+      (nil? child) state
+      (not (shape/final? child (:id (:sub state)))) nil
+      (nil? yield) state
+      :else (merge state (conform! yield
+                                   (select-keys (:sub state) (mu/keys yield))
+                                   {:crossing :yield :from id})))))
+
+(defn- continue
+  "EVERY COMPLETION TRANSITION FROM HERE, followed until the machine is somewhere that
+   declares none or has not completed. Answers the state it ends in.
+
+   NO EVENT, NO HANDLER AND NO PATCH, so this is PURE — it needs neither the Context nor a
+   deferred, and can run inside `initial` as happily as inside a step. Which is why the
+   first state of a run resolves a continuation too: entering is entering.
+
+   `conts` IS HANDED IN rather than read off the shape, because this sits on the hot path
+   and `shape/continuations` walks every edge. A shape declaring none pays ONE MAP LOOKUP
+   per transition. The rare path recomputes an enter-schema and a child's first state per
+   hop, which is the right way round.
+
+   THE `seen` GUARD IS FOR A GRAPH NOBODY BUILT WITH `shape`. The constructor PROVES an
+   entry-fired cycle cannot exist — :done-cycle — so arriving at this throw means a graph
+   assembled by hand, and a diagnosis is worth more than a hang."
+  [sh conts state]
+  (loop [state state seen #{}]
+    (let [id (:id state)
+          {:keys [to yield]} (conts id)]
+      (if-let [value (and to (completed sh state yield))]
+        (if (seen id)
+          (throw (ex-info "A completion transition cycles"
+                          {:crossing :done :at id :seen seen}))
+          (recur (arrive value to (shape/enter-schema sh to)
+                         (some-> (shape/machine sh to) (enter nil {}))
+                         {:from id})
+                 (conj seen id)))
+        state))))
+
 (defn- enter
   "The state a machine starts in, seeded with a nested machine's own first state wherever
-   the node it starts in declares one. RECURSIVE, so nesting goes as deep as the shapes do.
+   the node it starts in declares one, AND CONTINUED wherever that node completes on
+   arrival. RECURSIVE, so nesting goes as deep as the shapes do.
 
    PRIVATE, and both arities of `initial` call it: a public 2-arity delegating to a public
    3-arity goes through the INSTRUMENTED var, which would check this nil against Instance
    and throw. That trap is recorded in AGENTS.md and this is the shape that avoids it."
   [sh instance data]
-  (let [id (shape/initial-id sh)
-        child (shape/machine sh id)
-        schema (shape/enter-schema sh id)]
-    (conform! schema
-              (cond-> (-> (select-keys data (mu/keys schema)) (assoc :id id))
-                (some? instance) (assoc :instance instance)
-                child (assoc :sub (enter child nil {})))
-              {:crossing :enter :to id})))
+  (let [id (shape/initial-id sh)]
+    (continue sh (shape/continuations sh)
+              (arrive (cond-> data (some? instance) (assoc :instance instance))
+                      id
+                      (shape/enter-schema sh id)
+                      (some-> (shape/machine sh id) (enter nil {}))
+                      {}))))
 
 (def Patch
   "WHAT A HANDLER ANSWERED, before any state has taken it — and whose machine it belongs
@@ -269,7 +359,8 @@
   {:malli/schema [:=> [:cat shape/Shape [:maybe Context]] Phases]}
   [sh context]
   (let [{:keys [then pure ignored]} (merge synchronous context)
-        idx  (index sh)
+        idx   (index sh)
+        conts (:continuations idx)
         ;; Every nested machine split ONCE, with the SAME Context, so a child may answer a
         ;; deferred wherever its parent may. `enter` is what makes its first state, and it
         ;; is computed here because entering a node is not the moment to discover that a
@@ -338,7 +429,11 @@
                                :depth (:depth p) :nested (boolean m)})))
             (if m
               (then ((:apply (:phases m)) (:sub state) event (update p :depth dec))
-                    (fn [sub'] (assoc state :sub sub')))
+                    ;; THE CHILD MAY HAVE JUST FINISHED, which is the second moment a
+                    ;; completion transition fires: this node completes when its child
+                    ;; reaches a final state, so the parent continues with no event of its
+                    ;; own. Nothing else about the parent's state has changed.
+                    (fn [sub'] (continue sh conts (assoc state :sub sub'))))
               (if-let [{:keys [to patch-schema enter-schema]} (entry idx state event)]
                 (let [ctx {:from (:id state) :event (:id event) :to to}
                       answer (:answer p)]
@@ -352,29 +447,13 @@
                   ;; is answering an undeclared key and this is what refuses it. An event
                   ;; is the only way a transition happens.
                   (conform! patch-schema answer (assoc ctx :crossing :answer))
-                  ;; A NODE HOLDS WHAT IT DECLARES AND NOTHING ELSE. The merge is PROJECTED
-                  ;; onto the keys of the target's enter-schema, so data stops flowing
-                  ;; through states that never mentioned it. That is what bounds internal
-                  ;; visibility BY ABSENCE — a handler cannot see what the state it is
-                  ;; changing does not hold — and it is what makes the view check sound: a
-                  ;; declared schema is what a node HAS rather than a lower bound on it. It
-                  ;; also removes `a merge cannot remove a key`: dropping a field is
-                  ;; declaring one fewer. The cost, said out loud: a bare [:map] node holds
-                  ;; nothing but its :id, so a state that carries data must say which.
-                  ;;
-                  ;; :id, :instance AND :sub go on AFTER the projection. A handler cannot
-                  ;; move the machine sideways past the edge that decides where it lands,
-                  ;; cannot move it to another run, and cannot reach into a nested machine.
-                  (pure (conform! enter-schema
-                                  (let [sub (subs to)]
-                                    (cond-> (-> (landed state answer
-                                                        (get-in idx [:combines to]))
-                                                (select-keys (mu/keys enter-schema))
-                                                (assoc :id to)
-                                                (into (select-keys state [:instance]))
-                                                (dissoc :sub))
-                                      sub (assoc :sub (:first sub))))
-                                  (assoc ctx :crossing :enter))))
+                  ;; THE PATCH LANDS, THE VALUE ARRIVES, AND THEN EVERY COMPLETION
+                  ;; TRANSITION FROM WHERE IT LANDED. What arriving means is `arrive`'s to
+                  ;; say and is said in one place; a state that completes on arrival goes
+                  ;; on at once, with no event — see `continue`.
+                  (pure (continue sh conts
+                                  (arrive (landed state answer (get-in idx [:combines to]))
+                                          to enter-schema (:first (subs to)) ctx))))
                 ;; THE LICENCE PROMISED THIS EDGE. `commutes` proves the diamond closes
                 ;; before anything is applied out of order, so an edge missing HERE is a
                 ;; licence that was wrong or a caller applying a patch where it does not

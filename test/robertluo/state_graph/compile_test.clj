@@ -632,3 +632,87 @@
             e {:id :eval :eval {:ok true}}
             t {:id :test :test {:ok false}}]
         (is (nil? (agree js e (patch js e) t (patch js t))))))))
+
+;;; ------------------------------------------------------ a completion transition
+
+(defspec a-pass-through-is-transparent 60
+  ;; THE ALGEBRAIC STATEMENT OF THE FEATURE, and an independent invariant rather than the
+  ;; implementation restated: split one edge a -e-> b into a -e-> mid {:done b} and the
+  ;; reduction must end EXACTLY where it ended before, data and all. Nothing here
+  ;; recomputes what `continue` computes — it compares two machines.
+  (prop/for-all [parts ts/gen-shape
+                 events (gen/vector ts/gen-event 0 20)
+                 n gen/nat]
+    (let [edges (vec (ts/parts-of :transition parts))
+          t (nth edges (mod n (count edges)))
+          spliced (concat (remove #{t} parts)
+                          [(shape/transition (:from t) (:event t) :mid)
+                           (shape/state :mid [:map] {:done (:to t)})])
+          plain (apply shape/shape parts)
+          split (apply shape/shape spliced)]
+      (= (reduce (c/compile plain) (c/initial plain {}) events)
+         (reduce (c/compile split) (c/initial split {}) events)))))
+
+(deftest a-state-with-no-machine-completes-ON-ENTRY
+  ;; One rule, and it is UML's: a simple state has no activity to finish, so finishing it
+  ;; is arriving.
+  (let [sh (shape/shape (shape/state :a [:map [:n :int]] {:initial true})
+                        (shape/state :b [:map [:n :int]] {:done :c})
+                        (shape/state :c [:map [:n :int]] {:final true})
+                        (shape/event :go [:map [:n :int]])
+                        (shape/transition :a :go :b))]
+    (is (= {:id :c :n 7} ((c/compile sh) (c/initial sh {:n 0}) {:id :go :n 7}))
+        "the machine is never observed sitting in :b")))
+
+(deftest a-chain-of-completions-is-followed-to-the-end
+  (let [sh (shape/shape (shape/state :a [:map [:n :int]] {:initial true})
+                        (shape/state :b [:map [:n :int]] {:done :c})
+                        (shape/state :c [:map [:n :int]] {:done :d})
+                        (shape/state :d [:map [:n :int]] {:final true})
+                        (shape/event :go [:map [:n :int]])
+                        (shape/transition :a :go :b))]
+    (is (= {:id :d :n 3} ((c/compile sh) (c/initial sh {:n 0}) {:id :go :n 3})))))
+
+(deftest initial-resolves-a-completion-transition-too
+  ;; ENTERING IS ENTERING, and a continuation is pure — no event, no handler, no deferred —
+  ;; so it runs inside `initial` as happily as inside a step.
+  (let [sh (shape/shape (shape/state :a [:map [:n :int]] {:initial true :done :b})
+                        (shape/state :b [:map [:n :int]] {:final true}))]
+    (is (= {:id :b :n 5} (c/initial sh {:n 5})))))
+
+(deftest a-parent-WAITS-for-its-child-and-harvests-what-it-finished-with
+  ;; The statechart done-transition, and the thing nesting could not do: before this the
+  ;; parent's only exit was an event, and taking one DISCARDED the child's work.
+  (let [sh (ts/shipping)
+        step (c/compile sh)
+        start (c/initial sh {:total 30})]
+    (is (= {:id :paying :total 30 :sub {:id :awaiting}} start))
+    (testing "the child finishing completes the parent, which harvests and continues —
+              through :shipped, which completes on entry, and on to :closed"
+      (is (= {:id :closed :total 30 :receipt "R-30"}
+             (step start {:id :authorize :receipt "R-30"}))))
+    (testing "the child is DROPPED on the way out, a state holding only what it declares"
+      (is (not (contains? (step start {:id :authorize :receipt "R-30"}) :sub))))))
+
+(deftest an-escape-is-still-an-ABORT-and-still-yields-nothing
+  ;; Which is the semantics nesting already had, and the reason the two must coexist:
+  ;; abort is the commoner need and `only when the child has finished` is what :done adds.
+  (let [sh (ts/shipping)
+        step (c/compile sh)]
+    (is (= {:id :cancelled :total 30}
+           (step (c/initial sh {:total 30}) {:id :cancel})))))
+
+(deftest a-yield-is-a-seam-and-is-checked-at-runtime-too
+  ;; :yield-unavailable is STRUCTURAL, so a shape whose child cannot provide the yield can
+  ;; still be BUILT — `problems` is opt-in. What holds in production is this.
+  (let [child (shape/shape (shape/state :d1 [:map] {:initial true})
+                           (shape/state :d2 [:map [:other :int]] {:final true})
+                           (shape/event :fin [:map [:other :int]])
+                           (shape/transition :d1 :fin :d2))
+        sh (shape/shape (shape/state :p [:map] {:initial true :machine child
+                                                :done :z :yield [:map [:receipt :string]]})
+                        (shape/state :z [:map [:receipt :string]] {:final true}))
+        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"yield"
+                                ((c/compile sh) (c/initial sh {}) {:id :fin :other 1})))]
+    (is (= :yield (:crossing (ex-data e))))
+    (is (= :p (:from (ex-data e))))))

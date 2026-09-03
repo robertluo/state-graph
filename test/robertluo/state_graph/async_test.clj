@@ -302,7 +302,7 @@
         {:keys [states done]} (a/drive (:step ph) (c/initial sh {})
                                        (fed [{:id :offer-a} {:id :offer-b}])
                                        a/state-only (licensed sh ph))]
-    (is (= {:choosing #{#{:offer-a :offer-b}}} (:pairs (licensed sh ph)))
+    (is (contains? (get (:pairs (licensed sh ph)) :choosing) #{:offer-a :offer-b})
         "one key, two writers, licensed")
     (d/success! gate {:best {:score 5 :by "a"}})
     (let [got (collect {:states states :done done})]
@@ -334,3 +334,34 @@
     (is (= [] (deref (s/reduce conj [] states) patience ::timeout))
         "closed, and closed EMPTY — the check runs before either patch lands")
     (is (thrown? clojure.lang.ExceptionInfo (deref done patience ::timeout)))))
+
+;;; ---------------------------------------------------------- the fan-out licence
+
+(deftest two-of-ONE-event-run-at-once-where-the-accumulator-commutes
+  ;; THE FAN-OUT, and what the licence was refusing until 2026-09-03. Two reports of the
+  ;; same kind, each parked on its own deferred, and neither can land until BOTH patches are
+  ;; in — which is what makes :agree a genuine pre-condition. Resolved out of order on
+  ;; purpose, so the assertion is about the ANSWER and never about a clock.
+  (let [g1 (d/deferred) g2 (d/deferred)
+        gates (atom [g1 g2])
+        next-gate (fn [] (let [[g & more] @gates] (reset! gates more) g))
+        sh (shape/shape
+            (shape/state :gathering
+                         [:map [:seen {:combine into :combine/commutes true} [:set :int]]]
+                         {:initial true})
+            ;; each report parks on its OWN gate, so the test decides which lands first
+            (shape/event :found [:map] (fn [_] (next-gate))
+                         [:map [:seen [:set :int]]])
+            (shape/transition :gathering :found :gathering))
+        ph (c/phases sh a/context)
+        {:keys [states done]} (a/drive (:step ph) (c/initial sh {:seen #{}})
+                                       (fed [{:id :found} {:id :found}])
+                                       a/state-only (licensed sh ph))]
+    (is (= {:gathering #{#{:found}}} (:pairs (licensed sh ph)))
+        "a SINGLETON licence, which is the fan-out one")
+    (d/success! g2 {:seen #{2}})
+    (d/success! g1 {:seen #{1}})
+    (let [got (collect {:states states :done done})]
+      (is (= #{1 2} (:seen (:done got)))
+          "set union, so which worker finished first is not in the answer")
+      (is (= 2 (count (:states got))) "one row per event, still"))))

@@ -455,19 +455,113 @@
 ;; A child that can never finish is a fault of the child, reported `:within [:p]` — a path,
 ;; because nesting nests.
 ;;
-;; ### The limit, said plainly
+;; ### An escape is an ABORT
 ;;
-;; **The escape is unconditional.** Nothing stops `:ship` firing while the payment is half
-;; done, because "only when the child has finished" is a fact about the *state*, and a guard
-;; — the next section — reads the *event*:
+;; Nothing stops `:ship` firing while the payment is half done, and the child's work is
+;; simply gone when it does:
 
 (mapv (juxt :id (comp :id :sub))
       (reductions order-step (sg/initial order {}) [{:id :checkout} {:id :ship}]))
 
-;; So deciding *when* is the producer's job, and the child's state is on every result, so a
-;; producer can see exactly what it needs to decide. A door left open, not designed: a node
-;; could declare where to go when its child finishes, which is the statechart
-;; done-transition and needs no event queue here.
+;; That is right for `:cancel` and wrong for `:ship`. Aborting is the commoner need, so it
+;; stays what an event does — and for the parent to **wait** instead, the node says where to
+;; go when it *completes*.
+
+;; ## Completing: `:done` and `:yield`
+;;
+;; A state can say where it goes when it is **finished** — no event, no handler, no patch.
+;; **One rule, and it is UML's: a state completes when it has nothing left to do.** A state
+;; with no machine has no activity to finish, so *finishing it is arriving*. A state with one
+;; completes when that child reaches a final state.
+;;
+;; Here is the same order with `:ship` **gone**. That event was the producer telling the
+;; machine that payment had finished, which is a thing the shape can now work out for itself:
+
+(def waiting-order
+  (sg/shape
+   (sg/state :cart      [:map [:total :int]] {:initial true})
+   (sg/state :paying    [:map [:total :int]] {:machine payment
+                                              :done  :shipped
+                                              :yield [:map [:auth :string]]})
+   (sg/state :shipped   [:map [:total :int] [:auth :string]] {:done :closed})
+   (sg/state :closed    [:map [:total :int] [:auth :string]] {:final true})
+   (sg/state :cancelled [:map [:total :int]] {:final true})
+
+   (sg/event :checkout [:map] (constantly {}) [:map])
+   (sg/event :cancel   [:map] (constantly {}) [:map])
+
+   (sg/transition :cart   :checkout :paying)
+   (sg/transition :paying :cancel   :cancelled)))
+
+;; The completion transitions are drawn **dashed and unlabelled**, which is UML's own
+;; notation for them: there is no event to name, arriving being the whole of the cause.
+
+(picture waiting-order)
+
+(def waiting-step (sg/compile waiting-order))
+
+(kind/table
+ {:column-names [:event :order :payment]
+  :row-vectors (let [events [{:id :checkout}
+                             {:id :authorize :auth "tok_9"}
+                             {:id :capture}]]
+                 (map (fn [e s] [(:id e) (:id s) (-> s :sub :id)])
+                      (cons nil events)
+                      (reductions waiting-step (sg/initial waiting-order {:total 30}) events)))})
+
+;; Look at the last row. **One event, and the machine moved three times**: `:capture`
+;; finished the payment, so `:paying` completed and *harvested* its `:auth`, so `:shipped`
+;; was entered — and `:shipped` completes on arrival, so the machine went straight on to
+;; `:closed`. The child is dropped on the way, a state holding only what it declares:
+
+(reduce waiting-step (sg/initial waiting-order {:total 30})
+        [{:id :checkout} {:id :authorize :auth "tok_9"} {:id :capture}])
+
+;; `:yield` is what a finished child hands **up**. It needs a `:machine` to harvest from and
+;; a `:done` to harvest *on*, because completing is the only moment the child is guaranteed
+;; final — and so the only moment the schema is a guarantee rather than a hope.
+;;
+;; Which is what makes the check exact rather than hopeful. A parent asking for what its
+;; child cannot finish with is a **proven** fault, before anything runs — and it is asked of
+;; **every** final state the child has, a child being free to finish in any of them:
+
+(sg/problems
+ (sg/shape (sg/state :p [:map] {:initial true
+                                :done  :z
+                                :yield [:map [:receipt :string]]
+                                :machine (sg/shape
+                                          (sg/state :d1 [:map] {:initial true})
+                                          (sg/state :ok  [:map [:receipt :string]] {:final true})
+                                          (sg/state :bad [:map] {:final true})
+                                          (sg/event :win  [:map [:receipt :string]])
+                                          (sg/event :lose [:map])
+                                          (sg/transition :d1 :win  :ok)
+                                          (sg/transition :d1 :lose :bad))})
+           (sg/state :z [:map [:receipt :string]] {:final true})))
+
+;; `:bad` is a way for that child to finish with no `:receipt` at all, so the yield is a
+;; promise the shape cannot keep — and `problems` names the state that breaks it.
+
+;; An escape is still an abort, and still yields nothing:
+
+(reduce waiting-step (sg/initial waiting-order {:total 30}) [{:id :checkout} {:id :cancel}])
+
+;; ### It is not a guard, and that is what it buys
+;;
+;; There is one target and it is unconditional, so determinism is untouched and nothing has
+;; to be proved disjoint. What that gets you is a fault no guard could have: a **cycle**
+;; among states that complete on entry is a *proven* infinite loop, because an unconditional
+;; relation is a plain graph.
+;;
+;; This one is **referential** — answerable from the parts alone — so it is `shape/problems`
+;; that is asked, and a machine that would spin for ever never gets built at all:
+
+(shape/problems (sg/state :a [:map] {:initial true :done :b})
+                (sg/state :b [:map] {:done :a}))
+
+;; A cycle *through* a nesting node is legal — the events are what break it. And the
+;; structural checks needed no teaching at all, because a completion transition is a **real
+;; edge**: `reachable`, `dead-ends`, `finishable` and `traps` all walk the graph.
 
 ;; ## Branching: a guard is a schema
 ;;
@@ -698,6 +792,51 @@
 ;;
 ;; Expect the licence to widen less than it first appears: most domain merges are not
 ;; commutative until you make the order total.
+
+;; ### Fan-out: n of one event
+;;
+;; A combine also licenses **two events of the same id**, and that is the fan-out: *n* workers
+;; each reporting a result send *n* events of one kind into one accumulating state. The shape
+;; of it is a single self-loop:
+
+(def gathering
+  (sg/shape
+   (sg/state :gathering [:map [:seen {:combine into :combine/commutes true} [:set :int]]]
+             {:initial true})
+   (sg/state :gathered [:map [:seen [:set :int]]] {:final true})
+   (sg/event :found [:map [:seen [:set :int]]])
+   (sg/event :stop  [:map] (constantly {}) [:map])
+   (sg/transition :gathering :found :gathering)
+   (sg/transition :gathering :stop  :gathered)))
+
+(check/commuting gathering)
+
+;; `#{:found}` is a **singleton**, and that is the fan-out licence sitting in the same
+;; set-of-sets as a two-event one. Two of a kind were refused outright before: they run one
+;; handler and write one set of keys, so under a merge they conflicted by construction. With a
+;; commutative combine on that key they do not, and `commutes` needed no change to say so.
+;;
+;; Watch the accumulation, and note that `:stop` with **itself** is `:no` — it leaves
+;; `:gathering`, so a second one meets a state with no edge for it:
+
+(check/confluence gathering)
+
+;; Here is the trap, and every first attempt at a join walks into it. `into` on a **vector**
+;; is order-dependent, so which worker reported first is visible in the answer:
+
+(check/laws
+ (sg/shape
+  (sg/state :s [:map [:xs {:combine into :combine/commutes true} [:vector :int]]]
+            {:initial true})
+  (sg/event :add [:map [:xs [:vector :int]]])
+  (sg/transition :s :add :s)))
+
+;; **Set union is** what a join wants, or a map keyed by the item.
+;;
+;; And what the shape does *not* say is **how wide the fan is**. Nothing here counts to *n* or
+;; notices when the collection is full — that would be a guard over the state, which this
+;; library refuses. Whoever dispatched the work is the only party that knows *n*, so `:stop` is
+;; theirs to send. A graph shows structure; a count is data.
 
 ;; ## Reading the state, and what a state holds
 ;;

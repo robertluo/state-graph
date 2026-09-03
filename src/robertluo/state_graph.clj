@@ -87,7 +87,8 @@
 
 (defn state
   "A state: an id, the malli schema of its DATA, and optionally {:initial true},
-   {:final true} or {:machine <a shape>}. Exactly one state in a shape is the initial one.
+   {:final true}, {:machine <a shape>} or {:done <id>}. Exactly one state in a shape is the
+   initial one.
 
    THE SCHEMA IS WHAT THIS NODE HOLDS, not a lower bound on it: the merge is projected onto
    these keys on entry, so anything a state does not declare is dropped at its door. Data that
@@ -104,7 +105,26 @@
    so the child's vocabulary decides who handles what, and a child that has finished admits
    nothing and stops competing. The child's state lives under :sub, seeded on entry, dropped
    on the way out, and visible on every result. It is an ordinary shape, so it is checked
-   and drawn as one."
+   and drawn as one.
+
+   {:done <id>} IS A COMPLETION TRANSITION — where this state goes when it COMPLETES, with
+   no event, no handler and no patch. A state with no :machine completes ON ENTRY, so it is
+   passed straight through; one WITH a machine completes when that child reaches a final
+   state, which is the statechart done-transition and is how a parent waits for its child
+   rather than aborting it. One rule, and it is UML's: a simple state has no activity to
+   finish, so finishing it is arriving.
+
+   It is not a guard and not an event. There is one target and it is unconditional, so
+   determinism is untouched, and a CYCLE among states that complete on entry is refused as
+   :done-cycle — an unconditional relation is a plain graph, so a cycle in it PROVES the
+   machine would continue for ever rather than merely suggesting it might. Two states may
+   complete to ONE target, which is a MERGE and not a join: one arrival continues.
+
+   {:yield <a map schema>} IS WHAT A FINISHED CHILD HANDS UP, harvested off the child's own
+   final state and merged in before the continuation lands. It needs a :machine and a :done:
+   completing is the only moment the child is GUARANTEED final, and so the only moment the
+   schema is a guarantee rather than a hope. An escape by an ordinary event is still an
+   ABORT and still yields nothing."
   ([id schema] (shape/state id schema))
   ([id schema opts] (shape/state id schema opts)))
 

@@ -173,7 +173,10 @@
               (shape/transition :p :a :p)
               (shape/transition :p :b :p)
               (shape/transition :p :fin :out))]
-    (is (= [:no] (map :verdict (check/confluence child)))
+    (is (= [{:pair [:a :a] :verdict :no}
+            {:pair [:a :b] :verdict :no}
+            {:pair [:b :b] :verdict :no}]
+           (map #(select-keys % [:pair :verdict]) (check/confluence child)))
         "the child proves its own pair is order-dependent")
     (is (every? #{:unknown} (map :verdict (check/confluence host)))
         "so the host may claim nothing about any pair pending where that child lives")
@@ -191,7 +194,14 @@
   ;; distinct nodes and two routes that rejoin, which is what `commutes` implements and
   ;; what a self-loop shortcut would have refused to see.
   (let [j (ts/join)]
-    (is (= [{:in :verifying :pair [:eval :test] :verdict :yes}] (vec (check/confluence j))))
+    (is (= [{:in :evaled :pair [:test :test] :verdict :no}
+            {:in :tested :pair [:eval :eval] :verdict :no}
+            {:in :verifying :pair [:eval :eval] :verdict :no}
+            {:in :verifying :pair [:eval :test] :verdict :yes}
+            {:in :verifying :pair [:test :test] :verdict :no}]
+           (vec (check/confluence j)))
+        "and the diagonals are all :no, a join's arms being the opposite of a fan-out —
+         one :eval takes you somewhere that does not admit a second")
     (is (= {:verifying #{#{:eval :test}}} (check/commuting j)))
     (testing "and the proof holds when run: both orders land in one identical state"
       (let [step (c/compile j)
@@ -336,8 +346,13 @@
            (shape/transition :s :set :s))
         step (c/compile g)
         init (c/initial g {:n 1 :total 0})]
-    (is (= [{:in :s :pair [:set :sum] :verdict :unknown}] (check/confluence g))
-        ":unknown and not :no — an overlap is not a PROOF that the values differ")
+    (is (= [{:in :s :pair [:set :set] :verdict :unknown}
+            {:in :s :pair [:set :sum] :verdict :unknown}
+            {:in :s :pair [:sum :sum] :verdict :unknown}]
+           (check/confluence g))
+        ":unknown and not :no — an overlap is not a PROOF that the values differ. The
+         diagonals are :unknown for the same reason each writes what it writes with no
+         combine to say how it lands")
     (is (= {} (check/commuting g))
         "so no licence, which is what matters: only :yes licenses anything")
     (is (not= (reduce step init [{:id :sum} {:id :set :to 9}])
@@ -399,12 +414,18 @@
            (shape/transition :idle :tick :idle)
            (shape/transition :idle :go :done {:when [:map [:v [:= :x]]]})
            (shape/transition :idle :go :idle {:when [:map [:v [:= :y]]]}))]
-    (is (= [{:in :idle :pair [:go :tick] :verdict :unknown}]
+    (is (= [{:in :idle :pair [:go :go] :verdict :unknown}
+            {:in :idle :pair [:go :tick] :verdict :unknown}
+            {:in :idle :pair [:tick :tick] :verdict :yes}]
            (vec (check/confluence g)))
         "the guarded event appears in the listing, because leaving it out would be a
-         quiet gap in what this publishes")
-    (is (= {} (check/commuting g))
-        "and nothing is licensed off an :unknown")))
+         quiet gap in what this publishes — and so does the DIAGONAL, two of one event
+         being the fan-out case")
+    (is (not (contains? (get (check/commuting g) :idle) #{:go :tick}))
+        "nothing is licensed off an :unknown")
+    (is (= {:idle #{#{:tick}}} (check/commuting g))
+        "and :tick with ITSELF is licensed, its :out writing nothing at all — two empty
+         patches commute however many of them there are")))
 
 (deftest a-guard-is-drawn-on-the-arrow
   ;; Harel's own notation, event [guard], and a guard here is a SCHEMA — so it can be read
@@ -422,7 +443,9 @@
   ;; write THE SAME key, so under last-write-wins this pair could never be licensed however
   ;; independent the work behind it was. It is licensed now.
   (let [f (ts/fanning)]
-    (is (= {:choosing #{#{:offer-a :offer-b}}} (check/commuting f)))
+    (is (= {:choosing #{#{:offer-a :offer-b} #{:offer-a} #{:offer-b}}} (check/commuting f))
+        "and each offer with ITSELF, a SINGLETON in the same set-of-sets — which is the
+         fan-out licence: n workers sending n events of one id")
     (testing "and take the combine's promise away and the licence goes with it"
       (let [plain (shape/shape
                    (shape/state :choosing [:map [:best {:optional true} ts/Impl]]
@@ -480,8 +503,178 @@
               (shape/transition :s :q :s))]
     (is (every? #{:unknown} (map :verdict (check/laws liar {:samples 14})))
         "2,744 triples and nothing found")
-    (is (= {:s #{#{:p :q}}} (check/commuting liar))
+    (is (= {:s #{#{:p :q} #{:p} #{:q}}} (check/commuting liar))
         "so the pair IS licensed on a false promise — which is what the runtime check is for")
     (testing "and the promise really is false"
       (let [s {:score 0 :by "m"} a {:score 5 :by "pinned"} b {:score 9 :by "z"}]
         (is (not= (sticky (sticky s a) b) (sticky (sticky s b) a)))))))
+
+;;; ------------------------------------------------------ a completion transition
+
+(deftest the-structural-checks-see-a-completion-transition-for-nothing
+  ;; THE WHOLE ARGUMENT FOR MAKING IT AN EDGE. None of these four learned anything about
+  ;; :done; they walk the graph, and the arrow is in the graph.
+  (let [sh (shape/shape (shape/state :a [:map] {:initial true})
+                        (shape/state :b [:map] {:done :c})
+                        (shape/state :c [:map] {:final true})
+                        (shape/event :go [:map])
+                        (shape/transition :a :go :b))]
+    (testing ":c is reached only by completing, and `reachable` reaches it"
+      (is (= #{:a :b :c} (set (check/reachable sh))))
+      (is (empty? (check/unreachable sh))))
+    (testing ":b's only way out is completing, so it is neither a dead end nor a trap"
+      (is (empty? (check/dead-ends sh)))
+      (is (empty? (check/traps sh))))
+    (is (empty? (check/problems sh)))))
+
+(deftest a-completion-transition-is-subsumption-checked-and-is-never-undeclared
+  ;; THE ONE WAY THIS IS STRONGER THAN AN EVENT EDGE: an event edge can only be checked
+  ;; where the event declared an :out, because what a closure answers is otherwise
+  ;; unknowable. A completion carries no closure, so what arrives is the state itself.
+  (let [sh (shape/shape (shape/state :a [:map [:n :int]] {:initial true :done :b})
+                        (shape/state :b [:map [:n :int]] {:final true}))
+        v (first (filter :done (check/subsumption sh)))]
+    (is (= {:from :a :to :b :done true :verdict :yes} v))
+    (is (not-any? #{:undeclared} (map :verdict (filter :done (check/subsumption sh))))))
+  (testing "a target that insists on a key the source cannot have is a PROVEN fault"
+    (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})
+                          (shape/state :b [:map [:needed :int]] {:final true}))]
+      (is (= [{:from :a :to :b :done true :problem :target-refuses}]
+             (check/problems sh))))))
+
+(deftest a-yield-is-admits-for-the-third-time
+  ;; `views` was the second. Three structural checks off one subsumption function is the
+  ;; argument for having written it.
+  (let [child (fn [schema]
+                (shape/shape (shape/state :d1 [:map] {:initial true})
+                             (shape/state :d2 schema {:final true})
+                             (shape/event :fin schema)
+                             (shape/transition :d1 :fin :d2)))
+        verdict (fn [child-schema yield]
+                  (let [sh (shape/shape
+                            (shape/state :p [:map] {:initial true :machine (child child-schema)
+                                                    :done :z :yield yield})
+                            (shape/state :z yield {:final true}))]
+                    (:verdict (first (check/yields sh)))))]
+    (is (= :yes (verdict [:map [:r :string]] [:map [:r :string]]))
+        "the child finishes with the key and more")
+    (is (= :no (verdict [:map [:other :int]] [:map [:r :string]]))
+        "the child never has it")
+    (is (= :no (verdict [:map [:r :int]] [:map [:r :string]]))
+        "the child has it at the wrong type")
+    (is (= :no (verdict [:map [:r {:optional true} :string]] [:map [:r :string]]))
+        "AND ONLY OPTIONALLY IS ALSO :no — a yield cannot rest on a maybe")))
+
+(deftest every-final-state-of-the-child-is-asked-and-not-just-one
+  ;; A child may finish in ANY of its finals, and a yield resting on only some is a yield
+  ;; that is sometimes not there.
+  (let [child (shape/shape (shape/state :d1 [:map] {:initial true})
+                           (shape/state :ok  [:map [:r :string]] {:final true})
+                           (shape/state :bad [:map] {:final true})
+                           (shape/event :win  [:map [:r :string]])
+                           (shape/event :lose [:map])
+                           (shape/transition :d1 :win :ok)
+                           (shape/transition :d1 :lose :bad))
+        sh (shape/shape (shape/state :p [:map] {:initial true :machine child
+                                                :done :z :yield [:map [:r :string]]})
+                        (shape/state :z [:map [:r :string]] {:final true}))]
+    (is (= [{:from :p :final :bad :verdict :no}
+            {:from :p :final :ok :verdict :yes}]
+           (vec (check/yields sh))))
+    (is (= [{:from :p :final :bad :problem :yield-unavailable}]
+           (filter (comp #{:yield-unavailable} :problem) (check/problems sh))))))
+
+(deftest a-continuing-JOIN-NODE-keeps-its-licence
+  ;; AND THAT MATTERS RATHER THAN BEING A NICETY. x is where both orders arrive — the
+  ;; diamond having proved they arrive at the SAME x — and a continuation is a pure
+  ;; function of the state, so both orders continue identically. A join's own :complete is
+  ;; exactly where a :done belongs, and refusing it would lose the licence precisely where
+  ;; it was won.
+  (let [R [:map [:ok :boolean]]
+        joined (shape/shape
+                (shape/state :verifying [:map] {:initial true})
+                (shape/state :evaled [:map [:eval R]])
+                (shape/state :tested [:map [:test R]])
+                (shape/state :complete [:map [:eval R] [:test R]] {:done :shipped})
+                (shape/state :shipped [:map [:eval R] [:test R]] {:final true})
+                (shape/event :eval [:map [:eval R]])
+                (shape/event :test [:map [:test R]])
+                (shape/transition :verifying :eval :evaled)
+                (shape/transition :verifying :test :tested)
+                (shape/transition :evaled :test :complete)
+                (shape/transition :tested :eval :complete))]
+    (is (empty? (check/problems joined)))
+    (is (= {:verifying #{#{:eval :test}}} (check/commuting joined)))
+    (is (= {:verifying #{#{:eval :test}}} (check/commuting (ts/join)))
+        "and it is the same licence the join had without one")))
+
+(deftest a-plain-state-can-never-both-continue-and-be-in-a-diamond
+  ;; WHICH IS WHY `commutes` NEEDS NO TEST OF ITS OWN FOR THIS. A state in a diamond needs
+  ;; out-edges, and a plain state that both continues and has out-edges is refused before
+  ;; it exists — so the licence's own guard is IMPLIED by this fault. Asserted here because
+  ;; that implication is the thing `commutes` is resting on, and it spans two namespaces.
+  (is (= [:done-with-edges]
+         (map :problem
+              (shape/problems (shape/state :s [:map] {:initial true})
+                              (shape/state :ta [:map] {:done :x})
+                              (shape/state :tb [:map])
+                              (shape/state :x [:map] {:final true})
+                              (shape/event :a [:map]) (shape/event :b [:map])
+                              (shape/transition :s :a :ta)
+                              (shape/transition :s :b :tb)
+                              (shape/transition :ta :b :x)
+                              (shape/transition :tb :a :x))))))
+
+(deftest a-completion-transition-is-drawn-DASHED-and-UNLABELLED
+  ;; UML's own notation for it, and honest here for a better reason: there is no event to
+  ;; name, and a :yield is about the DATA rather than about where the machine goes.
+  (let [d (check/dot (ts/shipping))]
+    (is (re-find #"dashed" d))
+    (is (not (re-find #"\$eval" d)) "no closure ever reaches a picture")))
+
+;;; ---------------------------------------------------------- the fan-out licence
+
+(deftest two-of-ONE-event-may-commute-which-is-the-fan-out-case
+  ;; THE DIAGONAL, and it is not a degenerate case. n workers feeding one accumulating
+  ;; state send n events of a SINGLE id, and an async handler makes two of them pending at
+  ;; once exactly as it does for two ids. It was refused outright before, on the ground that
+  ;; two events of one id write one set of keys and so conflict by construction — true under
+  ;; a merge, and untrue of a key that declares a COMMUTATIVE COMBINE.
+  (let [g (ts/gathering)]
+    (is (= [{:in :gathering :pair [:found :found] :verdict :yes}
+            {:in :gathering :pair [:found :stop] :verdict :no}
+            {:in :gathering :pair [:stop :stop] :verdict :no}]
+           (vec (check/confluence g))))
+    (is (= {:gathering #{#{:found}}} (check/commuting g))
+        "a SINGLETON in the same set-of-sets, so a runtime asks one question for both kinds")
+    (testing "`commutes` needed no change for it, which is what says the condition was
+              always right: with a = b the two events share a handler, an :out and a target,
+              so the diamond closes wherever the target admits the event again"
+      (is (= :no (:verdict (first (filter #(= [:stop :stop] (:pair %))
+                                          (check/confluence g)))))
+          ":stop leaves :gathering, so a second :stop meets a state with no edge for it"))))
+
+(deftest the-fan-out-accumulator-must-be-COMMUTATIVE-and-a-vector-is-not
+  ;; THE TRAP EVERY USER OF THIS WILL MEET, and `laws` is what catches it — measured, not
+  ;; guessed: `into` on a VECTOR is order-dependent, so which worker reported first is
+  ;; visible in the answer. Set union is not. This is :what-the-combine-taught's own warning
+  ;; landing on the obvious first attempt at a join.
+  (let [vec-shape (fn [schema]
+                    (shape/shape
+                     (shape/state :s [:map [:xs {:combine into :combine/commutes true} schema]]
+                                  {:initial true})
+                     (shape/event :add [:map [:xs schema]])
+                     (shape/transition :s :add :s)))]
+    (is (= [:no] (->> (check/laws (vec-shape [:vector :int]))
+                      (filter #(= :commutes (:law %))) (map :verdict)))
+        "a vector accumulator is REFUTED, and the witness is two patches in both orders")
+    (is (= [:unknown] (->> (check/laws (vec-shape [:set :int]))
+                           (filter #(= :commutes (:law %))) (map :verdict)))
+        "a set accumulator survives — :unknown being the best generation can ever say")
+    (testing "BOTH are licensed statically, and that is not a bug — `commutes` reads the
+              DECLARATION, a claim about a closure that no static check can settle. `laws`
+              is the development aid and compile's :agree is the enforcement, which is the
+              three-way argument :what-the-combine-taught made and this is a fourth witness
+              to it"
+      (is (= {:s #{#{:add}}} (check/commuting (vec-shape [:set :int]))))
+      (is (= {:s #{#{:add}}} (check/commuting (vec-shape [:vector :int])))))))

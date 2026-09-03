@@ -4,7 +4,8 @@
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [robertluo.state-graph.shape :as shape]
-            [robertluo.state-graph.test-support :as ts]))
+            [robertluo.state-graph.test-support :as ts]
+            [ubergraph.core :as uber]))
 
 (use-fixtures :once ts/instrumented)
 
@@ -295,3 +296,106 @@
                       (shape/problems (shape/state :x [:map [:k {:combine +} :int]]
                                                    {:initial true}))))
       "a combine with no law declared is fine — it simply licenses nothing"))
+
+;;; ------------------------------------------------------ a completion transition
+
+(deftest a-completion-transition-is-an-edge-and-not-a-node-attribute
+  ;; WHICH IS WHAT BUYS THE STRUCTURAL CHECKS FOR NOTHING — `reachable`, `dead-ends`,
+  ;; `finishable` and `traps` all walk the graph. Asserted here rather than there because
+  ;; this is the fact those four rest on.
+  (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})
+                        (shape/state :b [:map] {:final true}))]
+    (testing "the graph has the arrow"
+      (is (= [:b] (map uber/dest (uber/out-edges sh :a)))))
+    (testing "`transitions` is about EVENTS and leaves it out"
+      (is (empty? (shape/transitions sh))))
+    (testing "`continuations` is where it is read, and nothing is left on the node"
+      (is (= {:a {:to :b}} (shape/continuations sh)))
+      (is (nil? (uber/attr sh :a :done))))))
+
+(deftest a-yield-rides-on-the-completion-edge
+  (let [child (shape/shape (shape/state :c1 [:map] {:initial true})
+                           (shape/state :c2 [:map [:r :string]] {:final true})
+                           (shape/event :fin [:map [:r :string]])
+                           (shape/transition :c1 :fin :c2))
+        sh (shape/shape (shape/state :a [:map] {:initial true :machine child
+                                                :done :b :yield [:map [:r :string]]})
+                        (shape/state :b [:map [:r :string]] {:final true}))]
+    (is (= :b (get-in (shape/continuations sh) [:a :to])))
+    (is (= [:map [:r :string]]
+           (m/form (get-in (shape/continuations sh) [:a :yield]))))))
+
+(deftest what-a-completion-transition-may-not-be
+  (let [ok (fn [& parts] (map :problem (apply shape/problems parts)))
+        ;; A CHILD THAT CAN START, which is not `shipping` — its own first state insists on
+        ;; a :total and entering a child hands it no data at all, so nesting that one is
+        ;; :machine-cannot-start. Worth meeting here rather than in anger.
+        child (shape/shape (shape/state :c1 [:map] {:initial true})
+                           (shape/state :c2 [:map] {:final true})
+                           (shape/event :fin [:map])
+                           (shape/transition :c1 :fin :c2))
+        endless (shape/shape (shape/state :e [:map] {:initial true})
+                             (shape/event :spin [:map])
+                             (shape/transition :e :spin :e))]
+    (testing "naming a state that is not there"
+      (is (= [:unknown-state]
+             (ok (shape/state :a [:map] {:initial true :done :nope})))))
+    (testing "completing and being final are contradictory"
+      (is (= [:done-and-final]
+             (ok (shape/state :a [:map] {:initial true})
+                 (shape/state :z [:map] {:final true :done :a})
+                 (shape/event :go [:map]) (shape/transition :a :go :z)))))
+    (testing "a state that continues ON ENTRY can never receive an event, so its own
+              out-edges are dead code — the same fault as :unused-event"
+      (is (= [:done-with-edges]
+             (ok (shape/state :a [:map] {:initial true :done :z})
+                 (shape/state :z [:map] {:final true})
+                 (shape/event :go [:map]) (shape/transition :a :go :z)))))
+    (testing "a NESTING node's edges are its ESCAPE and are not dead"
+      (is (empty?
+           (ok (shape/state :a [:map] {:initial true :machine child :done :z})
+               (shape/state :z [:map] {:final true})
+               (shape/event :go [:map]) (shape/transition :a :go :z)))))
+    (testing "a :done waiting on a child that has no way to finish can never fire"
+      (is (= [:machine-cannot-finish]
+             (ok (shape/state :a [:map] {:initial true :machine endless :done :z})
+                 (shape/state :z [:map] {:final true})))))))
+
+(deftest a-cycle-among-entry-fired-continuations-is-a-PROVEN-infinite-loop
+  ;; And being PROVEN is the whole reason it may be a fault at all: a completion transition
+  ;; is unconditional, so the relation is a plain functional graph.
+  (testing "both members are named"
+    (is (= [{:problem :done-cycle :id :a} {:problem :done-cycle :id :b}]
+           (filter (comp #{:done-cycle} :problem)
+                   (shape/problems (shape/state :a [:map] {:initial true :done :b})
+                                   (shape/state :b [:map] {:done :a}))))))
+  (testing "a state LEADING INTO a cycle is not itself one, and is not named"
+    (is (= [:b :c]
+           (map :id (filter (comp #{:done-cycle} :problem)
+                            (shape/problems (shape/state :a [:map] {:initial true :done :b})
+                                            (shape/state :b [:map] {:done :c})
+                                            (shape/state :c [:map] {:done :b})))))))
+  (testing "a cycle through a nesting node needs EVENTS to close and is legal"
+    (let [child (shape/shape (shape/state :c1 [:map] {:initial true})
+                             (shape/state :c2 [:map] {:final true})
+                             (shape/event :fin [:map])
+                             (shape/transition :c1 :fin :c2))]
+      (is (empty? (filter (comp #{:done-cycle} :problem)
+                          (shape/problems
+                           (shape/state :a [:map] {:initial true :machine child :done :b})
+                           (shape/state :b [:map] {:done :a}))))))))
+
+(deftest a-yield-needs-a-child-to-harvest-from-and-a-moment-to-harvest-on
+  (let [ok (fn [& parts] (map :problem (apply shape/problems parts)))
+        child (shape/shape (shape/state :c1 [:map] {:initial true})
+                           (shape/state :c2 [:map] {:final true})
+                           (shape/event :fin [:map])
+                           (shape/transition :c1 :fin :c2))]
+    (is (= [:yield-without-machine]
+           (ok (shape/state :a [:map] {:initial true :done :z :yield [:map]})
+               (shape/state :z [:map] {:final true}))))
+    (is (= [:yield-without-done]
+           (ok (shape/state :a [:map] {:initial true :machine child
+                                       :yield [:map]})
+               (shape/state :z [:map] {:final true})
+               (shape/event :go [:map]) (shape/transition :a :go :z))))))

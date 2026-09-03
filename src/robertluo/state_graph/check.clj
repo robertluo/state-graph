@@ -167,17 +167,44 @@
                 (mu/assoc :id [:= to]))
       (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
 
+(defn continued
+  "The schema of what a COMPLETION TRANSITION hands its target: the source state's own
+   schema, the :yield merged over it, and the machinery's own keys written in last — the
+   same order and for the same reason as `produced`, which is its sibling.
+
+   NEVER :undeclared, and that is the one way this is STRONGER than `produced`. An event
+   edge can only be checked where the event declared an :out, because what a CLOSURE
+   answers is otherwise unknowable — and a completion transition carries no closure at all.
+   What arrives is the state itself, so its schema is known exactly.
+
+   :sub IS NOT CARRIED. A child left behind would ride into a state that never declared it,
+   so `arrive` drops it and re-seeds — and this starts from the node's OWN schema, which
+   never held it, so the two agree without either mentioning the other."
+  {:malli/schema [:=> [:cat shape/Shape shape/Id :map] shape/MapSchema]}
+  [sh from {:keys [to yield]}]
+  (let [base (cond-> (uber/attr sh from :schema) yield (mu/merge yield))]
+    (cond-> (mu/assoc base :id [:= to])
+      (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
+
 (defn subsumption
   "One verdict per transition — :yes, :no, :unknown, or :undeclared where the edge
    named no :out. The last two are not faults; they are the CHECK'S OWN COVERAGE, and
-   worth reading as such."
+   worth reading as such.
+
+   A COMPLETION TRANSITION IS IN HERE TOO, marked {:done true} and carrying no :event,
+   because it is a way a state is entered and this check is about what a target will
+   admit. See `continued` for why none of them is ever :undeclared."
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
-  (for [t (shape/transitions sh)]
-    (assoc (select-keys t [:from :event :to])
-           :verdict (if-let [p (produced sh t)]
-                      (admits (shape/enter-schema sh (:to t)) p)
-                      :undeclared))))
+  (concat
+   (for [t (shape/transitions sh)]
+     (assoc (select-keys t [:from :event :to])
+            :verdict (if-let [p (produced sh t)]
+                       (admits (shape/enter-schema sh (:to t)) p)
+                       :undeclared)))
+   (for [[from c] (shape/continuations sh)]
+     {:from from :to (:to c) :done true
+      :verdict (admits (shape/enter-schema sh (:to c)) (continued sh from c))})))
 
 (defn views
    "Every declared VIEW and whether the state it reads can provide it — one verdict per edge
@@ -201,6 +228,30 @@
      :verdict (if sees
                 (admits sees (shape/enter-schema sh from))
                 :undeclared)}))
+
+(defn yields
+  "Every declared :yield and whether the child it harvests from can PROVIDE it — one
+   verdict per final state of the nested machine, as plain data.
+
+   IT IS `admits` FOR THE THIRD TIME, with the yield as the TARGET and the child's own final
+   state as what is PRODUCED; `views` was the second. Three structural checks off one
+   subsumption function is the argument for having written it.
+
+   EVERY FINAL STATE AND NOT JUST ONE, because a child may finish in any of them, and a
+   yield that rests on only some is a yield that is sometimes not there.
+
+   SOUND ONLY BECAUSE A YIELD IS HARVESTED AT COMPLETION. Were it taken on an ordinary
+   escape the child could be in ANY state, so :no would prove nothing and this would condemn
+   shapes that run — the same dependency `views` has on projection, and the same lesson: a
+   read check is only ever as sound as the moment it reads at."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (for [[from {:keys [yield]}] (shape/continuations sh)
+        :when yield
+        :let [child (shape/machine sh from)]
+        id (sort (filter #(shape/final? child %) (shape/states child)))]
+    {:from from :final id
+     :verdict (admits yield (shape/enter-schema child id))}))
 
 (defn- domains
   "{k #{v}} for every key an event INSISTS on whose values are FINITE — the only keys a
@@ -308,6 +359,19 @@
   [sh]
   (set (keys (shape/machines sh))))
 
+(defn- continuing
+  "The states that declare a COMPLETION TRANSITION. A pair pending in one — or leaving into
+   one — cannot be reasoned about from the edges alone, for the same reason a nesting node
+   cannot: the state the second patch is applied to is not the state the edge names.
+
+   THE JOIN NODE MAY CONTINUE FREELY, and that matters rather than being a nicety. x is
+   where both orders arrive, the diamond having proved they arrive at the SAME x, and a
+   continuation is a pure function of the state — so both orders continue identically. A
+   join's own :complete state is exactly where a :done belongs, and refusing it would lose
+   the licence precisely where it was won."
+  [sh]
+  (set (keys (shape/continuations sh))))
+
 (defn- combining
   "{node-id {k {:combine f :commutes? bool :schema S}}} — what each node declares about
    how a patch lands on its keys. Empty maps for a shape that declares none."
@@ -342,7 +406,7 @@
    the write sets alone cannot see it. Measured: before this, a pair whose writes were
    {:total} and {:n} was licensed while one of them read :n, and the two orders answered
    :total 2 and :total 18."
-  [tgt guards nests comb out sees s a b]
+  [tgt guards nests conts comb out sees s a b]
   (let [ta (tgt [s a]), tb (tgt [s b])]
     (cond
       ;; A NESTED MACHINE IS NOT REASONED ABOUT HERE, and it has to be asked FIRST — of
@@ -352,6 +416,17 @@
       ;; :no is about what runs. The state a pair ENDS in may nest freely: entering a
       ;; nesting node seeds the child's own first state either way round.
       (some nests [s ta tb]) :unknown
+      ;; A COMPLETION TRANSITION IS REFUSED THE SAME WAY AND FOR THE SAME REASON: if ta
+      ;; continues, the second patch is applied where ta CONTINUED TO and not at ta, so
+      ;; (tgt [ta b]) is not the lookup that runs. `continuing` says why x is exempt.
+      ;;
+      ;; IMPLIED TODAY AND STATED HERE ANYWAY. No shape `shape` will build can reach this:
+      ;; s, ta and tb all need out-edges to be in a diamond, and a PLAIN state that both
+      ;; continues and has out-edges is refused as :done-with-edges, while a NESTING one is
+      ;; already caught a line above. So this is the licence's own statement of its own
+      ;; condition, and not a second reading of somebody else's fault — the coupling it
+      ;; would otherwise rest on spans two namespaces, and the licence is load-bearing.
+      (some conts [s ta tb]) :unknown
       ;; A GUARDED EVENT IS NOT REASONED ABOUT HERE. Where a guard decides the target,
       ;; `both admitted` stops being a fact about the shape — it depends on the events
       ;; themselves — so the diamond cannot be looked up at all. :unknown is the honest
@@ -415,6 +490,9 @@
    - :unknown wherever a NESTED MACHINE could take either event — the state the pair is
      pending in, or the state either event would leave it in. The edges read here are not
      what runs there, so no verdict off them would be about the right diamond.
+   - :unknown wherever a COMPLETION TRANSITION leaves one of those same three states, for
+     the same reason: the second patch would be applied where the first one CONTINUED TO.
+     The state the pair ENDS in may continue freely — see `continuing`.
    - :yes where the diamond closes and BERNSTEIN'S CONDITIONS hold on the patches: neither
      event writes what the other writes, and neither READS what the other writes. Disjoint
      writes alone was the condition until a handler could read a declared view, and it was
@@ -433,6 +511,7 @@
   (let [tgt (targets sh)
         guards (guarded sh)
         nests (nesting sh)
+        conts (continuing sh)
         comb (combining sh)
         out (declared-out sh)
         sees (declared-sees sh)
@@ -445,8 +524,19 @@
     (for [s (sort (shape/states sh))
           :let [es (here s)]
           a es b es
-          :when (neg? (compare a b))]
-      {:in s :pair [a b] :verdict (commutes tgt guards nests comb out sees s a b)})))
+          ;; THE DIAGONAL IS IN HERE, and a = b is not a degenerate case but the FAN-OUT one:
+          ;; n workers feeding one accumulating state send n events of ONE id, and an async
+          ;; handler makes two of them pending at once exactly as it does for two ids. Leaving
+          ;; the diagonal out was a QUIET GAP in what this publishes — the same fault this
+          ;; function avoids for a guarded event by reading the edges rather than `targets`.
+          ;;
+          ;; `commutes` NEEDED NO CHANGE FOR IT, which is what says the condition was right
+          ;; all along. With a = b the two events share a handler, an :out and a target, so
+          ;; ta = tb and the diamond closes wherever the target admits the event again; the
+          ;; write-write test then covers EVERY key the :out writes, so the pair is licensed
+          ;; only where all of them declare a commutative combine.
+          :when (not (pos? (compare a b)))]
+      {:in s :pair [a b] :verdict (commutes tgt guards nests conts comb out sees s a b)})))
 
 (def ^:private law-samples
   "How many values a law is tried on. 12 is 144 pairs and 1,728 triples, which costs
@@ -558,6 +648,11 @@
           ;; what it declares.
           (for [{:keys [verdict] :as v} (views sh) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :view-unavailable)))
+          ;; A parent asking to harvest what its child cannot finish with. PROVEN, like
+          ;; every other fault here, and provable only because a yield is taken at
+          ;; COMPLETION — the one moment the child is guaranteed to be in a final state.
+          (for [{:keys [verdict] :as v} (yields sh) :when (= :no verdict)]
+            (-> v (dissoc :verdict) (assoc :problem :yield-unavailable)))
           ;; A NESTED MACHINE IS CHECKED AS AN ORDINARY SHAPE, which is most of why
           ;; nesting cost so little: every check above is about one graph, and a child is
           ;; one. :within names the path of nodes it was found under, so a fault three
@@ -613,10 +708,19 @@
     (cond-> t (< 40 (count t)) (-> (subs 0 39) (str "…")))))
 
 (defn- edge-label
+  "What a person reads on an arrow: Harel's own event [guard].
+
+   A COMPLETION TRANSITION IS UNLABELLED, which is UML's own notation for it and is honest
+   here for a better reason — there is no event to name, arriving being the whole of its
+   cause, and a :yield is about the DATA rather than about where the machine goes. The
+   label test set by :a-node-is-labelled-by-its-id is whether a thing is STRUCTURAL, and a
+   yield is not. `labelled` draws these DASHED, because an unlabelled solid arrow among
+   labelled ones reads as a bug rather than as a convention."
   [sh e]
-  (let [w (uber/attr sh e :when)]
-    (str (name (uber/attr sh e :event))
-         (when w (str " [" (guard-label w) "]")))))
+  (if-let [ev (uber/attr sh e :event)]
+    (let [w (uber/attr sh e :when)]
+      (str (name ev) (when w (str " [" (guard-label w) "]"))))
+    ""))
 
 (defn labelled
   "The shape with its attributes replaced by things a person can read. ubergraph's own
@@ -625,7 +729,8 @@
   {:malli/schema [:=> [:cat shape/Shape] shape/Shape]}
   [sh]
   (reduce (fn [g e]
-            (uber/set-attrs g e {:label (edge-label sh e)}))
+            (uber/set-attrs g e (cond-> {:label (edge-label sh e)}
+                                  (uber/attr sh e :done) (assoc :style "dashed"))))
           (reduce (fn [g id]
                     (uber/set-attrs g id (cond-> {:label (node-label sh id)}
                                            (shape/final? sh id) (assoc :shape :doublecircle))))

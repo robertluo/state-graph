@@ -243,3 +243,55 @@
    (shape/transition :idle :start :running)
    (shape/transition :running :set :running)
    (shape/transition :running :stop :done)))
+
+(defn shipping
+  "A COMPLETION TRANSITION IN BOTH OF ITS FORMS, and it is the shape that says what the
+   feature is for.
+
+   :paying NESTS a machine and declares {:done :shipped :yield ...}, so the parent WAITS for
+   its child and HARVESTS what it finished with. Before this the parent's only way out was
+   an event, and taking one discarded the child's work entirely — measured, a child that
+   finished with a result in :sub left {:id :p2} behind. :cancel is still that escape and
+   still an abort, which is the commoner need and is why the two have to coexist.
+
+   :shipped completes ON ENTRY, having no machine and so no activity to finish, and passes
+   straight through to :closed. Same rule, and it is what makes a plain `then` expressible."
+  []
+  (let [payment (shape/shape
+                 (shape/state :awaiting [:map] {:initial true})
+                 (shape/state :paid [:map [:receipt :string]] {:final true})
+                 (shape/event :authorize [:map [:receipt :string]])
+                 (shape/transition :awaiting :authorize :paid))]
+    (shape/shape
+     (shape/state :paying [:map [:total :int]]
+                  {:initial true :machine payment
+                   :done :shipped :yield [:map [:receipt :string]]})
+     (shape/state :shipped [:map [:total :int] [:receipt :string]] {:done :closed})
+     (shape/state :closed [:map [:total :int] [:receipt :string]] {:final true})
+     (shape/state :cancelled [:map [:total :int]] {:final true})
+     (shape/event :cancel [:map])
+     (shape/transition :paying :cancel :cancelled))))
+
+(defn gathering
+  "FAN-OUT, and the shape of it is one self-loop. n workers each report a result as ONE
+   event of ONE id, and the state accumulates them under a key whose combine is SET UNION —
+   which is commutative, so the licence lets two of those reports land in whichever order
+   they finish.
+
+   A SET AND NOT A VECTOR, and this is the trap: `into` on a vector is order-dependent, so
+   `check/laws` refutes it in a handful of samples. Set union is the accumulator a join
+   wants, and a map keyed by the item is the other one.
+
+   THE WIDTH IS NOT IN THE SHAPE, deliberately. Who says `that is all of them` is the
+   DRIVER, which dispatched the work and is the only party that knows n — the same answer
+   this library gives to branching and to retry budgets. :stop is that report."
+  []
+  (shape/shape
+   (shape/state :gathering
+                [:map [:seen {:combine into :combine/commutes true} [:set :int]]]
+                {:initial true})
+   (shape/state :gathered [:map [:seen [:set :int]]] {:final true})
+   (shape/event :found [:map [:seen [:set :int]]])
+   (shape/event :stop  [:map] (constantly {}) [:map])
+   (shape/transition :gathering :found :gathering)
+   (shape/transition :gathering :stop  :gathered)))

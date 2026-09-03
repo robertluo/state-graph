@@ -171,6 +171,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
                                      as a value, so neither requires it
     robertluo.state-graph.check    — BUILT. What the graph BUYS: the static checks and the
                                      drawing, which answer the same question by different means.
+                                     `yields` and `continued` joined it 2026-09-03 with the
+                                     completion transition — `yields` being `admits` for the
+                                     THIRD time and `continued` the sibling of `produced`.
                                      A SIBLING of compile, not a part of shape: nothing here is on
                                      the runtime path, and an application shipping a working shape
                                      never loads it. Requires shape, ubergraph and malli — AND
@@ -562,8 +565,16 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       awkward to guard on` was said and is wrong: {:closed true} is already this library's
       vocabulary — `patch-schema` closes a map for exactly this reason. It gives `disjoint?` a
       SECOND decidable rule beside `a shared key whose value schemas are disjoint`: A CLOSED
-      SCHEMA THAT DOES NOT NAME k IS DISJOINT FROM ONE THAT REQUIRES k. So `green means no :fault
-      key` is decidable rather than a nudge towards inventing a tag.
+      SCHEMA THAT DOES NOT NAME k IS DISJOINT FROM ONE THAT REQUIRES k.
+      AND THE EXAMPLE GIVEN FOR IT WAS WRONG, corrected 2026-09-03 by trying it in ../coder.
+      `green means no :fault key is decidable rather than a nudge towards inventing a tag` DOES
+      NOT WORK when the key is one the EVENT'S OWN SCHEMA declares. `accepted` MERGES the guard
+      over that schema, so [:map {:closed true}] against an event declaring
+      [:fault {:optional true} ...] yields a closed map that STILL HAS :fault optional — which
+      is genuinely satisfiable with a fault, so `disjoint` answering :unknown is correct and the
+      shape is rightly refused as :ambiguous. MEASURED. The closed lever reaches a key the event
+      schema does not declare at all, and no further. So the tag was needed after all, and
+      coder's :judged carries {:verdict [:enum :green :red]}.
       AND THE PAYLOAD CONVENTION IS THE ANSWER TO WHAT THAT COSTS, the author's, decided
       2026-09-03: A GUARD DESCRIBES THE EVENT WITHOUT THE MACHINERY KEYS. An event map carries
       :id, and :instance where a run is named — :sub is a state's alone — so a guard is checked
@@ -638,6 +649,95 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       transition bullet, a section of its own, and two limits where `No guards` used to be.
       What the building taught, including one hole this design did not see, is in
       :what-guards-taught."
+
+   :a-state-may-say-where-it-goes-when-it-completes
+   "BUILT 2026-09-03, out of a review of this architecture against a DECLARATIVE TRANSITION
+    GRAPH proposal — small transition fragments, a separate declarative assembly, and a
+    token-flow runtime with fork/join/foreach/scope operators. Most of what it asked for was
+    already here or was here BETTER; what it named that was genuinely missing came down to
+    one door this file had already named twice and not opened. See :what-the-review-scored.
+    - THE GRAMMAR: {:done <id>} on a state, and {:yield <a map schema>} beside it where the
+      node nests a machine. Nothing else added, and NO FACADE FUNCTION — a completion
+      transition is an OPTION ON `state`, exactly as nesting is, which is the same check on
+      a feature that :the-facade-is-a-vocabulary-and-two-doors applied to nesting.
+    - ONE RULE, AND IT IS UML'S: A STATE COMPLETES WHEN IT HAS NOTHING LEFT TO DO. A state
+      with no :machine has no activity to finish, so FINISHING IT IS ARRIVING and it is
+      passed straight through. One WITH a machine completes when that child reaches a final
+      state, which is the statechart done-transition. That unification is the whole reason
+      this is small: a simple state and a composite one are not two features.
+    - IT IS NOT A GUARD, and that is what it BUYS rather than what it concedes. One target,
+      unconditional, so `compile` stays a lookup and nothing has to be proved disjoint — and
+      a CYCLE among entry-completing states is then a PROVEN infinite loop rather than a
+      suspicion, an unconditional relation being a plain functional graph. :done-cycle, and
+      it is REFERENTIAL, so a machine that would spin for ever is never built. A cycle
+      THROUGH a nesting node is legal — the events are what break it — and the check knows
+      the exception: a child whose own first state is FINAL makes its parent complete on
+      entry too, which is not academic, being exactly what would make such a cycle infinite.
+      THIS IS :a-handler-causes-nothing'S OWN LEAN TAKEN, at the cheaper end. That entry
+      narrowed the door to `the raise belongs to the STATE, arriving somewhere being what has
+      consequences`, and reasoned that an ENTRY RAISE IS UNCONDITIONAL so the relation is a
+      plain graph and a cycle in it is a fault `problems` may report. All of that is what
+      happened. What did NOT happen is the event queue: a completion is a DETERMINISTIC
+      CONTINUATION resolved inside one step, so there are still no internal events, no
+      run-to-completion, and nothing to drain.
+    - :yield IS WHAT A FINISHED CHILD HANDS UP, and it is HARVESTED AT COMPLETION ONLY. That
+      restriction is not tidiness, it is what makes the check SOUND: completing is the only
+      moment the child is guaranteed to be in a final state, so the yield schema is a
+      GUARANTEE rather than a hope. Taken on an ordinary escape the child could be in any
+      state, `admits` answering :no would prove nothing, and `problems` would condemn shapes
+      that run — which is :what-visibility-taught's dependency running the other way from the
+      design for the THIRD time now.
+      AN ESCAPE IS STILL AN ABORT AND STILL YIELDS NOTHING. Aborting is the commoner need and
+      stays what an event does; :done is how a parent WAITS instead. Both coexist, which is
+      the point — :a-machine-can-nest-in-a-node had only the first.
+    - IT IS A REAL EDGE AND NOT A NODE ATTRIBUTE, and this is the decision the rest rests on.
+      `reachable`, `dead-ends`, `finishable` and `traps` all WALK THE GRAPH, so as an edge
+      all four see it and NONE was told anything; as an attribute, four traversals would each
+      have had to learn about it or condemn correct shapes. It carries no :event, and that
+      absence is the whole distinction: `shape/transitions` reads it to leave these out, so
+      `index`, `coverage`, `commutes` and subsumption-over-events are untouched, and
+      `shape/continuations` is where the other kind is read. NOTHING IS LEFT ON THE NODE —
+      two places saying one thing is how a shape drifts from itself.
+    - `subsumption` COVERS IT AND IS NEVER :undeclared, the one way a completion is checked
+      HARDER than an event edge. An event edge is checkable only where the event declared an
+      :out, a closure's answer being otherwise unknowable; a completion carries NO CLOSURE,
+      so what arrives is the state itself and its schema is known exactly. `continued` is the
+      sibling of `produced` and composes in the same order for the same reason.
+    - `yields` IS `admits` FOR THE THIRD TIME — `views` was the second — with the yield as
+      TARGET and the child's own final state as PRODUCED. EVERY final state is asked, a child
+      being free to finish in any of them, and a yield resting on only some is a yield that
+      is sometimes not there. :yield-unavailable.
+    - THE LICENCE HAD TO LEARN ABOUT IT, and asking was the habit :what-the-phase-split-taught
+      said to keep: if ta CONTINUES, the second patch of a licensed pair is applied where ta
+      continued TO and not at ta, so (tgt [ta b]) is not the lookup that runs. `commutes`
+      refuses s, ta and tb. THE JOIN NODE x IS EXEMPT and that matters rather than being a
+      nicety — both orders were proved to arrive at the SAME x and a continuation is a pure
+      function of the state, so a join's own :complete is exactly where a :done belongs, and
+      refusing it would have lost the licence precisely where
+      :a-join-is-the-product-and-the-licence won it. VERIFIED: the n=2 lattice keeps
+      {:verifying #{#{:eval :test}}} with :complete declaring one.
+    - WHAT IT COSTS AT RUNTIME: one map lookup per transition for a shape declaring none.
+      And `arrive` is now ONE definition of what entering a node means, called by all three
+      places that do it — the first state of a run, the far end of a transition, and the far
+      end of a continuation — where the projection had been written out inline.
+    - ONE RESULT ROW PER EVENT, carrying the state the chain ended in, and the intermediate
+      hops are not published. They are a PURE FUNCTION of the shape and the state, so an
+      auditor holding the shape can reconstruct them; an EVENT is the thing a row could not
+      be reconstructed without. It is also what keeps `the-two-doors-agree` intact — a
+      continuation resolved inside the STEP is passed through by the reduction too, where one
+      emitted by the stream layer would have forced that property to weaken.
+    - THE DRAWING IS UML'S: dashed and UNLABELLED. There is no event to name, and a :yield is
+      about the DATA rather than about where the machine goes, which is the test
+      :a-node-is-labelled-by-its-id set. Verified as a real PNG and not merely as dot source.
+    - WHAT IS NOT TAKEN. A CONDITIONAL COMPLETION — `complete to :a or :b depending on the
+      result` — is a guard over the STATE and stays refused. A NODE STILL HOLDS ONE CHILD, so
+      a parent waiting on SEVERAL independent children is still orthogonal regions and still
+      out; what :a-join-is-the-product-and-the-licence said regions were blocked on is now
+      built for the ONE-CHILD case, so what remains is genuinely about regions rather than
+      about yielding. AND FAN-OUT IS STILL STATIC: `foreach` — one child per element of a
+      runtime list, joined when all are done — cannot be spelled, the width being a runtime
+      value and the lattice for it having to be generated per run. That is the one thing the
+      review named that is still missing, and it is the next thing to design."
 
    :parallel-is-across-instances
    "DECIDED 2026-08-31. `Automatically parallel` means ACROSS INSTANCES and nothing else: events
@@ -1031,6 +1131,20 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       THE LESSON IS ONE THIS PROJECT KEEPS RELEARNING, and :what-visibility-taught said it first:
       a check written for one purpose is not sound for a second one by default. It was decorative
       for two days and nothing noticed, because `drive` serialised whatever it said.
+    - AND A THIRD REFUSAL WAS ADDED 2026-09-03, by asking that same question of a new feature
+      before resting anything on it: a COMPLETION TRANSITION leaving ta means the second patch
+      is applied where ta CONTINUED TO and not at ta, so (tgt [ta b]) is not the lookup that
+      runs. `commutes` refuses s, ta and tb. THE JOIN NODE x IS EXEMPT — both orders were
+      proved to arrive at the same x and a continuation is a pure function of the state — and
+      that exemption is load-bearing, a join's own :complete being exactly where a :done
+      belongs. See :a-state-may-say-where-it-goes-when-it-completes.
+    - AND THE PAIR MAY BE TWO OF ONE EVENT, 2026-09-03. `confluence` had enumerated pairs with
+      (neg? (compare a b)), so THE DIAGONAL WAS NEVER ASKED ABOUT — a quiet gap in what that
+      function publishes, of exactly the kind it avoids for a guarded event by reading the edges
+      rather than `targets`. Two of one event ARE a concurrent candidate: an async handler makes
+      two of them pending exactly as it does two ids. Licensed only where every key the :out
+      writes declares a commutative combine, which is the fan-out — see
+      :a-combine-is-how-a-patch-lands.
     - WHAT IS STILL NOT TAKEN, and it is narrower than what was: only ever TWO events in flight.
       `commuting` is a PAIRWISE relation on ONE state, which is exactly what this entry designed;
       a third would need the licence re-established at each intermediate state, and inventing that
@@ -1084,7 +1198,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       {:id :c2 :result 42} in :sub is left behind entirely when the parent escapes — :p2 comes
       back {:id :p2}. Escape means ABORT today and discarding is correct; a join must COLLECT, so
       regions need a :yield before they are buildable at all. Regions are for when each branch is
-      itself a workflow; the lattice covers a join on plain events, so a real shape asks first."
+      itself a workflow; the lattice covers a join on plain events, so a real shape asks first.
+      THAT :yield NOW EXISTS FOR ONE CHILD, later the same day —
+      :a-state-may-say-where-it-goes-when-it-completes — and it did NOT bring regions with it,
+      which is worth being clear about: {:done :yield} waits for THE machine a node nests, and
+      a node nests one. What is left is genuinely the REGIONS question — several children,
+      several yields, and which of them the parent waits for — rather than the yielding
+      question this entry was blocked on."
 
    :a-combine-is-how-a-patch-lands
    "THE AUTHOR'S, 2026-09-03, in one line that reopened a door they had shut two days earlier:
@@ -1143,6 +1263,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       however it arrives, or the algebra is per-edge and proves nothing. Which is also the answer
       the data owner should have, the same instinct as
       :internal-visibility-is-declared-and-not-automatic.
+    - AND IT LICENSES TWO OF ONE EVENT, 2026-09-03, which is the FAN-OUT case and was refused
+      outright until then. n workers each reporting a result send n events of a SINGLE id into
+      one accumulating state, and the old refusal reasoned that `two events of one id run one
+      handler and write one set of keys, so they conflict with each other by construction` —
+      TRUE UNDER A MERGE and untrue of a key whose combine is commutative. `commutes` needed NO
+      CHANGE to say so, which is what says the condition was right all along: with a = b the two
+      events share a handler, an :out and a target, so ta = tb and the diamond closes wherever
+      the target admits the event AGAIN, and the write-write test then covers EVERY key the :out
+      writes. The licence publishes as a SINGLETON — #{:found} beside #{:eval :test} — so one
+      lookup serves both kinds. MEASURED: two 300ms reports went 613ms to 305ms. See
+      :what-the-fan-out-licence-taught for the two traps it turned up.
     - WHAT IT DOES NOT FIX, said out loud. The READ half of Bernstein: a handler that declared a
       {:sees} view computed from a value the other event changes, and no combine repairs a stale
       patch. The way to a CONCURRENT accumulation is therefore a combine INSTEAD of a view —
@@ -1280,19 +1411,23 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       touch it.
     - NESTING CANNOT BE CIRCULAR and needs no check to say so: a shape is an immutable value
       built out of already-built children, so none can contain itself.
-    - THE COST, said out loud: THE ESCAPE IS UNCONDITIONAL. Nothing stops the parent leaving
-      while the child is half done, because `only when the child has finished` is a GUARD and
-      there are none. AND :a-guard-is-a-schema-over-the-event WOULD NOT CHANGE IT, which is worth
-      knowing before anyone expects it to: a guard there is over the EVENT, and `the child has
-      finished` is a fact about the STATE. Deciding when is the producer's job — the same answer
-      this library gives to branching — and the child's state is on every result, so a producer
-      can see what it needs. Turned down deliberately: making the parent's edges wait for a final child,
-      which would have made ABORT inexpressible, and abort is the commoner need.
-    - THE DOOR, NAMED AND NOT DESIGNED: a node could declare where to go when its child
-      FINISHES — {:machine sh :done :shipped} — which is the statechart done-transition and
-      needs no event queue here, being a deterministic continuation inside one step rather than
-      an event. It is the same lean as :a-handler-causes-nothing (the state raises, not the
-      handler). The bar is a real shape asking for it twice."
+    - THE COST AS STATED 2026-09-01, AND IT IS NOW ONLY HALF TRUE — kept because the
+      reasoning is still exactly right about EVENTS. AN ESCAPE IS UNCONDITIONAL: nothing stops
+      the parent leaving while the child is half done, because `only when the child has
+      finished` is a GUARD and there are none. AND :a-guard-is-a-schema-over-the-event WOULD
+      NOT CHANGE IT, which is worth knowing before anyone expects it to: a guard there is over
+      the EVENT, and `the child has finished` is a fact about the STATE. Turned down
+      deliberately: making the parent's EDGES wait for a final child, which would have made
+      ABORT inexpressible, and abort is the commoner need.
+    - AND THE DOOR NAMED HERE IS NOW OPEN, 2026-09-03, without disturbing a word of the above.
+      {:machine sh :done :shipped} is BUILT — see
+      :a-state-may-say-where-it-goes-when-it-completes. The reason it changes nothing here is
+      that it is NOT a guard on the escape: the parent's own edges still abort
+      unconditionally, and :done is a SECOND way out that fires when the child finishes. So
+      `deciding when is the producer's job` stopped being the ONLY answer while remaining a
+      correct one, and ABORT stayed expressible, which was the whole objection to the
+      alternative. {:yield ...} came with it, because a parent that waits for its child wants
+      what the child finished WITH — and dropping :sub was the other half of this cost."
 
    :a-node-is-labelled-by-its-id
    "DECIDED 2026-09-02, at the author's asking — `should not each state just be represented by the
@@ -1336,11 +1471,71 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       hangs the suite rather than leaking a resource, so every deref in a stream test is BOUNDED."}
 
   :open-questions
-  ["ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
+  ["MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? What is LEFT of the fan-out
+    question below after it was mostly answered on 2026-09-03, and it is the one door three
+    separate wants now knock on: `all n reports are in`, `k branches have arrived`, `still
+    under budget`. Each is a COUNT or a COMPARISON over what the state holds, and each is
+    therefore a guard over the state, which :a-guard-is-a-schema-over-the-event refuses.
+    WHY IT IS NOT MERELY THAT REFUSAL AGAIN: :done already reads a fact about the state — is
+    the child final — and was allowed because completion is STRUCTURAL and has ONE
+    unconditional target. So the line already drawn is `the shape may read a structural fact
+    to decide COMPLETION, never to decide WHICH WAY`. The question is whether a fact about
+    DATA can join it.
+    ONE OF THE THREE IS ANSWERED AND NEEDED NO DOOR, measured 2026-09-03 in ../coder: `still
+    under budget` is a guard on a NUMERIC BOUND over a count the DRIVER reports on the event,
+    and two such bounds that do not meet are provably disjoint. So a retry budget lives in the
+    shape today. That is evidence the door is needed less than three wants made it look — what
+    is left wants a count the machine must take ITSELF, which is `all n are in` and `k arrived`.
+    THE OBSTRUCTION IS DECIDABILITY AND IT IS REAL. `(= expected (count reviews))` is a
+    relation between two keys and no malli schema expresses it, so such a condition can only
+    be a CLOSURE — and :a-combine-is-how-a-patch-lands drew that line explicitly: a combine
+    may be a closure because it decides what a VALUE is, a guard may not because it decides
+    WHERE THE MACHINE GOES. A completion condition decides where the machine goes. So the
+    honest answer today is no, and the driver counts.
+    WHAT WOULD CHANGE IT is a decidable spelling. The one worth thinking about: a node holding
+    a map keyed by item, where the KEY SET is fixed on entry and completion is `every value is
+    present` — which is structural rather than arithmetic, and is `every sub is final` wearing
+    different clothes. That is close enough to :a-machine-can-nest-in-a-node's shape to be
+    worth designing properly rather than bolting on. The bar is an agent workflow that needs
+    it, and `review these seven files` plausibly is one."
+
+   "IS DYNAMIC FAN-OUT WANTED, AND WHAT WOULD IT EVEN BE? Raised 2026-09-03 by
+    :what-the-review-scored, which is the only thing that review named as MISSING once the
+    completion transition was built: `foreach` — one child per element of a list discovered at
+    runtime, joined when all of them are done. It cannot be spelled today and the reason is
+    structural rather than an omission: a shape is CODE, built at load time, so every state and
+    every edge exists before the machine runs, and the product lattice a join needs is 2^n
+    states for an n THAT IS NOT KNOWN. Fan-out ACROSS INSTANCES is what `run` already does, and
+    nothing joins those back — `fan`'s :done is a map keyed by instance and no event consumes
+    it. Three things to settle before any of it: whether the width comes from the SHAPE (a
+    lattice generated per run, which makes a shape per run and breaks `a shape is code`) or
+    from the RUNTIME (a marking, which is the token model, and
+    :what-the-review-scored records what that would cost the static checks); whether a
+    collected result arrives as a :yield from n children, which needs orthogonal regions
+    first — see :a-join-is-the-product-and-the-licence; and what the RESULT stream says while
+    n branches are in flight, since :instance is the only partition key there is. The bar is
+    an agent workflow actually needing it, which `review these seven files at once` plausibly
+    is.
+    MOSTLY ANSWERED THE SAME DAY, and by trying it rather than by arguing: the ACCUMULATION
+    was already expressible — a commutative combine on a set-valued key, one self-loop — and
+    the CONCURRENCY needed one character in `confluence`'s pair enumeration, since two events
+    of one id had never been asked about. See :a-combine-is-how-a-patch-lands and
+    :what-the-fan-out-licence-taught. What is left is ONLY the completion test, which is the
+    question above, and the two structural answers this entry listed — a lattice generated per
+    run, or a marking — are BOTH still refused for the reasons given. The width being the
+    driver's is not a gap: a graph shows structure and a count is data."
+
+   "ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
     the handler's signature is unchanged in the meantime, so nothing is blocked by it. The motivation
     is HANDLER REUSE and not cascades for their own sake; the lean is that a state raises and a
     handler never does, for which the reasons are in :a-handler-causes-nothing. The bar for building
-    it is a real shape asking twice. Three things to settle before any of it: whether the machine may
+    it is a real shape asking twice.
+    NARROWED 2026-09-03 AND NOT ANSWERED. The LEAN was taken — a state may now say where it goes
+    when it completes, which is `the state raises` — but taken as a DETERMINISTIC CONTINUATION
+    inside one step rather than as an event, so none of the three things below was settled and
+    the queue still does not exist. What DID change is the motivating case: the commonest reason
+    to want an internal event was `move on now that this is finished`, and that is what a
+    completion transition is. See :a-state-may-say-where-it-goes-when-it-completes. Three things to settle before any of it: whether the machine may
     drive itself at all or a caller triggers the next event by hand — the latter costs nothing and
     hides the flow from check, which is the whole trade; if it may, whether the queue drains
     breadth-first or depth-first, which is OBSERVABLE in the history and cannot be left to whatever
@@ -1441,6 +1636,29 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     `ignored` and legal. The guard is drawn on the arrow in Harel's own notation. See
     :a-guard-is-a-schema-over-the-event and :what-guards-taught. The counts above are older than
     this: it is 88 tests and 257 assertions now, and 41 instrumented functions.
+    AND A STATE MAY SAY WHERE IT GOES WHEN IT COMPLETES, 2026-09-03, which is the door
+    :a-machine-can-nest-in-a-node and :a-handler-causes-nothing had both named and neither
+    opened: {:done <id>} on a state, plus {:yield <a map schema>} where it nests a machine. A
+    state with no machine completes ON ENTRY and is passed straight through; one with a
+    machine completes when that child reaches a FINAL state, so a parent can WAIT for its
+    child and HARVEST what it finished with, where before this the only way out was an event
+    and taking one discarded the child's work. It is not a guard — one unconditional target —
+    so determinism is untouched, and a cycle among entry-completing states is a PROVEN
+    infinite loop rather than a suspicion. It is a REAL EDGE, which is why `reachable`,
+    `dead-ends`, `finishable` and `traps` needed not one line. Built out of an outside
+    architecture review; see :a-state-may-say-where-it-goes-when-it-completes,
+    :what-the-review-scored and :what-completion-taught.
+    AND THE LICENCE NOW COVERS TWO OF ONE EVENT, the same day and from the same review: that
+    is the FAN-OUT — n workers reporting into one accumulating state, licensed where the key's
+    combine is commutative — and it needed NO grammar and no public function, only the
+    diagonal that `confluence` had never enumerated. Measured 613ms to 305ms on two 300ms
+    reports. See :a-combine-is-how-a-patch-lands and :what-the-fan-out-licence-taught, which
+    is also where the two traps live: a set LITERAL of two equal expressions THROWS, and a
+    VECTOR accumulator is not commutative. It is 129 tests and 381 assertions now, and still
+    48 instrumented functions.
+    WHAT IS LEFT OF WHAT THE REVIEW NAMED is one question and it is a narrow one: MAY A STATE
+    COMPLETE ON A CONDITION OVER ITS OWN DATA — counting to n, k arrivals, still under budget.
+    Three wants, one door, and it is in :open-questions. The driver counts until then.
     AND THERE IS A TUTORIAL, 2026-09-01, this component being a release candidate:
     notebook/tutorial.clj, a Clay notebook rendered by `clojure -X:notebook` to docs/tutorial.html,
     which is gitignored because it is derived. It works the facade through in order and ends with a
@@ -1957,6 +2175,202 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       instrument count went 42 to 45 — combines-of, combines and laws — and agrees with the
       independent ns-publics count. clj-kondo clean. The tutorial gained a section and RENDERS,
       which is what proves its cells run."
+
+   :what-the-review-scored
+   "SCORED 2026-09-03, against the code and not against memory, when the author brought a
+    DECLARATIVE TRANSITION GRAPH proposal as a review of this architecture: transition
+    fragments with declared inputs/outputs/effects, a separate declarative assembly, and a
+    TOKEN-FLOW runtime owning scheduling, persistence, replay and cancellation. Worth keeping
+    because it is the first outside frame this design has been held against, and because two
+    thirds of what it asked for turned out to be here already.
+    - THE ONE-LINE DIAGNOSIS: IT IS A DATAFLOW MODEL AND THIS IS A CONTROL-FLOW MODEL. There,
+      a transition fires when its INPUTS ARE AVAILABLE — a build system, a Petri net, `make`.
+      Here, one fires when AN EVENT ARRIVES AND THE STATE ADMITS IT. Nearly every difference
+      falls out of that substitution, and it is why the proposal's worked example is a
+      COMPILER PIPELINE: a closed system with no external cause, where every token originates
+      at a fork. `park until a human approves` has no dataflow spelling, there being no
+      upstream node whose output is `the person clicked`. It is the INNER half of a workflow,
+      and it is not wrong about that half.
+    - THE STATE-EXPLOSION ARGUMENT IS CORRECT AND WAS NOT NEWS.
+      :a-join-is-the-product-and-the-licence had measured it two days earlier: a join IS the
+      product construction, 2^n states, 8 at n=3. THE COUNTER WORTH MAKING BACK is that a
+      MARKING does not remove the explosion, it RELOCATES it — out of the shape, where it is
+      drawable and statically checkable, into the runtime state, where it is neither. And
+      there is a price the document never names: every static check here rests on ONE STATE
+      BEING ONE MAP WITH ONE SCHEMA. Under a marked graph the state is a set of markings plus
+      per-token payloads plus join buffers, and merge(from, out) ⊆ to loses its subject. It
+      trades a decidable checker for a nicer picture.
+    - WHERE THIS LIBRARY IS ALREADY AHEAD, and it is the proposal's weakest section: its
+      `essential constraint` is {:purity :effects :idempotence} — A DECLARATION THE ASSEMBLER
+      TRUSTS. It promises `correct concurrency` and `type-checked` and names no mechanism for
+      either. Here :sees declares reads, :out declares writes, :combine declares how a value
+      lands, and then `commuting` PROVES the reorder by Bernstein, `laws` refutes a false
+      combine by generation, and :agree re-verifies on the concrete values. A rule that lives
+      only in a declaration is the repository's own named anti-pattern.
+    - THE OPERATOR TABLE, SCORED. Expressible: `then` (an edge), `choose` (a guard),
+      `all`/`join-all` (the product lattice plus the licence), `recover` (an edge to a fault
+      state). Expressible with the PRODUCER's help: `retry` (a self-loop, the budget riding
+      on the event), `join-quorum`/`join-any` (a SLICE of the same lattice — an edge off every
+      k-subset — but firing on the k-th arrival needs a cause). Partly: `scope` — cancellation
+      is the unconditional escape and works, TIMEOUT IS THE CALLER'S CLOCK and is correct
+      since an event is the only cause, and CLEANUP was missing. Not at all: `foreach` and
+      `collect`.
+    - AND `foreach` SCORED WRONG, corrected 2026-09-03 by trying to build it. It is not `not
+      expressible`, it is `expressible with the producer's help` — the same row `join-quorum`
+      and `retry` sit in, and for the identical reason. The ACCUMULATION was already there (a
+      commutative combine on a set-valued key), the CONCURRENCY needed one character in
+      `confluence`'s pair enumeration, and what is genuinely absent is only the COMPLETION TEST
+      — counting to n, which is a guard over the state. So the driver counts, which is this
+      library's answer to branching and to retry budgets as well. Recorded because the wrong
+      score made the gap look STRUCTURAL when two thirds of it was a spelling.
+    - AND READING THE PARTIAL ROWS TOGETHER IS THE FINDING: they are ELEVEN WAYS OF WANTING
+      ONE THING — a transition caused by the machine's own accumulated state rather than by
+      the world. `only when the child has finished`, `only while under budget`, `once k
+      branches have arrived`. This library had refused that three times, each for a good and
+      DIFFERENT reason, and each refusal left a named door. The review was the accumulated
+      case for opening exactly one of them, which is what was built —
+      :a-state-may-say-where-it-goes-when-it-completes.
+    - WHAT WAS NOT ADOPTED AND WHY. `The runtime owns persistence, replay, observability` is
+      a FRAMEWORK, and :nothing-is-persisted-here and :the-caller-owns-the-lifecycle were
+      deliberate; a runtime owning persistence has to own shape identity and versioning,
+      which is the question v1 pushed out. And the ergonomic complaint — that a named
+      `join-all` reads better than 8 states and 12 edges — is LEGITIMATE and belongs in the
+      consumer: :a-join-is-the-product-and-the-licence already answered that a join is a
+      PARTS ASSEMBLY.
+    - ONE THING STILL WORTH STEALING, not built: the metadata block's :effects/:idempotence.
+      The licence proves REORDERING is safe and says nothing about RE-EXECUTION. Harmless
+      today, a speculative take never re-running a handler; retry and replay would both need
+      it, and it is the same class of declared-law-plus-checker as :combine/commutes."
+
+   :what-completion-taught
+   "VERIFIED BY RUNNING on 2026-09-03, building
+    :a-state-may-say-where-it-goes-when-it-completes.
+    - THE EDGE-OR-ATTRIBUTE QUESTION WAS THE WHOLE DESIGN, and it was settled by counting
+      what each way COSTS rather than by taste. As an edge, `reachable`, `dead-ends`,
+      `finishable` and `traps` needed NOT ONE LINE — they walk the graph. As an attribute,
+      each of the four would have had to learn about it or condemn correct shapes: a state
+      reached only by completing would be :unreachable, and one whose only way out is
+      completing would be a :dead-end. The cost of the edge was ONE `:when` in
+      `shape/transitions`.
+    - AND `transitions` TURNED OUT TO BE THE SEAM AGAIN. :what-the-handler-move-taught
+      recorded that a reading layer between the graph and its consumers is what let a
+      structural change stay local; this is the second time. Adding a whole new KIND of edge
+      touched `transitions` and nothing else above it — `index`, `coverage`, `commutes` and
+      `entry` never learned that a completion exists.
+    - THE MISTAKE I MADE IS THE ONE THIS FILE ALREADY RECORDED. :what-guards-taught says a
+      notebook example must ask `shape/problems` OF THE PARTS for a REFERENTIAL fault,
+      because the facade's `problems` takes a BUILT shape and the constructor throws. I wrote
+      exactly that bug again for :done-cycle, and RENDERING THE NOTEBOOK caught it again —
+      `clojure -X:notebook` runs every cell, so a tutorial example that cannot run is a lie a
+      test suite will never see. The habit worth keeping is the render, not the memory.
+    - THE LICENCE GUARD IS IMPLIED AND WAS KEPT ANYWAY, which is a deliberate exception to
+      `only assert what can fail`. No shape `shape` will build can reach `commutes`'s
+      completion refusal: s, ta and tb all need out-edges to be in a diamond, and a PLAIN
+      state that both continues and has out-edges is refused as :done-with-edges while a
+      NESTING one is caught a line above. But that argument SPANS TWO NAMESPACES, and the
+      licence is load-bearing — so the condition is stated where it is relied on, and the
+      test asserts the fault that implies it rather than reaching through a hand-built graph.
+    - THE PASS-THROUGH PROPERTY IS THE ONE WORTH HAVING, and it is genuinely independent
+      rather than the implementation restated: split one generated edge a -e-> b into
+      a -e-> mid {:done b} and the reduction must end EXACTLY where it ended before. It
+      compares two machines and recomputes nothing.
+    - THE FORMATTER HOOK REFLOWED A WHOLE SOURCE FILE on the first Edit, undoing the repo's
+      hand-alignment in three entries nobody had touched — :what-the-facade-taught recorded
+      this disagreement and its workaround, which is that the hook fires on the file-writing
+      TOOLS and not on a shell heredoc. Reverted and every edit after was done through the
+      shell. Worth reading that entry BEFORE the first edit rather than after.
+    - A FIXTURE THAT CANNOT BE A CHILD. `shipping`'s own first state insists on a :total, and
+      entering a child hands it NO DATA, so nesting it is :machine-cannot-start — which cost
+      two test failures before the fixture was right. The referential check was doing exactly
+      its job; the lesson is that a shape written to be a PARENT is usually not startable as a
+      CHILD.
+    - THE NUMBERS: 126 tests and 370 assertions, both suites green, up from 109 and 326. The
+      instrument count went 45 to 48 — `shape/continuations`, `check/continued` and
+      `check/yields` — and agrees with the independent ns-publics count. clj-kondo clean over
+      src, test and notebook. THE FACADE IS STILL TEN FUNCTIONS, a completion transition being
+      an option on `state`. The tutorial gained a section and RENDERS, and the drawing was
+      checked as a real 36KB PNG rather than as dot source — dashed unlabelled arrows for the
+      completions beside a solid labelled `cancel` for the abort, which is the distinction
+      visible at a glance and the argument for drawing at all."
+
+   :what-the-fan-out-licence-taught
+   "VERIFIED BY RUNNING on 2026-09-03, taking the last thing :what-the-review-scored named as
+    missing and finding that two thirds of it was already here.
+    - A SET LITERAL OF TWO EQUAL EXPRESSIONS THROWS, and this is the finding worth most.
+      `licensed?` asked (contains? pairs #{(:id a) (:id b)}), and with the two ids EQUAL that
+      is `#{x x}` — which Clojure REFUSES at runtime with `Duplicate key: :found`, the reader
+      form compiling to a construction that rejects duplicates. `hash-set` dedupes and `set`
+      dedupes; ONLY THE #{} LITERAL throws. Verified all three. The throw landed inside a
+      d/chain, so the machine did not crash — IT SIMPLY STOPPED, `done` never settled, `out`
+      never closed, and the symptom was two timeouts and a nil. My own docstring had asserted
+      `the encoding needed nothing` one edit earlier, which is what asserting-before-running
+      buys you.
+    - THE ACCUMULATOR MUST BE A SET, AND `laws` REFUTED MY FIRST ATTEMPT IN FORTY SAMPLES.
+      `into` on a VECTOR is order-dependent, so which worker reported first is visible in the
+      answer — the obvious spelling of a join accumulator is not commutative, and it is exactly
+      :what-the-combine-taught's `most domain merges are not commutative and the author will
+      not notice` landing on the person who wrote that sentence. SET UNION works, and so does a
+      map keyed by the item. Both are now fixtures, and the trap is in the README and the
+      tutorial because everyone meets it first.
+    - `commutes` NEEDED NO CHANGE, which is the check on whether the widening was principled.
+      With a = b the two events share a handler, an :out and a target, so ta = tb, the diamond
+      closes wherever the target admits the event again, and the write-write filter covers
+      every key the :out writes. The whole change was `(neg? (compare a b))` becoming
+      `(not (pos? ...))` plus dropping one `(not= ia ib)`.
+    - AN EVENT THAT WRITES NOTHING COMMUTES WITH ITSELF, and it fell out rather than being
+      arranged: the write-write filter is empty, so the pair is vacuously licensed. Sound —
+      two empty patches leave the same state in either order — and it turned up as a :yes in
+      an existing test's coverage, which is how it got looked at.
+    - THE DIAGONAL CHANGED EIGHT TESTS AND EVERY NEW ROW WAS CORRECT ON INSPECTION, which is
+      the good outcome for a coverage change: a join's arms are all :no (one :eval takes you
+      somewhere that does not admit a second, which is the OPPOSITE of a fan-out), a no-combine
+      self-pair is :unknown, and `fanning` — a fixture written for a two-event licence — turned
+      out to have been refusing its own same-id concurrency all along.
+    - AND THE UNLAWFUL VERSION IS STILL LICENSED STATICALLY, asserted rather than glossed:
+      `commutes` reads the DECLARATION, `laws` is the development aid, and compile's :agree is
+      the enforcement. That is :what-the-combine-taught's three-way argument getting a fourth
+      witness, and a vector accumulator is refused at runtime rather than at construction.
+    - THE NUMBERS: 129 tests and 381 assertions, both suites green, up from 126 and 370. NO
+      PUBLIC FUNCTION WAS ADDED — the instrument count is still 48 and agrees with the
+      independent ns-publics count — and no grammar was added either, which is the honest
+      summary of the whole change: a fan-out was already spellable and the licence was refusing
+      it. clj-kondo clean; the tutorial gained a section and renders."
+
+   :what-the-first-consumer-migration-taught
+   "MEASURED 2026-09-03 by migrating ../coder off its workaround at the author's instruction —
+    `remove the current trick; use state-graph vocabulary only`. THE FIRST TIME anything built
+    after the facade has had a consumer, so it is the first outside evidence about the
+    vocabulary rather than about the mechanisms.
+    - WHAT IT VALIDATED, and none of it needed a change here: guards on an enum tag, guards on
+      NUMERIC BOUNDS, `coverage`, the refusal of a shape whose guards are not provably disjoint,
+      and the Harel drawing with a :description. coder's shape went from 5 states / 5 events to
+      6 / 4, `problems` stayed empty, and src did not change by one line — which is the check
+      that its driver was about DRIVING and not about that task's five states.
+    - THE :out IS THE EVENT'S AND THAT IS THE REAL FRICTION. coder's :judged leads to two
+      targets needing DIFFERENT data — :fault requires a fault string, :implemented does not —
+      and one :out serves both edges, so it must be weak enough for the green one and then
+      cannot prove the red one. :target-refuses, on a correct shape.
+      :a-handler-belongs-to-the-event NAMED THIS COST and its advice is `where two edges
+      genuinely need different data, that is two events` — which is the workaround being
+      removed. So the honest statement is that a guard and a per-target payload pull against
+      each other, and the way out coder took is to declare NO :out on the guarded event and let
+      the runtime :answer and :enter crossings enforce it. `subsumption` then answers
+      :undeclared, which is coverage rather than a fault.
+      THE ALTERNATIVE WAS WORSE AND IS WORTH NAMING: weakening the target's own schema to
+      {:optional true} buys :yes back and is weakening a schema to please a checker.
+    - AND THE `attempts > 3` CASE WORKS, which :a-guard-is-a-schema-over-the-event predicted and
+      nothing had tried. coder's retry budget is now two guarded edges on :round with
+      [:int {:max 8}] and [:int {:min 9}] — provably disjoint — so the stopping rule is in the
+      shape and the driving loop needs no counter. IT NEEDED NO NEW DOOR: the driver reports the
+      round as a FACT on the event and the guard reads it, which is exactly `the driver reports
+      a fact and the shape decides what the fact means`. See the open question this narrows.
+    - THE LINT CACHE BIT AGAIN, exactly as :an-event-given-only-a-schema-is-a-pure-lift records:
+      clj-kondo reported 8 errors about `sg/transition` being called with 4 args. `rm -rf
+      .clj-kondo/.cache` in the consumer fixed it. Second occurrence, same cause, and the entry
+      that predicted it is the one to read first.
+    - AND A `--reset-session` KILLED AN nREPL. Worth knowing before reaching for it: the session
+      did not reset, the server went away and the next eval failed inside the client's socket
+      code, which reads like a bug in the tool rather than a dead server."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is
