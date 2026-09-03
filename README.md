@@ -27,7 +27,11 @@ Instead of another Clojure FSM library. A shape that really is a graph can be:
   with nowhere to go, a state the machine can never finish from, and a handler whose answer
   the target state will not admit, all found **without running anything**;
 - **turned into a plain function**, because the lifecycle of an instance is a reduction over
-  a seq of events and nothing more.
+  a seq of events and nothing more;
+- **proven safe to run concurrently**, in the narrow place where that is true: which pairs
+  of pending events may be applied in order of *completion* is a question about the graph
+  and the schemas, answered before anything runs — and then actually taken, so two handlers
+  of a join cost one of them.
 
 Its results are data, so a machine's states, events and transitions become history — stored
 by the caller, in a datalog database or anywhere else. **This library stores nothing.**
@@ -41,7 +45,9 @@ Three definitions and no more.
   becomes visible. A node **holds exactly what it declares**: the schema is not a lower
   bound, it is the whole of the state's own data, and anything not named in it is dropped on
   entry. `:id` (which node it is in) and `:instance` (which run it belongs to) are the
-  machine's to write and are added for you. Exactly one state is `{:initial true}`.
+  machine's to write and are added for you. Exactly one state is `{:initial true}`. A key
+  may also say **how a patch lands on it** — `{:combine f :combine/commutes true}` on its own
+  map entry — where replacing it is not what merging means. See below.
 - An **event** is shaped by a malli schema too, and it **carries its handler** — though given
   only an id and a schema it is a **pure lift**, answering exactly the keys that schema
   declares, which is what most events are. By default the
@@ -366,8 +372,9 @@ transducer, core.async, a test.
 - `:done` is a deferred `{instance -> final state}`, or an error carrying whatever the step
   threw. A caller who names nothing finds their machine under `nil`.
 - **One function for one machine and for many.** The stream is partitioned on `:instance`;
-  one partition is one machine. Each is reduced strictly in order, all of them at once —
-  parallelism is *across* instances, serialisation is *within* one.
+  one partition is one machine, all of them at once — that is where the parallelism is.
+  *Within* one machine an event is applied to what the last one produced, except for a pair
+  proven not to care which finished first: see below.
 - A handler may answer a **manifold deferred**, so a machine waiting on I/O holds no thread
   and a slow handler slows only its own machine. Under `sg/compile`'s synchronous default a
   derefable answer is simply dereferenced, so the same shape works in both doors.
@@ -392,6 +399,106 @@ to the old one.
 into one order *before* the machine sees them, because only the caller can: the machine has
 no clock and no way to know two events were concurrent.
 
+### Two events at once, where it is proven
+
+A handler may answer a deferred, so a second event can arrive while the first is still in
+flight — and a machine is in one state at a time. `sg/run` runs both handlers **only where
+the order they finish in cannot be observed**, and serialises everywhere else.
+
+A **join** is what this is for. There is no join operator: a state whose schema *requires*
+both keys is reachable only once both events have been handled, and the intermediate states
+are the join's progress with their schemas saying so.
+
+```clojure
+(def R [:map [:ok :boolean]])
+
+(def verify
+  (sg/shape
+   (sg/state :verifying [:map] {:initial true})
+   (sg/state :evaled    [:map [:eval R]])
+   (sg/state :tested    [:map [:test R]])
+   (sg/state :complete  [:map [:eval R] [:test R]] {:final true})
+   (sg/event :eval [:map [:eval R]])                      ; pure lifts
+   (sg/event :test [:map [:test R]])
+   (sg/transition :verifying :eval :evaled)  (sg/transition :tested :eval :complete)
+   (sg/transition :verifying :test :tested)  (sg/transition :evaled :test :complete)))
+
+(check/commuting verify)                       ; `sg/run` computes this for you
+;=> {:verifying #{#{:eval :test}}}
+```
+
+Two 400ms handlers on that pair cost **400ms and not 800**. Feed `:eval` then `:test` and
+whichever finishes first is applied first, so the machine reaches `:complete` through
+`:evaled` or through `:tested` — two routes, one destination.
+
+What is proven, per pair of events pending in one state, is a **closing diamond** —
+`[s a] -> ta`, `[s b] -> tb`, and `[ta b]` and `[tb a]` both existing and landing in the
+same node — plus **Bernstein's conditions** on the patches: neither event writes what the
+other writes, and neither *reads* through a `{:sees …}` view what the other writes. Anything
+short of a proof serialises. A state that nests a machine licenses nothing at all, because
+inner-first means a child may take the event and the edges being read are not what runs.
+
+### How a patch lands: a combine
+
+A patch is *merged* into the state, and a merge is last-write-wins. That one operation is
+the only non-commutative thing in the whole apply phase, and **both halves of Bernstein
+traced back to it**: two patches touching one key could never be licensed, and a merge
+cannot express a change relative to what the state holds, which is what forces a `{:sees …}`
+view — and a view closes the licence from the other side.
+
+So a key may say how a patch lands on it:
+
+```clojure
+(defn better [a b]                                  ; a TOTAL order — see the warning below
+  (if (pos? (compare [(:score a) (:by a)] [(:score b) (:by b)])) a b))
+
+(sg/state :choosing
+          [:map [:best {:optional true
+                        :combine better
+                        :combine/commutes true} Impl]]
+          {:initial true})
+```
+
+Now two events that both write `:best` — fan out *k* implementations, take the best — are
+licensed to run at once, which under a merge they never could be. A key with no combine
+replaces, exactly as before.
+
+**The combine is a function and the promise is data**, and the split is the point. Merging
+is domain logic: keep the best-scoring implementation with its provenance, deduplicate
+review comments by line. No fixed vocabulary of `:+` and `:max` expresses that, so the
+combine is an ordinary closure — allowed here where it is refused for a *guard*, because a
+guard decides **where the machine goes** (structural, and must be decided from its own
+shape) while a combine decides **what a value is**, inside a state, exactly as a handler's
+body always has. But no function yields its own algebra, so `:combine/commutes` is declared
+beside it as data, and that declaration is the only part `commuting` reads.
+
+**The declaration is checked, not trusted**, at two strengths — and it needs both:
+
+- `check/laws` **refutes** it by generation from the key's own schema. It never answers
+  `:yes`, because generation can refute a law and cannot prove one. Two laws: `:commutes` is
+  *left*-commutativity over `(state, patch, patch)` triples — `f(f(s,a),b) = f(f(s,b),a)`,
+  which is the shape the fold has, not commutativity of the binary op — and `:closed`, that
+  `f` of two values of the key's schema answers a value of that schema, which has to hold or
+  the static subsumption check is reasoning about the wrong type.
+- **`sg/run` verifies it on the concrete values** whenever the licence is actually taken,
+  before either patch lands. A false promise is then a defect that stops the machine, not an
+  order-dependent flake.
+
+Why both: a plausible domain rule — *a pinned choice wins outright* — survived 27,000
+generated triples and is not commutative. Generation is where you find the mistakes that are
+about **values**; the runtime is what catches the ones about **rare** values.
+
+> **Ties are the trap.** `(if (>= (:score a) (:score b)) a b)` is not commutative: a tie has
+> no canonical winner, so the answer depends on which patch arrived first. `check/laws`
+> refutes it in a few dozen samples. Most domain merges are not commutative until you make
+> the order total, so expect the licence to widen less than it first appears.
+
+The price, and it is the only one: **`:states` reports a licensed pair in completion order**,
+so two rows may come back swapped against the order they were fed. No state is ever wrong —
+the pair was proved to land in the same one either way — but an audit trail should represent
+what happened rather than a sequence that did not. A caller who wants strict arrival order
+everywhere drives `robertluo.state-graph.async/drive` with no licence.
+
 ## What v1 does not do
 
 Said plainly, because each is a design decision and not an oversight.
@@ -415,7 +522,9 @@ Said plainly, because each is a design decision and not an oversight.
   declares a `{:sees …}` view — so the dependence is visible in the shape, narrowed to the
   keys named, and checkable. Two consequences: a state a view reads must *guarantee* those
   keys, and a handler that reads can never be licensed to run concurrently with one that
-  writes what it read.
+  writes what it read — no combine repairs that, since the value it read is already stale.
+  Where an accumulation must also be concurrent, the way to it is a **combine** rather than a
+  view: answer from the event alone and let the node say how the value lands.
 - **A state cannot hand a key onward silently.** Since a node holds only what it declares,
   data that should survive several states must be declared by each of them. Dropping a field
   is free — declare one fewer — but carrying one is explicit.
@@ -424,11 +533,13 @@ Said plainly, because each is a design decision and not an oversight.
   event.
 - **No persistence, and no shape versioning.** The results are the history; storing them is
   yours.
-- **Concurrency within one machine is proven but not taken.** `check/confluence` and
-  `check/commuting` compute which pairs of pending events could safely be applied in
-  completion order — the diamond must close, and the patches must satisfy Bernstein's
-  conditions: neither writes what the other writes, and neither *reads* through a view what
-  the other writes. `sg/run` serialises always, and says so rather than pretending.
+- **Concurrency within one machine is only ever two events, and only where proven.**
+  `check/commuting` is a *pairwise* relation on one state, so two handlers may be in flight
+  and never three: a third would need the licence re-established at each intermediate state,
+  which is not proven and so is not taken. An unproven pair — a guarded event, an undeclared
+  `:out`, overlapping writes, a nesting node — waits, which is always correct. And nothing
+  is *declared* concurrent: the shape already says which pairs commute, so there is no
+  annotation to get wrong.
 
 ## The API
 

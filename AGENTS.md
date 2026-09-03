@@ -173,7 +173,10 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
                                      drawing, which answer the same question by different means.
                                      A SIBLING of compile, not a part of shape: nothing here is on
                                      the runtime path, and an application shipping a working shape
-                                     never loads it. Requires shape, ubergraph and malli
+                                     never loads it. Requires shape, ubergraph and malli — AND
+                                     malli.generator since 2026-09-03, `laws` refuting a declared
+                                     combine law by generation, which means the facade now loads
+                                     test.check as well. Knowingly; see :what-the-combine-taught
     robertluo.state-graph.shape    — THE BOTTOM: the graph itself. Pure data plus constructors,
                                      ubergraph underneath, the malli schemas of a shape, and the
                                      REFERENTIAL checks — the ones answerable from the parts alone.
@@ -360,7 +363,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       ever GROW. What a task wants is the last n, or a summary, or one field from three steps back,
       and `:messages by conj` expresses none of those — while in the domain this library was built
       for, THE PILE IS THE COST, context being metered. So the accumulation question was the wrong
-      question, and the right one is who may SEE what: :internal-visibility-is-declared-and-not-automatic."
+      question, and the right one is who may SEE what: :internal-visibility-is-declared-and-not-automatic.
+    - AND THE DOOR IS OPEN AGAIN, 2026-09-03, THROUGH A DIFFERENT WALL. The objection above is
+      about ACCUMULATION POLICY — what a state should KEEP — and it stands exactly as written: a
+      combine that only grows is still the wrong answer to that question, and `:messages by conj`
+      is still refused. What was reopened is a different question that this reasoning never
+      covered: not what to keep, but HOW A PATCH LANDS. The author put it in one line —
+      `in real life, merging is a domain/task related job` — and it is the answer to why the
+      concurrency licence was so narrow rather than to anything about context. A combine declared
+      COMMUTATIVE lets two events write one key and still be licensed. See
+      :a-combine-is-how-a-patch-lands, and note what did NOT change: a key with no combine
+      REPLACES, so nothing written before this behaves differently."
 
    :internal-visibility-is-declared-and-not-automatic
    "BUILT 2026-09-01, both halves, the same day it was designed — and the design below stands as
@@ -956,6 +969,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       either event leaves the state, the other route has to exist AND rejoin, which MEASURED over
       this project's own fixtures never happens — see :confluence-was-measured-not-guessed. Divergence
       is the POINT of a state machine, so confluence is the exception and not the rule.
+    - THE WRITE-WRITE CONDITION IS NO LONGER ABSOLUTE, 2026-09-03. It was never really about
+      Bernstein and always about `merge`: last-write-wins is the only non-commutative thing in the
+      apply phase, so two patches touching one key were refused because of the OPERATION and not
+      because of the data. A key that declares a COMMUTATIVE COMBINE is licensed. The READ half
+      is untouched and cannot be helped by one — a handler that read the key computed from a value
+      the other event changes, so its patch is stale whatever lands it. See
+      :a-combine-is-how-a-patch-lands.
     - SO THE RULE IS SMALL. SERIALISE BY DEFAULT, always correct and needing no annotation. Take
       concurrency only where both pending events are SELF-LOOPS on the current state and their :out
       key sets are DISJOINT — mu/keys on each, and that declaration was paid for by the subsumption
@@ -991,18 +1011,149 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - AND THE INTERMEDIATE STATES NEEDED NO CHECK, which fell out rather than being solved: if
       [ta b] is an edge at all then `subsumption` has already asked whether ta admits what b
       produces. One of the three conditions was already paid for.
-    - THE RUNTIME DOES NOT TAKE THE LICENCE YET, and this is a GAP found by building the async layer
-      rather than by thinking about it. Concurrency for a licensed pair needs the HANDLER run apart
-      from the APPLICATION — two handlers in flight, their patches applied in order of completion —
-      and `compile` answers ONE step that does both at once. Calling that step twice from the same
-      state answers two whole states derived from it, and combining those is only correct where both
-      events are self-loops with disjoint patches, which is LESS than `commuting` licenses. So
-      async/drive serialises always, and says so rather than pretending.
-    - WHAT WOULD CLOSE IT is a decision for the author, not a refactor: split `compile` into a PATCH
-      phase (run the handler, check it against its own :out) and an APPLY phase (merge, write :id and
-      :instance, validate on enter). Which is exactly the shape :a-handler-causes-nothing already
-      leans towards for chained events — a handler answers a patch, a state applies it — so one
-      decision may pay for both."
+    - THE RUNTIME TAKES THE LICENCE, 2026-09-03, and the gap this entry recorded is CLOSED. What
+      it said was needed is what was built: `compile/phases` answers {:patch :apply :step}, the
+      step being BUILT from the other two so the one-call door and the two-call door cannot
+      drift. async/drive and async/fan take a `Licence` — the two phases plus `check/commuting`
+      verbatim — and `sg/run` computes and hands it down, that being the only layer that knows
+      the shape. MEASURED: two 400ms handlers on the licensed pair of a join went 843ms to 418ms.
+      See :what-the-phase-split-taught, and :a-join-is-the-product-and-the-licence for what the
+      whole thing is FOR.
+    - AND THE LICENCE WAS UNSOUND UNDER NESTING, found by asking whether `commuting` could be
+      trusted before resting a runtime on it, and it is the most important thing this work turned
+      up. INNER FIRST means a child sees an event before the parent's own edges do, so a nesting
+      node's self-loops describe a diamond that NEVER RUNS. Measured: a node whose child admitted
+      both events had its two own self-loops licensed :yes while the CHILD's own `confluence`
+      proved that same pair :no, and the two orders landed in visibly different states. `commutes`
+      now answers :unknown wherever a nested machine could take either event — the state the pair
+      is pending in, or the state either event would leave it in. The state a pair ENDS in may
+      nest freely, entering a nesting node seeding the child's first state either way round.
+      THE LESSON IS ONE THIS PROJECT KEEPS RELEARNING, and :what-visibility-taught said it first:
+      a check written for one purpose is not sound for a second one by default. It was decorative
+      for two days and nothing noticed, because `drive` serialised whatever it said.
+    - WHAT IS STILL NOT TAKEN, and it is narrower than what was: only ever TWO events in flight.
+      `commuting` is a PAIRWISE relation on ONE state, which is exactly what this entry designed;
+      a third would need the licence re-established at each intermediate state, and inventing that
+      in the async layer would be taking more than was proven. The speculative take is ONE event
+      deep for the same reason."
+
+   :a-join-is-the-product-and-the-licence
+   "ASKED BY THE AUTHOR 2026-09-03 as two features — park on a state waiting for an external
+    signal, and transit only after two independent events — and NEITHER NEEDED NEW GRAMMAR. What
+    it needed was for the runtime to take a licence it had been computing for two days.
+    - PARKING NEEDS NOTHING AND ALREADY WORKED, measured before anything was proposed. A state
+      waiting for :approve is a state with an :approve edge: no event, no transition, and
+      `problems` and `traps` both silent, a park having out-edges that reach a final. An event
+      arriving while parked that the state does not admit comes back :fired false, which is
+      already the `I am not accepting that` signal. THE ONLY THING THE SHAPE CANNOT SAY is
+      whether an event comes from the DRIVER or from the WORLD — the external/hidden distinction
+      :a-guard-is-a-schema-over-the-event draws in prose and nowhere in data. That is a label and
+      not a feature, and nobody has asked for it.
+    - A JOIN IS THE PRODUCT CONSTRUCTION, and it was expressible on the day it was asked about.
+      :complete declares [:map [:eval R] [:test R]], both REQUIRED, and the two events reach it
+      by two routes through intermediate states that declare what has arrived so far. Which is
+      family C of the guard survey — determinize on the input value — and the cost is the DFA's
+      own: 2^n states, being 4 at n=2 and 8 at n=3.
+    - PROJECTION IS WHY IT WORKS RATHER THAN A THING IT FIGHTS. Each intermediate state declares
+      exactly what it carries, so THE STATE NAME IS THE JOIN'S PROGRESS AND THE SCHEMA SAYS SO.
+      :a-handler-answers-a-map-and-declares-it called `carrying a key across several states is
+      EXPLICIT` a cost; for a join it is the whole mechanism.
+    - AND `confluence` PROVES IT, which is the part worth having and was already built. Measured
+      2026-09-03: the n=2 join answers {:in :verifying :pair [:eval :test] :verdict :yes} and
+      both orders land in one IDENTICAL map. At n=3 the generated lattice is 8 states, 12 edges,
+      `problems` [], and confluence {:yes 6} — every candidate pair at every level of the
+      lattice — with all SIX permutations landing in one identical state by six distinct paths.
+      THAT IS THE FIRST :yes ANY SHAPE HERE HAS PRODUCED: :confluence-was-measured-not-guessed
+      recorded that 100% of the candidate pairs in this project's fixtures FAIL confluence, and
+      the reason is that those fixtures had no join in them. A join is what a commuting pair IS.
+    - SO THE FEATURE WAS THE RUNTIME AND NOT THE SHAPE. Correctness was complete and only
+      wall-clock was lost: two 400ms handlers on a proven pair cost 843ms, serialised. Taking the
+      licence made it 418ms. See :two-events-in-flight-at-once, whose recorded gap this closed.
+    - A JOIN IS A PARTS ASSEMBLY AND NOT A CONSTRUCT, which is why nothing was added to build
+      one. The n=3 lattice above was GENERATED by a twenty-line function over the powerset, which
+      is :what-the-parts-library-showed's own advice — a library of parts selected from, and an
+      assembly that is (apply shape ...). If a `join` helper is ever wanted it belongs in whoever
+      writes the workflows, not here.
+    - WHAT WAS TURNED DOWN, and both were considered before the product construction was
+      recommended. A `{:join <schema>} + {:done <target>}` continuation on a node — accumulate on
+      self-loops and move on when the state satisfies a schema — which is a GUARD OVER THE STATE
+      wearing a different hat, and needs one event to move a machine through several states, so
+      the result stream would have to say something new. And ORTHOGONAL REGIONS,
+      {:machines {...} :done :x}, which is the textbook answer and is blocked on a question
+      nesting has never had to answer: MEASURED 2026-09-03, a child that finishes with
+      {:id :c2 :result 42} in :sub is left behind entirely when the parent escapes — :p2 comes
+      back {:id :p2}. Escape means ABORT today and discarding is correct; a join must COLLECT, so
+      regions need a :yield before they are buildable at all. Regions are for when each branch is
+      itself a workflow; the lattice covers a join on plain events, so a real shape asks first."
+
+   :a-combine-is-how-a-patch-lands
+   "THE AUTHOR'S, 2026-09-03, in one line that reopened a door they had shut two days earlier:
+    `in real life, merging is a domain/task related job.` It is the answer to why the concurrency
+    licence was so narrow, and the diagnosis is exact.
+    - A NAIVE MERGE WAS THE WHOLE LIMIT, and BOTH HALVES OF BERNSTEIN TRACED BACK TO IT. Measured
+      2026-09-03: every road to touching one key was closed. A relative change needs {:sees} and
+      is refused read-write; an absolute set is refused write-write. So a concurrently incremented
+      counter was INEXPRESSIBLE, and the reason is one operation — `merge` is last-write-wins, and
+      it is the only non-commutative thing in the apply phase, everything after it (the projection,
+      the identity keys, the enter validation) being a pure function of the value it produces. Two
+      increments applied concurrently under a merge give :n 1 where the serial answer is 2; under
+      `+` both orders give 2.
+    - SO A KEY MAY SAY HOW A PATCH LANDS ON IT, as properties on its own map entry:
+      {:combine f :combine/commutes true}. A key with no combine REPLACES, which is what a merge
+      always did, so nothing written before this behaves differently.
+    - IT IS A CLOSURE, AND THE FIXED VOCABULARY WAS REFUSED BY THE AUTHOR ON EXACTLY THE RIGHT
+      GROUND. The first proposal was a small proven set — :+ :max :min :union — whose algebra the
+      library would know. It does not survive contact: `:max` does not express `keep the
+      highest-scoring implementation with its provenance`, and a review-comment merge deduplicating
+      by line is nobody's `:union`. A vocabulary that covers no real merge buys a checker nothing.
+    - WHY A COMBINE MAY BE A CLOSURE WHERE A GUARD MAY NOT, since it reads as a reversal of
+      :a-guard-is-a-schema-over-the-event and is not one. A GUARD DECIDES WHERE THE MACHINE GOES
+      and a COMBINE DECIDES WHAT A VALUE IS. The first is structural — it changes the graph, which
+      is the thing this library exists to make visible and checkable — so it must be DECIDED, and
+      deciding needs the guard's own shape. The second lives inside a state's value, exactly as a
+      handler's body always has, and :a-shape-is-code already licenses that. The test is
+      :a-node-is-labelled-by-its-id's: is it structural.
+    - WHAT MAY NOT BE A CLOSURE IS THE PROMISE. No function yields its own algebra, so the law is
+      declared beside it as DATA, and that declaration is the only part `commutes` reads. Which
+      makes it exactly the class of claim this repository's own cross-component rule is about —
+      a rule that lives only in words is a rule nothing checks — so it is CHECKED AT TWO
+      STRENGTHS, and it needs both:
+        check/laws   REFUTES it by generation from the key's own schema. It never answers :yes,
+                     because generation can refute a law and cannot prove one, so the verdicts are
+                     :no with a witness or :unknown. Seeded, because a check that answers
+                     differently each call is not a check.
+        compile      VERIFIES it on the CONCRETE VALUES whenever the licence is actually taken,
+                     both patches being in hand, and BEFORE either lands. A false promise is then
+                     a defect that stops the machine rather than an order-dependent flake.
+    - AND THE LAW IS NOT THE ONE FIRST NAMED. What the licence needs is LEFT-COMMUTATIVITY over
+      (state, patch, patch) triples — f(f(s,a),b) = f(f(s,b),a) — which is the shape the FOLD has,
+      and not commutativity of the binary operation. The binary law was implemented first and is
+      the wrong test.
+    - THE SECOND LAW IS :closed AND IS NOT OPTIONAL: f of two values of the key's schema must
+      answer a value of that schema. It has to hold or the STATIC check is wrong — `produced`
+      composes the declared :out over the source's schema and knows nothing of a combine, so a
+      combine that changed the type would make every edge into that state a lie. It is also the
+      law generation settles WELL, being about types rather than about values.
+    - THREE NODES AND NOT ONE decide whether a shared key may be written by both events: ta, tb
+      and the join x, being every node a patch of the pair ever lands on. Each must declare the
+      SAME combine and each must declare it commutative, because the fold applies the first patch
+      at ta or tb and the second at x, so three different functions would compose two different
+      answers. For a SELF-LOOP, which is where combines pay, all three are one node.
+    - IT IS DECLARED ON THE NODE and never on an event: the same key must combine the same way
+      however it arrives, or the algebra is per-edge and proves nothing. Which is also the answer
+      the data owner should have, the same instinct as
+      :internal-visibility-is-declared-and-not-automatic.
+    - WHAT IT DOES NOT FIX, said out loud. The READ half of Bernstein: a handler that declared a
+      {:sees} view computed from a value the other event changes, and no combine repairs a stale
+      patch. The way to a CONCURRENT accumulation is therefore a combine INSTEAD of a view —
+      answer from the event alone and let the node say how it lands. And it does not lift the
+      `only ever two in flight` limit, which is the diamond's and not the merge's.
+    - THE HONEST CAUTION, and it is measured rather than modest: MOST DOMAIN MERGES ARE NOT
+      COMMUTATIVE, and the author will not notice. `best-of` written with >= on the score was
+      refuted in forty samples because A TIE HAS NO CANONICAL WINNER, so :by leaks argument order;
+      it took a TOTAL order to make the law hold. Ties, timestamps, last-writer and provenance all
+      break it invisibly. So the licence widens less than it sounds, which is worth knowing before
+      building a shape around it."
 
    :the-caller-owns-the-lifecycle
    "DECIDED 2026-09-01, and the question DISSOLVED rather than being answered. The author asked who
@@ -1268,9 +1419,20 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     right direction: `check/dot` made the graphviz-source test need no file, so it moved into the
     fast loop, leaving only what needs a real clock and a real `dot`. The integration suite NEEDS GRAPHVIZ — see
     :graphviz-and-the-devenv.
-    NOTHING IS UNBUILT. What is left is not a layer but a licence not taken: async/drive serialises
-    always, and the concurrency `check/commuting` proves to be safe is a GAP with a reason, recorded
-    in :two-events-in-flight-at-once.
+    NOTHING IS UNBUILT AND NOTHING IS UNTAKEN, 2026-09-03. The licence that was the last gap is
+    TAKEN: `compile/phases` splits the step into a PATCH half and an APPLY half, async/drive and
+    async/fan accept a `Licence`, and `sg/run` computes `check/commuting` and hands it down — so
+    two handlers of a join run at once where their order of completion is PROVEN unobservable.
+    Measured 843ms to 418ms on two 400ms handlers. The same work found a live unsoundness in
+    `commuting` under nesting and fixed it. See :two-events-in-flight-at-once,
+    :a-join-is-the-product-and-the-licence and :what-the-phase-split-taught.
+    AND A KEY MAY SAY HOW A PATCH LANDS ON IT, 2026-09-03, which is what the licence was really
+    waiting for: {:combine f :combine/commutes true} on a map entry, so two events writing ONE key
+    can be licensed where a naive merge made that impossible. The combine is a CLOSURE, merging
+    being domain work, and the law it declares is DATA — refuted by `check/laws` through
+    generation, and verified on the concrete values by `compile` whenever the licence is taken.
+    A key with no combine REPLACES, so nothing written earlier behaves differently. See
+    :a-combine-is-how-a-patch-lands and :what-the-combine-taught.
     AND A TRANSITION MAY BE GUARDED, 2026-09-03, which is the one thing the deleted
     :v1-is-deterministic said this library would never do: {:when <a map schema>} on a transition,
     so one event leads two ways and THE SHAPE SAYS WHICH. `shape/disjoint` proves two guards on
@@ -1675,6 +1837,126 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       README shows the throw instead, that file's own idiom for a referential fault. RENDERING
       THE NOTEBOOK IS WHAT CAUGHT IT: `clojure -X:notebook` runs every cell, and a tutorial
       example that cannot run is a lie a test suite will never see."
+
+   :what-the-phase-split-taught
+   "VERIFIED BY RUNNING on 2026-09-03, splitting the step and taking the licence.
+    - THE LICENCE WAS UNSOUND AND NOTHING HAD NOTICED, which is the finding that matters most
+      and it was found by ASKING rather than by a test. `check/commuting` reasons over
+      shape/transitions of ONE graph and knew nothing of nesting, so a node whose child admitted
+      both events had its own two self-loops licensed :yes while the child's own `confluence`
+      proved that pair :no — and the two orders landed in visibly different states, the parent's
+      self-loop RESTARTING the child and destroying its work. It was harmless for exactly as long
+      as `drive` ignored it. THE HABIT WORTH KEEPING: before resting anything on a check, ask what
+      it was reasoning about, because a check that is decorative is a check nobody has tested
+      against reality.
+    - THE SPLIT IS DECIDED BY WHAT EACH CROSSING DEPENDS ON, and the division came out exact:
+      :event, :sees and :out belong to the PATCH half (an event either is what it says it is or
+      is not, whatever state it meets; a view reads the state the handler SAW; :out is the
+      event's own promise), while :answer and :enter belong to the APPLY half. :answer is the
+      one that forced the split to exist — a patch-schema is the TARGET'S schema, and a licensed
+      patch is applied where the target may be a DIFFERENT NODE from the one it was computed
+      against. In the join, :test's patch is computed in :verifying where its target is :tested,
+      and applied in :evaled where its target is :complete.
+    - THE STEP IS DEFINED AS THE COMPOSITION and is asserted as a PROPERTY — patch-then-apply
+      equals step, for any generated shape and any event, admitted or not. That is the only thing
+      that stops the one-call door and the two-call door drifting, and it cost three lines.
+    - AND IT TURNED :then FROM AN fmap INTO A BIND, which an existing test caught within a minute.
+      The Context's words always said bind — `answers whatever the continuation answers` — but the
+      old step used `then` exactly ONCE per call, so an fmap satisfied it, and compile_test's box
+      fixture was (fn [v f] (box (f v))). Two composed binds turn that into a container of a
+      container, and `applying` found no :depth on what it was handed. VERIFIED FIRST, before
+      relying on it: d/chain flattens, flattens twice over, and chaining a deferred does not
+      consume it. The fixture is now a lawful bind and its assertions did not change.
+    - A PATCH HAS TO SAY WHOSE IT IS. :depth, and the two halves compare it against their own
+      lookup — a child's patch may only be applied to that child and this machine's only to this
+      machine, or an answer would be merged into a state that never asked for it. One comparison
+      per level checks the whole descent, nesting asserting the same thing of itself.
+    - THE BUG THE SEAM CAUGHT WAS MY OWN, one layer up: async handed `apply` the patch DEFERRED
+      rather than the patch, and the seam failed loudly at :depth instead of merging nonsense.
+      Nine errors, all one cause.
+    - A SPECULATIVE TAKE IS FREE AND IS TAKEN ONLY WHERE IT PAYS. Start the handler, then reach
+      for another event without waiting, and race the two: whatever the take brings is either the
+      other half of a licensed pair or the next iteration's event, carried in `held`, so nothing
+      is taken twice and nothing dropped. The reach is skipped entirely where THIS state has no
+      licensed pair, which is most states in most shapes — otherwise a shape with one licensed
+      pair would hold an event early everywhere.
+    - COMPLETION ORDER IS TESTABLE WITHOUT A CLOCK, which is better than the ^:integration test
+      it replaces the need for: the first event's handler PARKS on a deferred the test resolves
+      by hand, so the second can only land first. Feed :eval then :test and the first result is
+      :test, deterministically. One timing test remains and is ^:integration, asserting the thing
+      only a clock can — 600ms serialised against under 500 licensed.
+    - AND A TEST DEREF-ING :done BEFORE DRAINING :states HUNG, exactly as `Machine` warns.
+      Backpressure is real; the second result had nobody to take it.
+    - THE NUMBERS: 100 tests and 298 assertions, both suites green, up from 88 and 257. The
+      instrument count went 41 to 42 — `phases` is the one public function added — and agrees
+      with the independent ns-publics count. clj-kondo clean over src, test and notebook. THE
+      FACADE IS STILL TEN FUNCTIONS: `commuting` stays in `check` beside `subsumption`, `views`,
+      `coverage` and `confluence`, none of which is on the facade either, and `problems` is not
+      the precedent for it — that one publishes FAULTS and this publishes a licence."
+
+   :what-the-combine-taught
+   "VERIFIED BY RUNNING on 2026-09-03, building :a-combine-is-how-a-patch-lands.
+    - THE PROTOTYPE REFUTED MY OWN `SOUND` EXAMPLE, which is the finding that shaped the design.
+      `best-of` written as (if (>= score-a score-b) a b) was offered as the correct version and
+      generation broke it in forty samples: a TIE has no canonical winner, so :by depends on which
+      argument came first. It took (compare [score by]) — a TOTAL order — to make the law hold. If
+      the person proposing the mechanism gets it wrong in the first example, the mechanism needs a
+      checker and not a docstring.
+    - AND THE LAW I TESTED FIRST WAS THE WRONG LAW. Binary commutativity is not what the licence
+      needs; LEFT-COMMUTATIVITY over (state, patch, patch) triples is, because that is the shape
+      the fold has. A function can be left-commutative in the fold and not commutative as a binary
+      operation — the fold always puts the STATE first, so a rule that only ever discards the
+      SECOND argument is consistent in both orders. Two of my three attempted counterexamples were
+      not counterexamples for exactly that reason.
+    - GENERATION CANNOT REACH EVERY VIOLATION, and this is the number that decided the runtime
+      check: a plausible domain rule — `a pinned choice wins outright` — is not left-commutative,
+      and 27,000 generated triples found nothing, malli having no reason to invent the string
+      `pinned`. The special case must also be BEATABLE to violate anything: an unbeatable pin just
+      makes the max sticky and stays order-independent, which cost two wrong examples before the
+      right one.
+    - SO THE RUNTIME CHECK IS THE ENFORCEMENT AND THE GENERATIVE ONE IS THE DEVELOPMENT AID, and
+      each catches what the other cannot. `laws` finds mistakes about VALUES (a tie-break); :agree
+      finds mistakes about RARE values. The liar fixture is licensed by `commuting`, is NOT refuted
+      by `laws`, and IS refused by :agree — all three asserted, because that combination is the
+      whole argument for having the third.
+    - :agree HAD TO BECOME A PRE-CONDITION, which changed the async layer's shape. Applying one
+      patch and only then discovering the licence was invalid would emit a result derived from an
+      unsound proof. So `pump` now waits for BOTH patches before landing either — which costs
+      nothing in the machine's wall-clock, the concurrency being in the HANDLERS and both already
+      running, and only delays the FIRST result's row. Verified: :states is closed and EMPTY when a
+      false promise is caught.
+    - AND IT BROKE THE TESTS THAT PROVED THE ORDERING, which is how the change announced itself:
+      two gated tests read the first result and only then opened the gate, which under
+      wait-for-both is a deadlock. Rewritten to open the gate first — the RACE is already decided
+      by then, every stream in those tests being buffered so the chain runs synchronously to the
+      point where the machine chooses. Six consecutive suite runs to confirm that is a fact about
+      the machine and not about a clock.
+    - MALLI KEEPS ARBITRARY ENTRY PROPERTIES and `mu/merge` carries them through, so
+      {:combine f} on a map entry survives into `enter-schema` — checked before designing anything
+      on it. m/children hands back [k props child], which `entries-of` already destructured and
+      merely threw the props away.
+    - A `for` WHOSE BODY IS A `cond` PUTS nil IN `problems`. The first version of the referential
+      check emitted nil for the healthy case, `concat` kept it, and every shape with a combine was
+      refused with a vector of nils. Two `for`s with :when instead. Worth knowing because
+      `shape/problems` is a concat of a dozen comprehensions and the idiom there is :when, never a
+      cond body.
+    - mg/sample TAKES A :seed AND HONOURS IT, so `laws` answers the same thing twice; unseeded it
+      genuinely varies. An :fn schema with no :gen/gen throws :malli.generator/no-generator, which
+      is malli's answer and not one to work around — `laws` documents it rather than swallowing it,
+      :no-bare-try-catch holding.
+    - `check` NOW REQUIRES malli.generator, so it loads test.check — and the facade requires
+      `check`, so requiring robertluo.state-graph loads it too. test.check was already a :deps
+      dependency and not a dev one, so nothing NEW is on the classpath; what changed is what is
+      loaded. Taken knowingly, for the same reason the facade already pays for `check`: a fifth
+      namespace for one function is worse, and `laws` belongs beside `subsumption`, `views`,
+      `coverage` and `confluence`, none of which is on the facade either.
+    - `laws` IS DELIBERATELY NOT PART OF `problems`. `problems` is static, cheap and runs nothing;
+      `laws` runs the author's own function a couple of thousand times. Mixing them would make
+      `problems` a test runner.
+    - THE NUMBERS: 109 tests and 326 assertions, both suites green, up from 100 and 298. The
+      instrument count went 42 to 45 — combines-of, combines and laws — and agrees with the
+      independent ns-publics count. clj-kondo clean. The tutorial gained a section and RENDERS,
+      which is what proves its cells run."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is

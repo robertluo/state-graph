@@ -225,20 +225,35 @@
    threw. A caller who named nothing finds their machine under nil.
 
    ONE FUNCTION FOR ONE MACHINE AND FOR MANY, because the stream is partitioned on
-   :instance and one partition is one machine — each reduced strictly in order, all of them
-   at once. That is where the parallelism is and where it stays: within a machine, an event
-   is applied to what the last one produced, which is what a reduction means.
+   :instance and one partition is one machine — all of them at once. That is where the
+   parallelism is.
+
+   AND WITHIN ONE MACHINE, WHERE IT IS PROVEN. This door computes `check/commuting` and
+   hands it down as the LICENCE, so two events pending in one state whose order of
+   completion cannot be observed have their handlers run AT ONCE — which is what makes a
+   fork-and-join of two slow handlers cost one of them rather than both. Everything else is
+   applied strictly in order, an event to what the last one produced.
+   THE PRICE, and it is the reason this is worth saying in the docstring: :states then
+   reports a licensed pair in COMPLETION order, so the two rows may appear swapped against
+   the order they were fed. The pair was PROVED to land in the same state either way, so no
+   state is ever wrong; what changes is the history, which should say what happened. A
+   caller who wants strict arrival order everywhere drives `async/drive` with no licence.
 
    Handlers may answer deferreds here, which is the point of the door: a machine waiting on
    I/O holds no thread, and a slow handler slows only its own machine."
   {:malli/schema [:=> [:cat shape/Shape :map async/Source] async/Machine]}
   [sh data events]
-  (let [idx (compile/index sh)]
-    (async/fan (compile/compile sh async/context)
+  (let [idx (compile/index sh)
+        ph  (compile/phases sh async/context)]
+    (async/fan (:step ph)
                (fn [instance] (compile/initial sh instance data))
                events
                (fn [state event state']
                  (cond-> {:event event
                           :state state'
                           :fired (compile/admits? idx state event)}
-                   (some? (:instance state')) (assoc :instance (:instance state')))))))
+                   (some? (:instance state')) (assoc :instance (:instance state'))))
+               {:patch (:patch ph)
+                :apply (:apply ph)
+                :agree (:agree ph)
+                :pairs (check/commuting sh)})))

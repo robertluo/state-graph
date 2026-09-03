@@ -12,6 +12,7 @@
    Requires the shape, ubergraph and malli."
   (:require [clojure.string :as str]
             [malli.core :as m]
+            [malli.generator :as mg]
             [malli.util :as mu]
             [robertluo.state-graph.shape :as shape]
             [ubergraph.alg :as alg]
@@ -294,6 +295,41 @@
   [sh]
   (into {} (map (juxt :event :sees)) (shape/transitions sh)))
 
+(defn- nesting
+  "The states that NEST a machine. A pair pending in one of them cannot be reasoned about
+   from these edges at all, because INNER FIRST means the child sees an event before this
+   shape's own edges do — so the diamond the edges describe is not the diamond that runs.
+
+   MEASURED, and it was a live unsoundness rather than a gap: a node whose child admits
+   both events had its two own self-loops licensed as commuting while the child's own
+   `confluence` proved that pair :no, and the two orders landed in visibly different
+   states. Nothing had noticed because `drive` serialised regardless; the licence became
+   load-bearing the day the runtime took it."
+  [sh]
+  (set (keys (shape/machines sh))))
+
+(defn- combining
+  "{node-id {k {:combine f :commutes? bool :schema S}}} — what each node declares about
+   how a patch lands on its keys. Empty maps for a shape that declares none."
+  [sh]
+  (into {} (for [id (shape/states sh)] [id (shape/combines sh id)])))
+
+(defn- combines-commutatively?
+  "Whether key k may be written by BOTH events of a candidate pair.
+
+   THE THREE NODES ARE ta, tb AND x, which are every node a patch of this pair ever lands
+   on: the first event's target, the second's, and the join they rejoin at. Each must
+   declare the SAME combine for k and each must declare it commutative — three nodes
+   because the fold applies the first patch at ta or tb and the second at x, so three
+   different functions would compose into two different answers and prove nothing. For a
+   SELF-LOOP, where combines actually pay, all three are one node and this is one lookup.
+
+   A KEY DECLARED ON ONLY SOME OF THEM IS REFUSED, `:commutes?` of nil being false."
+  [comb nodes k]
+  (let [ds (map #(get-in comb [% k]) nodes)]
+    (and (every? :commutes? ds)
+         (apply = (map :combine ds)))))
+
 (defn- commutes
   "The verdict for two events pending in ONE state: :yes, :no or :unknown, and like
    `admits` it never lies.
@@ -306,9 +342,16 @@
    the write sets alone cannot see it. Measured: before this, a pair whose writes were
    {:total} and {:n} was licensed while one of them read :n, and the two orders answered
    :total 2 and :total 18."
-  [tgt guards out sees s a b]
+  [tgt guards nests comb out sees s a b]
   (let [ta (tgt [s a]), tb (tgt [s b])]
     (cond
+      ;; A NESTED MACHINE IS NOT REASONED ABOUT HERE, and it has to be asked FIRST — of
+      ;; where the pair is pending AND of where either event would leave it, since those
+      ;; are the three states an event of this pair is ever routed from. INNER FIRST means
+      ;; a child would take the event before the edge being read here, so neither :yes nor
+      ;; :no is about what runs. The state a pair ENDS in may nest freely: entering a
+      ;; nesting node seeds the child's own first state either way round.
+      (some nests [s ta tb]) :unknown
       ;; A GUARDED EVENT IS NOT REASONED ABOUT HERE. Where a guard decides the target,
       ;; `both admitted` stops being a fact about the shape — it depends on the events
       ;; themselves — so the diamond cannot be looked up at all. :unknown is the honest
@@ -329,7 +372,20 @@
           (not (and x1 x2 (= x1 x2))) :no
           ;; the diamond closes, and now it is only about the patches
           (not (and oa ob)) :unknown
-          (some (writes ob) (writes oa)) :unknown
+          ;; WRITE-WRITE, AND A SHARED KEY IS NO LONGER THE END OF IT. Under a naive merge
+          ;; two patches touching one key could never be licensed, last-write-wins being
+          ;; the whole of how a patch landed. A key that declares a COMMUTATIVE COMBINE is
+          ;; different: which patch landed second stops being observable in that key. The
+          ;; declaration is a claim about a closure and is not proven here — `laws` refutes
+          ;; it by generation and `compile`'s :agree verifies it on the concrete values
+          ;; whenever the licence is actually taken.
+          (not-every? (partial combines-commutatively? comb [ta tb x1])
+                      (filter (writes ob) (writes oa)))
+          :unknown
+          ;; READ-WRITE IS UNTOUCHED BY A COMBINE, and cannot be helped by one: a handler
+          ;; that READ the key computed from a value the other event changes, so its patch
+          ;; is stale whatever lands it. The way to a concurrent accumulation is a combine
+          ;; INSTEAD of a view — answer from the event alone and let the node combine.
           (some (writes ob) (reads a)) :unknown
           (some (writes oa) (reads b)) :unknown
           :else :yes)))))
@@ -356,6 +412,9 @@
    - :unknown where the diamond closes but the patches cannot be shown to commute:
      an event with no :out declared, or two whose :out share a key. Sharing a key is not
      a PROOF of conflict — the values might coincide — so it is not reported as one.
+   - :unknown wherever a NESTED MACHINE could take either event — the state the pair is
+     pending in, or the state either event would leave it in. The edges read here are not
+     what runs there, so no verdict off them would be about the right diamond.
    - :yes where the diamond closes and BERNSTEIN'S CONDITIONS hold on the patches: neither
      event writes what the other writes, and neither READS what the other writes. Disjoint
      writes alone was the condition until a handler could read a declared view, and it was
@@ -373,6 +432,8 @@
   [sh]
   (let [tgt (targets sh)
         guards (guarded sh)
+        nests (nesting sh)
+        comb (combining sh)
         out (declared-out sh)
         sees (declared-sees sh)
         ;; read from the edges and not from `targets`, so a GUARDED event still appears in
@@ -385,7 +446,70 @@
           :let [es (here s)]
           a es b es
           :when (neg? (compare a b))]
-      {:in s :pair [a b] :verdict (commutes tgt guards out sees s a b)})))
+      {:in s :pair [a b] :verdict (commutes tgt guards nests comb out sees s a b)})))
+
+(def ^:private law-samples
+  "How many values a law is tried on. 12 is 144 pairs and 1,728 triples, which costs
+   milliseconds and is enough to catch the mistakes that are about VALUES rather than about
+   rare ones — a tie-break, an argument-order leak."
+  12)
+
+(defn- refute
+  "A COUNTEREXAMPLE OR nil. A counterexample is a PROOF; its absence is not."
+  [law f vs schema]
+  (case law
+    :closed
+    (first (for [a vs b vs
+                 :let [r (f a b)]
+                 :when (not (m/validate schema r))]
+             {:witness [a b] :answer r}))
+    :commutes
+    (first (for [held vs a vs b vs
+                 :let [ab (f (f held a) b) ba (f (f held b) a)]
+                 :when (not= ab ba)]
+             {:witness {:held held :patches [a b]} :answers [ab ba]}))))
+
+(defn laws
+  "One verdict per LAW per COMBINING KEY — whether the algebra a node declares about a
+   combine actually holds, tried by GENERATION from the key's own schema.
+
+   IT NEVER ANSWERS :yes, and that is the honest part. Generation can REFUTE a law and
+   cannot prove one, so a counterexample is :no with a witness and everything else is
+   :unknown. MEASURED, and the reason `compile` verifies the same claim at runtime: a
+   plausible domain rule — a pinned choice wins outright — survived 27,000 generated
+   triples here and is not commutative.
+
+   THE TWO LAWS:
+   - :closed  is checked for EVERY combine, declared or not, and is the one generation
+              settles well, being about TYPES rather than about values: f of two values of
+              the key's schema must answer a value of that schema. It has to hold or the
+              static subsumption check is wrong — `produced` composes the declared :out
+              over the source's schema and knows nothing of a combine, so a combine that
+              changed the type would make every edge into that state a lie.
+   - :commutes is checked only where {:combine/commutes true} is declared, and is the law
+              the licence rests on. It is LEFT-COMMUTATIVITY over triples — f(f(s,a),b) =
+              f(f(s,b),a) — and not commutativity of the binary operation, because that is
+              the shape the fold has. Testing the binary law instead is a real mistake and
+              was made here first.
+
+   IT IS NOT PART OF `problems`, deliberately. `problems` is static, cheap and runs
+   nothing; this runs the author's own function a couple of thousand times. Mixing them
+   would make `problems` a test runner. Seeded, so it answers the same thing twice.
+
+   A key whose schema malli cannot generate THROWS, which is malli's answer and not one to
+   work around: give that schema a :gen/gen. The runtime check holds either way."
+  {:malli/schema [:function [:=> [:cat shape/Shape] [:sequential :map]]
+                            [:=> [:cat shape/Shape [:maybe :map]] [:sequential :map]]]}
+  ([sh] (laws sh nil))
+  ([sh opts]
+   (let [{:keys [samples seed]} (merge {:samples law-samples :seed 1} opts)]
+     (for [id (sort (shape/states sh))
+           [k {:keys [combine commutes? schema]}] (sort-by key (shape/combines sh id))
+           :when combine
+           :let [vs (mg/sample schema {:size samples :seed seed})]
+           law (cond-> [:closed] commutes? (conj :commutes))
+           :let [bad (refute law combine vs schema)]]
+       (merge {:in id :key k :law law :verdict (if bad :no :unknown)} bad)))))
 
 (defn commuting
   "{state-id #{#{event-a event-b}}} — only the pairs PROVEN to commute, as plain data a
@@ -396,7 +520,11 @@
    compiled step. A state with no such pair is absent rather than empty.
 
    A PAIR THAT CANNOT BE CONCURRENT IS NOT A FAULT, so none of this reaches `problems`.
-   It is a pair that has to wait, and waiting is the default."
+   It is a pair that has to wait, and waiting is the default.
+
+   THIS IS NOW LOAD-BEARING AND WAS ONCE DECORATIVE. `sg/run` hands it to the async layer
+   as the LICENCE, so a wrong :yes here is an order-dependent flake and not merely an
+   unused claim — which is what makes every :unknown above worth its caution."
   {:malli/schema [:=> [:cat shape/Shape] [:map-of shape/Id [:set [:set shape/Id]]]]}
   [sh]
   (reduce (fn [m {:keys [in pair verdict]}]

@@ -334,7 +334,7 @@
 ;; **The two machines interleave.** `m-2` finished while `m-1` was still in review, and the
 ;; order of these rows is *not* promised: parallelism is across instances. What is promised
 ;; is that each machine's own events are applied strictly in order — one partition is one
-;; machine, serialised.
+;; machine, in order — apart from a pair proven not to care, which is the join section below.
 
 (kind/table
  {:column-names [:instance :path]
@@ -551,6 +551,154 @@
          (catch clojure.lang.ExceptionInfo e (ex-data e)))
     (select-keys [:crossing :event :errors]))
 
+;; ## A join: two events, one destination
+;;
+;; There is no join operator, and none is needed. A state whose schema **requires** both keys
+;; is reachable only once both events have been handled — and the states along the way declare
+;; what has arrived so far, so **the state name is the join's progress and the schema says
+;; so**. That is projection working for you: a node holds exactly what it declares.
+
+(def R [:map [:ok :boolean]])
+
+(def verify
+  (sg/shape
+   (sg/state :verifying [:map] {:initial true})
+   (sg/state :evaled    [:map [:eval R]])
+   (sg/state :tested    [:map [:test R]])
+   (sg/state :complete  [:map [:eval R] [:test R]] {:final true})
+   (sg/event :eval [:map [:eval R]])                       ; pure lifts
+   (sg/event :test [:map [:test R]])
+   (sg/transition :verifying :eval :evaled)  (sg/transition :tested :eval :complete)
+   (sg/transition :verifying :test :tested)  (sg/transition :evaled :test :complete)))
+
+(kind/graphviz [(sg/dot verify)])
+
+;; Two routes, one destination — and one event alone simply parks, because the join is not
+;; satisfied yet:
+
+(let [step (sg/compile verify)
+      s0   (sg/initial verify {})
+      e    {:id :eval :eval {:ok true}}
+      t    {:id :test :test {:ok false}}]
+  {:eval-alone   (reduce step s0 [e])
+   :eval-then-test (reduce step s0 [e t])
+   :test-then-eval (reduce step s0 [t e])})
+
+;; The two orders land in one **identical** state. That is not a coincidence to be hoped for,
+;; it is a property of this shape that can be proven before anything runs:
+
+(require '[robertluo.state-graph.check :as check])
+
+(check/commuting verify)
+
+;; `{:verifying #{#{:eval :test}}}` is a **licence**: those two events, pending in that state,
+;; may be applied in whichever order finishes first. What is proven is a closing diamond —
+;; both routes existing and rejoining — plus Bernstein's conditions on the patches: neither
+;; writes what the other writes, and neither *reads* through a view what the other writes.
+;;
+;; `sg/run` computes this and takes it. Two 400ms handlers on that pair cost **400ms, not
+;; 800** — the handlers run at once and their patches are applied as they land. The price is
+;; that `:states` then reports the pair in *completion* order, so the two rows may come back
+;; swapped against the order they were fed. No state is ever wrong; the pair was proved to
+;; land in the same one either way.
+;;
+;; The cost of the shape is the DFA's own: the product of *n* independent events is 2^n
+;; states. Four here, eight for three events. Worth knowing before joining five things.
+
+;; ## How a patch lands: a combine
+;;
+;; A patch is *merged* into the state, and a merge is last-write-wins. That one operation is
+;; the only non-commutative thing in the whole apply phase — and both halves of the licence
+;; above traced back to it. Two patches touching one key could never be licensed, and a merge
+;; cannot express a change relative to what the state already holds, which is what forces a
+;; `{:sees …}` view; and a view closes the licence from the other side.
+;;
+;; So a key may say how a patch lands on it. Here is *fan out and take the best*:
+
+(defn better
+  "A TOTAL order — ties broken on :by. See the warning below."
+  [a b]
+  (if (pos? (compare [(:score a) (:by a)] [(:score b) (:by b)])) a b))
+
+(def Impl [:map [:score :int] [:by :string]])
+
+(def choosing
+  (sg/shape
+   (sg/state :choosing
+             [:map [:best {:optional true
+                           :combine better
+                           :combine/commutes true} Impl]]
+             {:initial true})
+   (sg/state :chosen [:map [:best {:optional true} Impl]] {:final true})
+   (sg/event :offer-a [:map [:best Impl]])
+   (sg/event :offer-b [:map [:best Impl]])
+   (sg/event :settle  [:map])
+   (sg/transition :choosing :offer-a :choosing)
+   (sg/transition :choosing :offer-b :choosing)
+   (sg/transition :choosing :settle :chosen)))
+
+;; Both events write the **same key**, and the pair is licensed anyway:
+
+(check/commuting choosing)
+
+;; A key with no combine replaces, exactly as before. One with a combine is combined with
+;; what the state already holds — and a key the state does not hold *yet* is simply taken,
+;; a combine needing two values where there is only one:
+
+(let [step (sg/compile choosing)
+      s0   (sg/initial choosing {})
+      a    {:id :offer-a :best {:score 5 :by "a"}}
+      b    {:id :offer-b :best {:score 9 :by "b"}}]
+  {:nothing-held-yet (step s0 a)
+   :a-then-b         (step (step s0 a) b)
+   :b-then-a         (step (step s0 b) a)})
+
+;; ### The combine is a function; the promise is data
+;;
+;; Merging is **domain logic** — keep the best-scoring implementation with its provenance,
+;; deduplicate review comments by line — and no fixed vocabulary of `:+` and `:max` expresses
+;; that. So the combine is an ordinary closure. That is allowed here where it is refused for a
+;; **guard**, and the line between them is worth knowing: a guard decides *where the machine
+;; goes*, which is structural and has to be decided from the guard's own shape, while a
+;; combine decides *what a value is*, inside a state, exactly as a handler's body always has.
+;;
+;; But no function yields its own algebra, so `:combine/commutes` is declared beside it as
+;; data — and that declaration is the only part `check/commuting` reads. It is checked rather
+;; than trusted, at two strengths, and it needs both.
+;;
+;; `check/laws` **refutes** a law by generating from the key's own schema. It never answers
+;; `:yes`, because generation can refute a law and cannot prove one:
+
+(check/laws choosing)
+
+;; Here is the trap, and it is the commonest one. `>=` on the score alone looks like the same
+;; function, but a **tie has no canonical winner**, so the answer depends on which patch
+;; arrived first:
+
+(check/laws
+ (sg/shape
+  (sg/state :c [:map [:best {:optional true
+                             :combine (fn [a b] (if (>= (:score a) (:score b)) a b))
+                             :combine/commutes true} Impl]]
+            {:initial true})
+  (sg/event :o [:map [:best Impl]])
+  (sg/transition :c :o :c)))
+
+;; `:verdict :no` with the two values that disagree. The other law, `:closed`, is checked for
+;; every combine whether it claims commutativity or not: `f` of two values of the key's schema
+;; must answer a value of that schema, or the static subsumption check is reasoning about a
+;; type the state will never hold.
+;;
+;; And the second strength: **`sg/run` verifies the same claim on the concrete values**
+;; whenever the licence is actually taken, before either patch lands. Why both — a plausible
+;; domain rule, *a pinned choice wins outright*, survived 27,000 generated triples and is not
+;; commutative. Generation finds the mistakes that are about **values**; the runtime catches
+;; the ones about **rare** values, and turns a false promise into a defect that stops the
+;; machine rather than an order-dependent flake.
+;;
+;; Expect the licence to widen less than it first appears: most domain merges are not
+;; commutative until you make the order total.
+
 ;; ## Reading the state, and what a state holds
 ;;
 ;; Two halves of one question, and it is the question that decides whether a machine is safe to
@@ -641,10 +789,12 @@
 ;; because it is a function. What the *shape* decides is who may read what, and which nodes
 ;; carry it at all.
 ;;
-;; One consequence worth knowing if you ever take the concurrency licence: a handler that reads
-;; can have a **stale patch**. `check/confluence` accounts for it — two pending events commute
-;; only if neither writes what the other writes and neither reads what the other writes — so a
-;; pair like this one is never licensed to run in completion order.
+;; One consequence worth knowing, and it is why the licence of the previous section is narrower
+;; than it looks: a handler that reads can have a **stale patch**. What it computed from `:n`
+;; while the machine was in one state is wrong in the next if the other event changed `:n`.
+;; `check/confluence` accounts for it — two pending events commute only if neither writes what
+;; the other writes **and** neither reads what the other writes — so a pair like this one is
+;; never licensed, and `sg/run` will serialise it.
 
 ;; ## Beneath the facade
 ;;
@@ -652,13 +802,11 @@
 ;; convenience over four that are usable directly — `.shape`, `.compile`, `.check` and
 ;; `.async`. Drop through when you want something the facade does not offer.
 ;;
-;; `check/commuting`, for instance, asks which pairs of events pending in one state could
-;; safely be applied in whichever order finished first. For this pipeline, as for every
-;; shape measured so far, the answer is none — divergence is what a state machine is *for*:
+;; `check/confluence`, for instance, publishes every verdict and not merely the licences, so
+;; the check's own coverage is readable. For this pipeline the answer is none — divergence is
+;; what a state machine is *for*, and a join is the exception rather than the rule:
 
-(require '[robertluo.state-graph.check :as check])
-
-(check/commuting pipeline)
+(check/confluence pipeline)
 
 ;; `check/coverage` is the other one worth knowing, and it lives down here rather than in
 ;; `problems` for a reason: it says whether the guards on a `[state, event]` leave a gap, and
@@ -672,7 +820,8 @@
 ;; `{:verdict :no :witness {:verdict :red}}` — not an error, but the value that proves an
 ;; event can reach nothing from there, which is worth knowing either way.
 
-;; So `sg/run` serialises within a machine, always, and says so rather than pretending.
+;; So `sg/run` serialises within a machine wherever nothing has been proven, which is most of
+;; the time, and runs two handlers at once exactly where it can show the order will not matter.
 ;;
 ;; The other reason to drop through is starting data: `sg/run` gives every machine the same
 ;; initial data, and `async/fan` takes a function of the instance instead. This pipeline

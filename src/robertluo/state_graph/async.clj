@@ -7,10 +7,12 @@
    shape is, and somebody with their own stream library can use `compile` directly and lose
    nothing. That is what makes this a battery rather than part of the core.
 
-   PARALLELISM IS ACROSS INSTANCES and serialisation is within one. `drive` runs a single
-   machine strictly in order; `fan` partitions a stream on :instance and runs one drive per
-   machine, concurrently. See :parallel-is-across-instances in AGENTS.md, and
-   :two-events-in-flight-at-once for why within one machine is the harder question.
+   PARALLELISM IS ACROSS INSTANCES and serialisation is within one — unless a LICENCE says
+   otherwise. `drive` runs a single machine in order; `fan` partitions a stream on :instance
+   and runs one drive per machine, concurrently. Given a `Licence` — the step in two halves
+   and the pairs `check/commuting` proved — a machine will also run TWO handlers at once
+   where the order they finish in cannot be observed. See :parallel-is-across-instances in
+   AGENTS.md and :two-events-in-flight-at-once for what that proof is.
 
    Requires manifold, and NOTHING BELOW THIS REQUIRES IT — which is the whole purpose of
    the Context that `compile` takes."
@@ -58,6 +60,31 @@
    states passes nothing."
   (fn [_state _event state'] state'))
 
+(def Licence
+  "WHAT A PROVEN PAIR NEEDS IN ORDER TO RUN AT ONCE, and the answer to the one thing this
+   layer could not do: the step IN ITS TWO HALVES, plus the pairs themselves.
+
+     :patch  (fn [state event] -> a deferred Patch)         the handler, run
+     :apply  (fn [state event patch] -> a deferred State)   the patch, landed
+     :agree  (fn [state ea pa eb pb])                       throws if the two disagree
+     :pairs  {state-id #{#{event-a event-b}}}               check/commuting, verbatim
+
+   :agree IS NOT OPTIONAL, and requiring it is the point. Part of what licensed a pair may
+   be a claim about a CLOSURE — that a domain combine is commutative — which no static
+   check can settle. So the claim is verified on the concrete values before either patch
+   lands, and a Licence that carried no way to do that would be a licence to be silently
+   wrong.
+
+   HANDED DOWN AS VALUES, exactly as the step is, so this layer STILL knows nothing of
+   shapes, schemas or graphs — which is the rule the whole batteries idea rests on. Only a
+   layer that knows the shape can prove a pair commutes, and all it passes is the proof.
+
+   ABSENT MEANS SERIALISE, which is what every caller got before this existed and what
+   `drive` and `fan` still do when nothing is passed. Serialised is always correct; this is
+   the only thing that makes anything else correct."
+  [:map [:patch fn?] [:apply fn?] [:agree fn?]
+        [:pairs [:map-of :keyword [:set [:set :keyword]]]]])
+
 (def context
   "The Context to hand `compile` so that a handler may answer a deferred and the step
    answers one too. TWO FUNCTIONS, and that is the whole of what manifold contributes to
@@ -72,6 +99,18 @@
 
 ;;; ---------------------------------------------------------------------- pump
 
+(defn- licensed?
+  "Whether these two events, PENDING IN THIS STATE, were PROVED applicable in order of
+   completion. Nothing is inferred here — this is a set lookup of somebody else's proof.
+
+   TWO OF THE SAME EVENT ARE NEVER LICENSED, and it falls out rather than being arranged:
+   `commuting` records pairs of DISTINCT events, and #{:a :a} is a set of one and not a
+   pair. Which is right — two events of one id run one handler and write one set of keys,
+   so they conflict with each other by construction."
+  [pairs state a b]
+  (let [ia (:id a) ib (:id b)]
+    (and (not= ia ib) (contains? (get pairs (:id state)) #{ia ib}))))
+
 (defn- pump
   "Take events, step, put one result per event to `out`. Answers a deferred of the final
    state — the STATE and never a result, because the state is the accumulator and a result
@@ -82,18 +121,95 @@
    The first version of `fan` used s/connect from each machine's own stream instead, and
    s/connect is ASYNCHRONOUS — closing the shared output after every machine reported done
    raced the last value still in a connect pipeline, and lost it. Writing straight to the
-   sink means a machine's :done cannot resolve until its last result has been ACCEPTED there."
-  [step result initial events out]
-  (d/loop [state initial]
-    (d/chain
-     (s/take! events ::drained)
-     (fn [e]
-       (if (identical? ::drained e)
-         state
-         (d/chain (step state e)
-                  (fn [state']
-                    (d/chain (s/put! out (result state e state'))
-                             (fn [_] (d/recur state'))))))))))
+   sink means a machine's :done cannot resolve until its last result has been ACCEPTED there.
+
+   WITH A LICENCE IT WILL RUN TWO HANDLERS AT ONCE. The shape of it is one speculative
+   take: start this event's handler, then reach for another event WITHOUT waiting, and race
+   the two. Whatever the take brings is never wasted — it is either the other half of a
+   licensed pair or the next iteration's event, carried forward in `held` — so the reach
+   costs nothing when no second event is coming.
+
+   ONLY EVER TWO, deliberately. `check/commuting` is a PAIRWISE relation on ONE state, which
+   is precisely what :two-events-in-flight-at-once designed and proved; three in flight would
+   need the licence re-established at each intermediate state, and inventing that here would
+   be taking more than was proven."
+  [step result initial events out licence]
+  (let [{patch :patch land :apply agree :agree pairs :pairs} licence
+        emit (fn [state event state']
+               (d/chain (s/put! out (result state event state')) (fn [_] state')))]
+    (d/loop [state initial held nil]
+      (d/chain
+       (or held (s/take! events ::drained))
+       (fn [e]
+         (cond
+           (identical? ::drained e) state
+
+           ;; STRICTLY IN ORDER — each event applied to what the last one produced, which
+           ;; is what a reduction means. Taken with no licence at all AND wherever THIS
+           ;; state has no licensed pair, which is most states in most shapes: there is
+           ;; then nothing a second event in flight could be paired with, so reaching for
+           ;; one early would buy nothing and hold an event for no reason.
+           (or (nil? licence) (empty? (get pairs (:id state))))
+           (d/chain (step state e)
+                    (fn [state'] (emit state e state'))
+                    (fn [state'] (d/recur state' nil)))
+
+           :else
+           (let [p1  (patch state e)
+                 nxt (s/take! events ::drained)]
+             (d/chain
+              ;; WHICH HAPPENS FIRST: this handler settling, or another event arriving.
+              (d/alt (d/chain p1 (fn [_] ::settled))
+                     (d/chain nxt (fn [e2] [::arrived e2])))
+              (fn [outcome]
+                (if-let [e2 (when (vector? outcome)
+                              (let [v (second outcome)]
+                                (when (and (not (identical? ::drained v))
+                                           (licensed? pairs state e v))
+                                  v)))]
+                  ;; TWO IN FLIGHT. Both handlers were selected from the SAME state, so
+                  ;; there is no speculation about which edge either belongs to; the patches
+                  ;; are then applied AS THEY LAND rather than as they arrived, which is the
+                  ;; whole of the licence. `commutes` proved the diamond closes and the
+                  ;; patches satisfy Bernstein's conditions, so where the machine ends up
+                  ;; cannot tell you which finished first.
+                  ;;
+                  ;; THE RACE CARRIES THE PATCH AND NOT ITS DEFERRED for whichever won, and
+                  ;; the loser's deferred to be waited on second. `apply` takes a PATCH: a
+                  ;; deferred handed to it has no :depth and fails at that seam, which is
+                  ;; how this was found rather than shipped.
+                  (let [p2 (patch state e2)]
+                    (d/chain
+                     ;; WHICH LANDED FIRST — the only thing the race is for. Both handlers
+                     ;; are already running, so this costs no wall-clock either way.
+                     (d/alt (d/chain p1 (fn [v] [e v e2 p2]))
+                            (d/chain p2 (fn [v] [e2 v e p1])))
+                     (fn [[ea pa eb pb]]
+                       ;; BOTH PATCHES BEFORE EITHER LANDS. The concurrency is in the
+                       ;; HANDLERS and they have both already run, so waiting here costs
+                       ;; only the first RESULT's latency and never the machine's — and it
+                       ;; buys the one thing worth more: :agree becomes a genuine
+                       ;; PRE-CONDITION. Applying one patch and then discovering the
+                       ;; licence was invalid would emit a result derived from an unsound
+                       ;; proof, which is the silent wrongness this whole check exists for.
+                       (d/chain
+                        pb
+                        (fn [pbv]
+                          (agree state ea pa eb pbv)
+                          (d/chain
+                           (land state ea pa)
+                           (fn [s1] (emit state ea s1))
+                           (fn [s1] (d/chain (land s1 eb pbv)
+                                             (fn [s2] (emit s1 eb s2))
+                                             (fn [s2] (d/recur s2 nil))))))))))
+                  ;; NOT A PAIR — the handler landed first, or what arrived may not be
+                  ;; applied beside it. Finish this event and carry the take forward: `nxt`
+                  ;; is the same deferred either way, so nothing is ever taken twice and
+                  ;; nothing is dropped.
+                  (d/chain p1
+                           (fn [p] (land state e p))
+                           (fn [state'] (emit state e state'))
+                           (fn [state'] (d/recur state' nxt)))))))))))))
 
 (defn- closing
   "Close `out` when `done` settles, either way. d/catch here is manifold's combinator over a
@@ -115,21 +231,31 @@
    so a slow handler slows its own machine and no other. That is the useful half of
    serialisation and it is free.
 
-   SERIALISED IS THE ONLY THING CORRECT WITHOUT A LICENCE, and the licensed concurrency of
-   :two-events-in-flight-at-once is NOT implemented here. The reason is worth stating
-   plainly: taking it needs the HANDLER run apart from the APPLICATION — two handlers in
-   flight, their patches applied in order of completion — and `compile` answers one step
-   that does both at once. Nothing here can split that, so nothing here pretends to.
+   SERIALISED IS THE ONLY THING CORRECT WITHOUT A LICENCE, and with one it will run two
+   handlers AT ONCE. A `Licence` carries the step in its two halves and the pairs
+   `check/commuting` proved: where the next event to arrive is licensed against the one in
+   flight, both handlers run and their patches are applied AS THEY LAND. Pass nothing and
+   this serialises exactly as it always did.
+
+   THE COST OF TAKING IT, said out loud, and there are two. :states reports in COMPLETION
+   order and not arrival order, so a pair may appear swapped — not a flake, the pair having
+   been proved to end in the same state either way round, but visible to whoever stores the
+   results, and an audit trail should represent what happened rather than a sequence that
+   did not. And the FIRST of a pair waits for the second's handler before its result is
+   put, because the law that licensed them is verified with both patches in hand. The
+   machine reaches its final state no later for it; only the intermediate row is delayed.
 
    `result` says what goes on :states, and defaults to the state alone. :done is the final
    state either way."
   {:malli/schema [:function [:=> [:cat ifn? :map Source] Machine]
-                            [:=> [:cat ifn? :map Source Result] Machine]]}
+                            [:=> [:cat ifn? :map Source Result] Machine]
+                            [:=> [:cat ifn? :map Source Result [:maybe Licence]] Machine]]}
   ([step initial events] (drive step initial events state-only))
-  ([step initial events result]
+  ([step initial events result] (drive step initial events result nil))
+  ([step initial events result licence]
    (let [out (s/stream)]
      {:states (s/source-only out)
-      :done (closing (pump step result initial events out) out)})))
+      :done (closing (pump step result initial events out licence) out)})))
 
 ;;; ----------------------------------------------------------------------- fan
 
@@ -154,11 +280,17 @@
 
    THE PARTITION KEY IS READ OFF THE EVENT and never off a state, because routing happens
    BEFORE any state is in hand. That is the load-bearing half of
-   :an-instance-has-an-identity, and this is the function that bears it."
+   :an-instance-has-an-identity, and this is the function that bears it.
+
+   A `Licence` applies WITHIN each machine and is shared by all of them, being a fact about
+   the shape and not about any one run. Across instances is where the parallelism was
+   already; this is the narrower concurrency inside one."
   {:malli/schema [:function [:=> [:cat ifn? ifn? Source] Machine]
-                            [:=> [:cat ifn? ifn? Source Result] Machine]]}
+                            [:=> [:cat ifn? ifn? Source Result] Machine]
+                            [:=> [:cat ifn? ifn? Source Result [:maybe Licence]] Machine]]}
   ([step initial-of events] (fan step initial-of events state-only))
-  ([step initial-of events result]
+  ([step initial-of events result] (fan step initial-of events result nil))
+  ([step initial-of events result licence]
    (let [out (s/stream)
          machines (atom {})
          done (d/loop []
@@ -180,7 +312,8 @@
                                  ;; only this loop creates one and it is sequential, so
                                  ;; there is no race here to guard.
                                  (let [in (s/stream)
-                                       m {:in in :done (pump step result (initial-of k) in out)}]
+                                       m {:in in :done (pump step result (initial-of k)
+                                                             in out licence)}]
                                    (swap! machines assoc k m)
                                    m))]
                        (d/chain (s/put! (:in m) e) (fn [_] (d/recur))))))))]

@@ -44,6 +44,15 @@
 
    :then    a value and a continuation. Answers whatever the continuation answers, in
             whatever container the caller works in — (fn [v f] (f v)) here, d/chain there.
+
+            IT MUST FLATTEN, which is a BIND and not a map: where the continuation answers
+            a container, `then` answers THAT container and never one wrapped around it.
+            The words above always said so — `answers whatever the continuation answers` —
+            and nothing depended on it until the step came apart into `phases`, both of
+            whose halves answer a container, so the step now composes two binds where it
+            used to take one. d/chain flattens; the default answers f's value untouched.
+            An fmap in this slot yields a container of a container and fails at the seam
+            rather than silently, `applying` finding no :depth on what it was handed.
    :pure    a value already available, put into that same container.
    :ignored a state and an event no edge admits, answering the state. The default is
             SILENT, and a caller folding by hand replaces it to hear about a miss.
@@ -93,6 +102,24 @@
   [event]
   (dissoc event :id :instance))
 
+(defn- landed
+  "The patch applied to the state, key by key.
+
+   A KEY WITH NO COMBINE REPLACES, which is exactly what `merge` did and what every shape
+   written before combines existed still gets. A key WITH one is combined with what the
+   state already holds — and a key the state does not hold yet is simply TAKEN, a combine
+   needing two values where there is only one.
+
+   THIS IS THE ONLY NON-COMMUTATIVE THING IN THE APPLY PHASE, which is why replacing it
+   widens the concurrency licence: everything after it — the projection, the identity keys,
+   the enter validation — is a pure function of the value this produces."
+  [state answer combines]
+  (reduce-kv (fn [m k v]
+               (assoc m k (if-let [f (and (contains? state k) (combines k))]
+                            (f (get state k) v)
+                            v)))
+             state answer))
+
 (defn index
   "Everything the step looks up, computed once — :edges keyed by [state-id event-id],
    which is what determinism buys, and :machines keyed by the node that nests one.
@@ -114,6 +141,14 @@
                              :patch-schema (shape/patch-schema sh to)
                              :enter-schema (shape/enter-schema sh to)}))
                   {} (shape/transitions sh))
+   ;; {node-id {k f}} — HOW A PATCH LANDS on each key the node declares a combine for.
+   ;; Keyed by NODE and not by edge, because a combine is the data owner's and the same
+   ;; key must combine the same way however it arrives.
+   :combines (into {}
+                   (for [id (shape/states sh)]
+                     [id (into {} (for [[k v] (shape/combines sh id)
+                                        :when (:combine v)]
+                                    [k (:combine v)]))]))
    :machines (into {}
                    (for [[id child] (shape/machines sh)]
                      [id {:shape child :index (index child)}]))})
@@ -174,8 +209,233 @@
                 child (assoc :sub (enter child nil {})))
               {:crossing :enter :to id})))
 
+(def Patch
+  "WHAT A HANDLER ANSWERED, before any state has taken it — and whose machine it belongs
+   to, a nested machine's handler answering one too.
+
+   ::missed IS NOT A PATCH AND SAYS SO: no edge admitted the event, so no handler ran and
+   there is nothing to apply. A legal outcome, not an error, and the reduction stays total.
+
+   :depth IS THE ONE THING A PATCH MUST CARRY. A patch is computed against the state a
+   machine was in and may be applied to a LATER one — that is the whole point of having two
+   phases — and the patch itself is never stale for it: a handler answers FROM THE EVENT
+   ALONE, so what it computed in S is still exactly right in T. What CAN have changed is
+   WHICH MACHINE admits the event, and applying a child's patch to its parent would be
+   silent nonsense. So the depth is recorded here and REFUSED on disagreement at the other
+   end, which is the seam this whole split rests on."
+  [:or [:= ::missed]
+       [:map [:answer :map] [:depth [:int {:min 0}]]]])
+
+(def Phases
+  "The step in its two halves, the step itself, and the one check only the runtime can
+   make. See `phases`."
+  [:map [:patch fn?] [:apply fn?] [:agree fn?] [:step fn?]])
+
+(defn phases
+  "THE STEP IN TWO HALVES — {:patch :apply :step} — and the step BUILT OUT OF THE OTHER
+   TWO, so that what runs in one call and what runs in two cannot come to disagree.
+
+   :patch  (fn [state event] -> Patch)         runs the handler
+   :apply  (fn [state event patch] -> State)   lands it
+   :step   (fn [state event] -> State)         both, which is `compile`
+
+   WHY THE SPLIT EXISTS, and it is the only reason: a licensed pair of events may run AT
+   ONCE. `check/commuting` proves which pairs pending in one state can be applied in order
+   of COMPLETION, and taking that licence needs the HANDLER run apart from the APPLICATION
+   — two handlers in flight, their patches applied as they land. One step doing both cannot
+   be split by a caller: calling it twice from the same state answers two whole states
+   derived from it, and combining those is only correct for self-loops with disjoint
+   patches, which is LESS than the licence gives.
+
+   WHICH CROSSING BELONGS TO WHICH HALF is decided by what it depends on, and the division
+   is exact:
+     :event  the patch phase — an event either is what it says it is or is not, whatever
+             state it meets
+     :sees   the patch phase, READING THE STATE THE HANDLER SAW. Which is precisely why
+             Bernstein's conditions include reads: a view read in S is stale in T if the
+             other event wrote it, and `commutes` refuses such a pair
+     :out    the patch phase. It is the EVENT'S promise about its own answer and no state
+             is party to it
+     :answer the APPLY phase, and it cannot be anywhere else — a patch-schema is the
+             TARGET'S own schema, and a licensed patch is applied where the target may be
+             a different node from the one it was computed against. That is the whole
+             difference between the two halves
+     :enter  the apply phase, being about the state that comes out
+
+   THE LOOKUP IS DONE TWICE, once per half, and the second one is the authority: it reads
+   the edge from the state the patch is ACTUALLY landing on. A licence guarantees that edge
+   exists — the diamond closing is what `commutes` proves — so its absence is a DEFECT and
+   throws rather than being quietly ignored."
+  {:malli/schema [:=> [:cat shape/Shape [:maybe Context]] Phases]}
+  [sh context]
+  (let [{:keys [then pure ignored]} (merge synchronous context)
+        idx  (index sh)
+        ;; Every nested machine split ONCE, with the SAME Context, so a child may answer a
+        ;; deferred wherever its parent may. `enter` is what makes its first state, and it
+        ;; is computed here because entering a node is not the moment to discover that a
+        ;; child cannot start.
+        subs (into {}
+                   (for [[id {:keys [shape index]}] (:machines idx)]
+                     [id {:phases (phases shape context)
+                          :index index
+                          :first (enter shape nil {})}]))
+        ;; ONE READING OF `whose event is this`, asked by both halves. INNER FIRST: a
+        ;; nested machine gets every event before this node's own edges do, which is what
+        ;; makes the parent's edges the ESCAPE and needs no guard — a child that has
+        ;; finished admits nothing, so the next event falls straight through.
+        inner (fn [state event]
+                (let [m (subs (:id state))]
+                  (when (and m (admits? (:index m) (:sub state) event)) m)))]
+    (letfn
+     [(patching
+        [state event]
+        (if-let [m (inner state event)]
+          (then ((:patch (:phases m)) (:sub state) event)
+                (fn [p] (cond-> p (map? p) (update :depth inc))))
+          (if-let [{:keys [to handler out sees event-schema]} (entry idx state event)]
+            (let [ctx {:from (:id state) :event (:id event) :to to}]
+              (conform! event-schema (payload event) (assoc ctx :crossing :event))
+              ;; A VIEW IS A SEAM AND IS CHECKED HERE TOO. The static check proves what it
+              ;; can from the schemas; this holds in production and gives the diagnosis
+              ;; `the state did not provide the view` rather than a nil inside a handler.
+              ;; A handler with no view declared keeps its one argument, so nothing that
+              ;; existed before views learns that they exist.
+              (then (if sees
+                      (handler event (conform! sees
+                                               (select-keys state (mu/keys sees))
+                                               (assoc ctx :crossing :sees)))
+                      (handler event))
+                    (fn [answer]
+                      ;; :out is validated only where it is declared. Its real job is the
+                      ;; STATIC check; here it buys a better diagnosis — `the handler is
+                      ;; wrong` rather than `the state is wrong` one phase later.
+                      (when out (conform! out answer (assoc ctx :crossing :out)))
+                      {:answer answer :depth 0})))
+            ;; NO EDGE ADMITTED IT — but `every guard refused` and `there was no edge` are
+            ;; different things, and only one of them may be a defect. Where edges exist,
+            ;; the event is conformed against their schema before the miss is believed:
+            ;; A GUARD IS A REFINEMENT OF A SCHEMA THE EVENT MUST ALREADY SATISFY, so a
+            ;; malformed one throws here rather than being reported as an ordinary miss.
+            (let [cs (candidates idx state event)]
+              (when (seq cs)
+                (conform! (:event-schema (first cs)) (payload event)
+                          {:from (:id state) :event (:id event) :crossing :event}))
+              (pure ::missed)))))
+
+      (applying
+        [state event p]
+        (if (identical? ::missed p)
+          (pure (ignored state event))
+          (let [m (inner state event)]
+            ;; THE TWO HALVES MUST AGREE ABOUT WHOSE EVENT IT IS. A patch a child's handler
+            ;; answered may only be applied to that child, and one this machine answered
+            ;; only to this machine — otherwise a `{:answer ...}` would be merged into a
+            ;; state that never asked for it. Deeper levels assert the same thing of
+            ;; themselves, so one comparison per level checks the whole descent.
+            (when (not= (boolean m) (pos? (:depth p)))
+              (throw (ex-info "Patch does not belong to the machine it is being applied to"
+                              {:crossing :depth :from (:id state) :event (:id event)
+                               :depth (:depth p) :nested (boolean m)})))
+            (if m
+              (then ((:apply (:phases m)) (:sub state) event (update p :depth dec))
+                    (fn [sub'] (assoc state :sub sub')))
+              (if-let [{:keys [to patch-schema enter-schema]} (entry idx state event)]
+                (let [ctx {:from (:id state) :event (:id event) :to to}
+                      answer (:answer p)]
+                  ;; THE ANSWER MUST BE ONE THE TARGET WILL TAKE. `:out` is what a handler
+                  ;; PROMISES and is optional; this is what the state ADMITS and is not. A
+                  ;; patch-schema is the target's own schema with every key optional and
+                  ;; the map closed, so a key the state does not declare is REFUSED rather
+                  ;; than projected away in silence.
+                  ;; IDENTITY NEEDS NO SPECIAL CASE HERE. A state schema describes the map
+                  ;; without :id, :instance or :sub, so a handler naming any of the three
+                  ;; is answering an undeclared key and this is what refuses it. An event
+                  ;; is the only way a transition happens.
+                  (conform! patch-schema answer (assoc ctx :crossing :answer))
+                  ;; A NODE HOLDS WHAT IT DECLARES AND NOTHING ELSE. The merge is PROJECTED
+                  ;; onto the keys of the target's enter-schema, so data stops flowing
+                  ;; through states that never mentioned it. That is what bounds internal
+                  ;; visibility BY ABSENCE — a handler cannot see what the state it is
+                  ;; changing does not hold — and it is what makes the view check sound: a
+                  ;; declared schema is what a node HAS rather than a lower bound on it. It
+                  ;; also removes `a merge cannot remove a key`: dropping a field is
+                  ;; declaring one fewer. The cost, said out loud: a bare [:map] node holds
+                  ;; nothing but its :id, so a state that carries data must say which.
+                  ;;
+                  ;; :id, :instance AND :sub go on AFTER the projection. A handler cannot
+                  ;; move the machine sideways past the edge that decides where it lands,
+                  ;; cannot move it to another run, and cannot reach into a nested machine.
+                  (pure (conform! enter-schema
+                                  (let [sub (subs to)]
+                                    (cond-> (-> (landed state answer
+                                                        (get-in idx [:combines to]))
+                                                (select-keys (mu/keys enter-schema))
+                                                (assoc :id to)
+                                                (into (select-keys state [:instance]))
+                                                (dissoc :sub))
+                                      sub (assoc :sub (:first sub))))
+                                  (assoc ctx :crossing :enter))))
+                ;; THE LICENCE PROMISED THIS EDGE. `commutes` proves the diamond closes
+                ;; before anything is applied out of order, so an edge missing HERE is a
+                ;; licence that was wrong or a caller applying a patch where it does not
+                ;; belong. Either is a defect, and the patch phase already distinguished a
+                ;; genuine miss by answering ::missed.
+                (throw (ex-info "No edge admits this event where its patch is applied"
+                                {:crossing :apply :from (:id state)
+                                 :event (:id event)})))))))
+
+      (agreeing
+        [state ea pa eb pb]
+        ;; THE LAW, CHECKED WHERE IT MATTERS AND NOT TRUSTED. `commutes` proves the diamond
+        ;; and reads the declared :combine/commutes, but that declaration is a claim about a
+        ;; CLOSURE and no static check can settle it — a generative one refutes it at best,
+        ;; and MEASURED, 27,000 generated triples missed a plausible domain rule (a pinned
+        ;; choice wins outright) that is not commutative. Here both patches are in hand, so
+        ;; the claim is checked on the CONCRETE VALUES.
+        ;;
+        ;; ONLY THE KEYS BOTH PATCHES WRITE. Every other key is disjoint and was proven
+        ;; statically, so there is nothing to ask about it. Which also makes this cost
+        ;; nothing on the common path: no shared key, no work.
+        ;;
+        ;; ONE f SUFFICES because `commutes` licensed the pair only where the combine is
+        ;; declared IDENTICALLY on both intermediate states and on the join node — so this
+        ;; reads it off the join node and does not have to compose three.
+        (let [a (:answer pa) b (:answer pb)]
+          (when (and (map? a) (map? b))
+            (let [shared (filter (set (keys b)) (keys a))]
+              (when (seq shared)
+                (let [ta (:to (entry idx state ea))
+                      ;; where the second event lands from there. A licensed pair is never
+                      ;; guarded, so {:id ta} is the whole of what the lookup needs.
+                      x  (when ta (:to (entry idx {:id ta} eb)))
+                      fs (get-in idx [:combines x])]
+                  (doseq [k shared
+                          :let [f (get fs k)]
+                          :when f
+                          :let [held? (contains? state k)
+                                s0 (get state k)
+                                ab (if held?
+                                     (f (f s0 (get a k)) (get b k))
+                                     (f (get a k) (get b k)))
+                                ba (if held?
+                                     (f (f s0 (get b k)) (get a k))
+                                     (f (get b k) (get a k)))]
+                          :when (not= ab ba)]
+                    (throw (ex-info "A combine declared commutative is not, on these values"
+                                    {:crossing :combine :key k :from (:id state)
+                                     :events [(:id ea) (:id eb)]
+                                     :held s0 :patches [(get a k) (get b k)]
+                                     :answers [ab ba]})))))))))]
+      {:patch patching
+       :apply applying
+       :agree agreeing
+       :step  (fn [state event]
+                (then (patching state event) (fn [p] (applying state event p))))})))
+
 (defn compile
-  "The shape as an ordinary Clojure function of a state and an event.
+  "The shape as an ordinary Clojure function of a state and an event. `phases` in one
+   call, and literally built from it, so the one-call door and the two-call door cannot
+   drift.
 
    An event the current state has no transition for leaves the state UNCHANGED and THE
    HANDLER IS NEVER CALLED — an event a state does not care about is not an error, and it
@@ -189,7 +449,7 @@
    and the map closed, so a key that state does not declare is REFUSED. That is what makes
    AN EVENT THE ONLY WAY A TRANSITION HAPPENS — a handler naming :id, :instance or :sub is
    naming a key no state schema declares, so identity is refused by the same rule that
-   refuses a typo, and never by a special case. It used to be silently overwritten.
+   refuses a typo, and never by a special case.
 
    WITH NO CONTEXT the step is synchronous and answers a State, which is what Step says.
    With one, the return type is the CALLER'S to know — a deferred State under manifold —
@@ -197,96 +457,7 @@
   {:malli/schema [:function [:=> [:cat shape/Shape] Step]
                             [:=> [:cat shape/Shape [:maybe Context]] ifn?]]}
   ([sh] (compile sh nil))
-  ([sh context]
-   (let [{:keys [then pure ignored]} (merge synchronous context)
-         idx  (index sh)
-         ;; Every nested machine compiled ONCE, with the SAME Context, so a child may
-         ;; answer a deferred wherever its parent may. `enter` is what makes its first
-         ;; state, and it is computed here because entering a node is not the moment to
-         ;; discover that a child cannot start.
-         subs (into {}
-                    (for [[id {:keys [shape index]}] (:machines idx)]
-                      [id {:step (compile shape context)
-                           :index index
-                           :first (enter shape nil {})}]))]
-     (fn step [state event]
-       (let [m (subs (:id state))]
-         (cond
-           ;; INNER FIRST. A nested machine gets every event before this node's own edges
-           ;; do, which is what makes the parent's edges the ESCAPE and needs no guard: a
-           ;; child that has finished admits nothing, so the next event falls straight
-           ;; through to here.
-           (and m (admits? (:index m) (:sub state) event))
-           (then ((:step m) (:sub state) event)
-                 (fn [sub'] (assoc state :sub sub')))
-
-           :else
-           (if-let [{:keys [to handler out sees event-schema patch-schema enter-schema]}
-                    (entry idx state event)]
-             (let [ctx {:from (:id state) :event (:id event) :to to}]
-               (conform! event-schema (payload event) (assoc ctx :crossing :event))
-               ;; A VIEW IS A SEAM AND IS CHECKED HERE TOO. The static check proves what it
-               ;; can from the schemas; this holds in production and gives the diagnosis
-               ;; `the state did not provide the view` rather than a nil inside a handler.
-               ;; A handler with no view declared keeps its one argument, so nothing that
-               ;; existed before this learns that views exist.
-               (then (if sees
-                       (handler event (conform! sees
-                                                (select-keys state (mu/keys sees))
-                                                (assoc ctx :crossing :sees)))
-                       (handler event))
-                     (fn [answer]
-                       ;; :out is validated only where it is declared. Its real job is the
-                       ;; STATIC check; here it buys a better diagnosis — `the handler is
-                       ;; wrong` rather than `the state is wrong` one line later.
-                       (when out (conform! out answer (assoc ctx :crossing :out)))
-                       ;; AND THE ANSWER MUST BE ONE THE TARGET WILL TAKE. `:out` is what a
-                       ;; handler PROMISES and is optional; this is what the state ADMITS
-                       ;; and is not. A patch-schema is the target's own schema with every
-                       ;; key optional and the map closed, so a key the state does not
-                       ;; declare is REFUSED rather than projected away in silence — which
-                       ;; is what it used to be, `mu/keys` dropping it a line below.
-                       ;; IDENTITY NEEDS NO SPECIAL CASE HERE. A state schema describes the
-                       ;; map without :id, :instance or :sub, so a handler naming any of
-                       ;; the three is answering an undeclared key and this is what refuses
-                       ;; it. An event is the only way a transition happens.
-                       (conform! patch-schema answer (assoc ctx :crossing :answer))
-                       ;; A NODE HOLDS WHAT IT DECLARES AND NOTHING ELSE. The merge is
-                       ;; PROJECTED onto the keys of the target's enter-schema, so data
-                       ;; stops flowing through states that never mentioned it. That is
-                       ;; what bounds internal visibility BY ABSENCE — a handler cannot see
-                       ;; what the state it is changing does not hold — and it is what makes
-                       ;; the view check sound: a declared schema is now what a node HAS
-                       ;; rather than a lower bound on it. It also removes `a merge cannot
-                       ;; remove a key`: dropping a field is declaring one fewer.
-                       ;; The cost, said out loud: a bare [:map] node holds nothing but its
-                       ;; :id, so a state that carries data must say which.
-                       ;;
-                       ;; :id, :instance AND :sub go on AFTER the projection. A handler
-                       ;; cannot move the machine sideways past the edge that decides where
-                       ;; it lands, cannot move it to another run, and cannot reach into a
-                       ;; nested machine. Identity is never a handler's to say.
-                       (conform! enter-schema
-                                 (let [sub (subs to)]
-                                   (cond-> (-> (merge state answer)
-                                               (select-keys (mu/keys enter-schema))
-                                               (assoc :id to)
-                                               (into (select-keys state [:instance]))
-                                               (dissoc :sub))
-                                     sub (assoc :sub (:first sub))))
-                                 (assoc ctx :crossing :enter)))))
-             ;; NO EDGE ADMITTED IT — but `every guard refused` and `there was no edge`
-             ;; are different things, and only one of them may be a defect. Where edges
-             ;; exist, the event is conformed against their schema before the miss is
-             ;; believed: A GUARD IS A REFINEMENT OF A SCHEMA THE EVENT MUST ALREADY
-             ;; SATISFY, so a malformed one throws here rather than being reported as an
-             ;; ordinary miss. A genuine miss — a well-formed event no guard wanted — is
-             ;; still `ignored`, and the reduction stays total.
-             (let [cs (candidates idx state event)]
-               (when (seq cs)
-                 (conform! (:event-schema (first cs)) (payload event)
-                           {:from (:id state) :event (:id event) :crossing :event}))
-               (pure (ignored state event))))))))))
+  ([sh context] (:step (phases sh context))))
 
 (defn initial
   "The first state, ENTERED THROUGH THE SAME VALIDATION as every other one. The shape

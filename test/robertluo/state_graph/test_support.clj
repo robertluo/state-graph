@@ -168,6 +168,67 @@
    (shape/transition :filling :touch :filling)
    (shape/transition :filling :submit :submitted)))
 
+(defn join
+  "A JOIN, spelled the only way this library has: the PRODUCT of two independent events,
+   so :complete is reachable only once both :eval and :test have been handled and either
+   ORDER gets there. The intermediate states are the join's progress and their schemas say
+   so — which is projection working for us rather than against.
+
+   THE POINT OF IT HERE is that the pair is licensed while being NOTHING LIKE self-loops:
+   `form` has the trivial diamond where ta = tb = x = s, and this has the real one, four
+   distinct nodes and two routes that rejoin. `commutes` implements the general diamond and
+   this is the fixture that says so.
+
+   Handlers are pure lifts, so a caller feeds {:id :eval :eval {...}} and the patch is that
+   key. The two events write DISJOINT keys and read nothing, which is Bernstein's condition."
+  []
+  (let [R [:map [:ok :boolean]]]
+    (shape/shape
+     (shape/state :verifying [:map] {:initial true})
+     (shape/state :evaled    [:map [:eval R]])
+     (shape/state :tested    [:map [:test R]])
+     (shape/state :complete  [:map [:eval R] [:test R]] {:final true})
+     (shape/event :eval [:map [:eval R]])
+     (shape/event :test [:map [:test R]])
+     (shape/transition :verifying :eval :evaled)
+     (shape/transition :verifying :test :tested)
+     (shape/transition :tested    :eval :complete)
+     (shape/transition :evaled    :test :complete))))
+
+(def Impl
+  "What a fan-out offers back."
+  [:map [:score :int] [:by :string]])
+
+(defn better
+  "A TOTAL order, ties broken on :by — which is the whole difference between a combine
+   that is commutative and one that merely looks it. With `>=` on :score alone a tie has no
+   canonical winner, so the answer depends on which patch arrived first, and `check/laws`
+   refutes it in a few dozen samples."
+  [a b]
+  (if (pos? (compare [(:score a) (:by a)] [(:score b) (:by b)])) a b))
+
+(defn fanning
+  "FAN OUT AND TAKE THE BEST — what a combine is for, and what a naive merge made
+   inexpressible. :offer-a and :offer-b write THE SAME key, so under last-write-wins the
+   pair could never be licensed however independent the work was. With a commutative
+   combine declared on the node, which patch landed second stops being observable.
+
+   Note the combine is declared on :choosing, the node the offers land on, and NOT on
+   :chosen. It is the data owner's declaration and there is nothing to combine on the way
+   out."
+  []
+  (shape/shape
+   (shape/state :choosing
+                [:map [:best {:optional true :combine better :combine/commutes true} Impl]]
+                {:initial true})
+   (shape/state :chosen [:map [:best {:optional true} Impl]] {:final true})
+   (shape/event :offer-a [:map [:best Impl]])
+   (shape/event :offer-b [:map [:best Impl]])
+   (shape/event :settle  [:map])
+   (shape/transition :choosing :offer-a :choosing)
+   (shape/transition :choosing :offer-b :choosing)
+   (shape/transition :choosing :settle :chosen)))
+
 (defn counter
   "The canonical example shape, where the schemas DO bite: a counter whose :n the
    events carry, since a handler never sees the state it is changing."

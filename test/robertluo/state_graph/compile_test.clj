@@ -181,9 +181,19 @@
   ;; answers something else entirely, while compile never learns what that something is.
   ;; A one-key box stands in for a deferred — the point is that BOTH paths route through
   ;; the context, the transition through :then and the miss through :pure.
-  (let [g    (ts/counter)
-        box  (fn [v] {:boxed v})
-        step (c/compile g {:then (fn [v f] (box (f v))) :pure box})
+  ;;
+  ;; THE BOX IS A LAWFUL BIND AND HAS TO BE. `then` unwraps its input and answers exactly
+  ;; what the continuation answers, boxing only what is not already boxed — d/chain's own
+  ;; behaviour, and what Context asks for. An fmap here (box (f v)) instead reads as a
+  ;; container of a container the moment the step composes two of them, which is what
+  ;; `phases` does.
+  (let [g      (ts/counter)
+        box    (fn [v] {:boxed v})
+        boxed? (fn [x] (and (map? x) (contains? x :boxed)))
+        unbox  (fn [x] (if (boxed? x) (:boxed x) x))
+        step (c/compile g {:then (fn [v f] (let [r (f (unbox v))]
+                                             (if (boxed? r) r (box r))))
+                           :pure box})
         init (c/initial g {})]
     (is (= {:boxed {:id :running :n 3}} (step init {:id :start :seed 3}))
         "a fired transition came back through :then")
@@ -484,3 +494,141 @@
                           (step s0 {:id :judged :verdict :amber})))
     (is (= s0 (step s0 {:id :nothing-fires-this}))
         "while an event with no edge at all is still the quiet miss it always was")))
+
+;;; ------------------------------------------------------------------ the phases
+
+(defspec the-step-is-its-two-halves 60
+  ;; THE PROPERTY THAT KEEPS THEM FROM DRIFTING, and the reason `compile` is defined as
+  ;; (:step (phases ...)) rather than written twice: patching and then applying must equal
+  ;; stepping, for any shape and any event, admitted or not. Everything else about the
+  ;; split is an optimisation of when the two halves run; this is what says they are the
+  ;; same machine.
+  (prop/for-all [parts ts/gen-shape
+                 event ts/gen-event]
+    (let [sh (apply shape/shape parts)
+          {:keys [patch apply step]} (c/phases sh nil)
+          s0 (c/initial sh {})]
+      (= (step s0 event) (apply s0 event (patch s0 event))))))
+
+(deftest a-patch-is-a-value-and-says-whose-it-is
+  (let [sh (ts/counter)
+        {:keys [patch]} (c/phases sh nil)
+        s0 (c/initial sh {})]
+    (is (= {:answer {:n 4} :depth 0} (patch s0 {:id :start :seed 4}))
+        "the handler's answer, and the depth of the machine that owns it")
+    (is (= :robertluo.state-graph.compile/missed (patch s0 {:id :stop}))
+        "and an event no edge admits is not a patch at all — no handler ran")))
+
+(deftest the-patch-is-never-stale-only-the-admission-is
+  ;; THE CLAIM THE WHOLE SPLIT RESTS ON. A handler answers from the EVENT ALONE, so what
+  ;; it computed while the machine was in one state is still exactly right in a later one
+  ;; — and here the target is a DIFFERENT NODE from the one it was computed against, which
+  ;; is precisely what the apply phase re-looks-up and what a single step cannot express.
+  (let [sh (ts/join)
+        {:keys [patch apply]} (c/phases sh nil)
+        s0 (c/initial sh {})
+        p-test (patch s0 {:id :test :test {:ok false}})]
+    (is (= {:answer {:test {:ok false}} :depth 0} p-test))
+    (testing "computed in :verifying, where its target would have been :tested"
+      (is (= {:id :tested :test {:ok false}}
+             (apply s0 {:id :test :test {:ok false}} p-test))))
+    (testing "and the SAME patch applied in :evaled lands in :complete instead"
+      (let [evaled (apply s0 {:id :eval :eval {:ok true}}
+                          (patch s0 {:id :eval :eval {:ok true}}))]
+        (is (= {:id :evaled :eval {:ok true}} evaled))
+        (is (= {:id :complete :eval {:ok true} :test {:ok false}}
+               (apply evaled {:id :test :test {:ok false}} p-test))
+            "the apply phase reads the edge from where the patch LANDS")))))
+
+(deftest the-two-halves-must-agree-about-whose-event-it-is
+  ;; The seam the split rests on, checked in the code. A patch a CHILD's handler answered
+  ;; may only be applied to that child, and one this machine answered only to this machine
+  ;; — otherwise an answer would be merged into a state that never asked for it.
+  (let [child (shape/shape
+               (shape/state :c1 [:map] {:initial true})
+               (shape/state :c2 [:map [:v :int]] {:final true})
+               (shape/event :inner [:map [:v :int]])
+               (shape/transition :c1 :inner :c2))
+        sh (shape/shape
+            (shape/state :p [:map [:v {:optional true} :int]]
+                         {:initial true :machine child})
+            (shape/state :q [:map] {:final true})
+            ;; :inner IS THE CHILD'S WORD AND THE PARENT DOES NOT KNOW IT — declaring it
+            ;; here would be :unused-event, an event no transition of THIS shape fires.
+            ;; Which is the whole mechanism of nesting: the child's own vocabulary decides
+            ;; who handles an event.
+            (shape/event :out [:map])
+            (shape/transition :p :out :q))
+        {:keys [patch apply]} (c/phases sh nil)
+        s0 (c/initial sh {})
+        deep (patch s0 {:id :inner :v 1})]
+    (is (= {:answer {:v 1} :depth 1} deep)
+        "the child's handler ran, and the patch says it was one level down")
+    (is (= {:id :p :sub {:id :c2 :v 1}} (apply s0 {:id :inner :v 1} deep))
+        "and applied to the child, it lands in the child")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Patch does not belong"
+                          (apply s0 {:id :inner :v 1} (assoc deep :depth 0)))
+        "a child's patch claimed for the parent is refused")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Patch does not belong"
+                          (apply s0 {:id :out} {:answer {} :depth 1}))
+            "and so is the parent's claimed for a child that does not admit it")))
+
+;;; --------------------------------------------------------------- the combines
+
+(deftest a-key-with-a-combine-is-combined-and-one-without-replaces
+  ;; What replaces the naive merge, and the only non-commutative thing the apply phase had.
+  (let [f (ts/fanning)
+        step (c/compile f)
+        s0 (c/initial f {})
+        a {:id :offer-a :best {:score 5 :by "a"}}
+        b {:id :offer-b :best {:score 9 :by "b"}}]
+    (is (= {:id :choosing} s0) ":best is optional, so nothing is held yet")
+    (is (= {:id :choosing :best {:score 5 :by "a"}} (step s0 a))
+        "a key the state does not hold yet is TAKEN — a combine needs two values")
+    (is (= {:id :choosing :best {:score 9 :by "b"}}
+           (step (step s0 a) b)
+           (step (step s0 b) a))
+        "and thereafter combined, so which offer landed second is not observable")
+    (testing "while a key with no combine declared replaces, exactly as merge did"
+      (let [g (ts/counter)
+            st (c/compile g)]
+        (is (= {:id :running :n 7}
+               (st (st (c/initial g {}) {:id :start :seed 1}) {:id :set :to 7})))))))
+
+(deftest a-declared-law-is-verified-on-the-values-and-not-trusted
+  ;; THE SEAM THE CLOSURE COSTS. `commutes` reads {:combine/commutes true} and cannot
+  ;; check it — the algebra of a closure is not statically knowable, and generation misses
+  ;; a rare case (see check-test/generation-cannot-reach-every-violation). So when the
+  ;; licence is actually taken, both patches are in hand and the claim is checked.
+  (let [sticky (fn [a b] (if (= "pinned" (:by a)) a (ts/better a b)))
+        liar (shape/shape
+              (shape/state :s [:map [:best {:optional true
+                                            :combine sticky
+                                            :combine/commutes true} ts/Impl]]
+                           {:initial true})
+              (shape/event :p [:map [:best ts/Impl]])
+              (shape/event :q [:map [:best ts/Impl]])
+              (shape/transition :s :p :s)
+              (shape/transition :s :q :s))
+        {:keys [patch agree]} (c/phases liar nil)
+        s0 (assoc (c/initial liar {}) :best {:score 0 :by "m"})
+        ep {:id :p :best {:score 5 :by "pinned"}}
+        eq {:id :q :best {:score 9 :by "z"}}]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"combine declared commutative is not"
+         (agree s0 ep (patch s0 ep) eq (patch s0 eq)))
+        "the exact case 2,744 generated triples could not reach")
+    (testing "and it is silent where the promise holds"
+      (let [f (ts/fanning)
+            {:keys [patch agree]} (c/phases f nil)
+            fs (assoc (c/initial f {}) :best {:score 0 :by "m"})
+            a {:id :offer-a :best {:score 5 :by "a"}}
+            b {:id :offer-b :best {:score 9 :by "b"}}]
+        (is (nil? (agree fs a (patch fs a) b (patch fs b))))))
+    (testing "and where the two patches share no key at all, there is nothing to ask"
+      (let [j (ts/join)
+            {:keys [patch agree]} (c/phases j nil)
+            js (c/initial j {})
+            e {:id :eval :eval {:ok true}}
+            t {:id :test :test {:ok false}}]
+        (is (nil? (agree js e (patch js e) t (patch js t))))))))

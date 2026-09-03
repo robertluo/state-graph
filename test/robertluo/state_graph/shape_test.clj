@@ -263,3 +263,35 @@
                          (shape/state :b [:map])
                          (shape/event :go [:map [:id :keyword]] (constantly {}))
                          (shape/transition :a :go :b)))))
+
+;;; -------------------------------------------------------------- the combines
+
+(deftest a-key-may-say-how-a-patch-lands-on-it
+  ;; What replaces the naive merge, read back off the node that declared it. The combine
+  ;; itself is a CLOSURE — merging is domain logic and no fixed vocabulary of :+ and :max
+  ;; expresses it — and what it PROMISES is data, because no function yields its own
+  ;; algebra and the promise is the only part a checker can read.
+  (let [f (ts/fanning)
+        got (shape/combines f :choosing)]
+    (is (= #{:best} (set (keys got))))
+    (is (= ts/better (:combine (got :best))) "the function itself, not a name for one")
+    (is (true? (:commutes? (got :best))))
+    (is (= [:map [:score :int] [:by :string]] (m/form (:schema (got :best))))
+        "and the key's own schema COMPILED, as `entries-of` answers one, which is what a
+         law is generated from"))
+  (is (= {} (shape/combines (ts/counter) :running))
+      "a node declaring none is empty, and every shape written before this declared none"))
+
+(deftest a-combine-and-its-promise-are-checked-referentially
+  ;; Two faults answerable from the parts: whether the thing declared is a function, and
+  ;; whether a law was declared with nothing to be a law about. Whether the law is TRUE is
+  ;; a different question — check/laws refutes it, compile verifies it on the values.
+  (is (= [{:problem :combine-not-a-function :id :x :key :k}]
+         (shape/problems (shape/state :x [:map [:k {:combine 7} :int]] {:initial true}))))
+  (is (= [{:problem :law-without-combine :id :x :key :k}]
+         (shape/problems (shape/state :x [:map [:k {:combine/commutes true} :int]]
+                                      {:initial true}))))
+  (is (empty? (filter (comp #{:combine-not-a-function :law-without-combine} :problem)
+                      (shape/problems (shape/state :x [:map [:k {:combine +} :int]]
+                                                   {:initial true}))))
+      "a combine with no law declared is fine — it simply licenses nothing"))

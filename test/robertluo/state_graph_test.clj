@@ -6,13 +6,15 @@
    code through a second door. What IS the facade's own is the TRANSITION RESULT — the
    record it builds, and :fired, which no layer below it can answer."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
+            [manifold.deferred :as d]
             [manifold.stream :as s]
             [robertluo.state-graph :as sg]
+            [robertluo.state-graph.check :as check]
             [robertluo.state-graph.shape :as shape]
             [robertluo.state-graph.test-support :as ts]))
 
@@ -167,3 +169,54 @@
         {:keys [results]} (ran sh [{:id :go} {:id :nobody-knows-this} {:id :fin}])]
     (is (= [[:host :b true] [:host :b false] [:done nil true]]
            (map (juxt (comp :id :state) (comp :id :sub :state) :fired) results)))))
+
+;;; ------------------------------------------------------------- the licence
+
+(deftest run-takes-the-concurrency-it-can-prove
+  ;; THE FACADE'S OWN JOB HERE, and the only layer that can do it: `run` knows the shape,
+  ;; so it computes `check/commuting` and hands the proof down. Neither `compile` nor
+  ;; `async` could — one has no graph algorithms and the other has no shape.
+  ;;
+  ;; Deterministic without a clock: :eval is fed FIRST and parks on a deferred, so the
+  ;; first result cannot be :eval. That it is :test proves the machine did not wait.
+  (let [gate (d/deferred)
+        sh (sg/shape
+            (sg/state :verifying [:map] {:initial true})
+            (sg/state :evaled    [:map [:eval :int]])
+            (sg/state :tested    [:map [:test :int]])
+            (sg/state :complete  [:map [:eval :int] [:test :int]] {:final true})
+            (sg/event :eval [:map] (fn [_] gate)          [:map [:eval :int]])
+            (sg/event :test [:map] (constantly {:test 2}) [:map [:test :int]])
+            (sg/transition :verifying :eval :evaled)
+            (sg/transition :verifying :test :tested)
+            (sg/transition :tested    :eval :complete)
+            (sg/transition :evaled    :test :complete))
+        {:keys [states done]} (sg/run sh {} (fed [{:id :eval} {:id :test}]))]
+    (is (= {:verifying #{#{:eval :test}}} (check/commuting sh))
+        "the pair is proven, so this is the branch under test")
+    (d/success! gate {:eval 1})
+    (let [rows (deref (s/reduce conj [] states) patience ::timeout)]
+      (is (= [:test :eval] (mapv (comp :id :event) rows))
+          "the results report in COMPLETION order, so the pair comes back swapped")
+      (is (= [{:id :tested :test 2} {:id :complete :eval 1 :test 2}] (mapv :state rows))
+          "and :eval's patch, computed in :verifying, landed in :complete not :evaled")
+      (is (every? true? (map :fired rows))))
+    (is (= {nil {:id :complete :eval 1 :test 2}} (deref done patience ::timeout)))))
+
+(deftest a-join-reaches-its-target-only-once-both-events-have-landed
+  ;; What the licence is FOR, through the front door and with no gate: a state whose schema
+  ;; REQUIRES both keys is reachable only when both events have been handled, and either
+  ;; order gets there. One event alone parks in an intermediate state, which is the join's
+  ;; progress and is exactly what that state's schema says.
+  (let [sh (ts/join)
+        e {:id :eval :eval {:ok true}}
+        t {:id :test :test {:ok false}}
+        end (fn [evs] (get (:done (ran sh evs)) nil))]
+    (is (= {:id :evaled :eval {:ok true}} (end [e]))
+        "one event alone parks: the join is not satisfied")
+    (is (= {:id :complete :eval {:ok true} :test {:ok false}} (end [e t]) (end [t e]))
+        "and both orders reach one identical state")
+    (testing "which is the same state the reduction door reaches"
+      (is (= (end [e t])
+             (reduce (sg/compile sh) (sg/initial sh {}) [e t])
+             (reduce (sg/compile sh) (sg/initial sh {}) [t e]))))))

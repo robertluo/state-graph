@@ -148,6 +148,57 @@
       (is (= :no (v [:name :submit])))
       (is (= :no (v [:submit :touch]))))))
 
+(deftest a-nested-machine-makes-a-pair-unknowable
+  ;; MEASURED, and it was a live unsoundness rather than a gap: INNER FIRST means a child
+  ;; sees an event before this shape's own edges do, so a nesting node's own self-loops
+  ;; describe a diamond that never runs. Before this, the pair below was licensed as
+  ;; commuting while the CHILD's own confluence proved it :no — and the two orders landed
+  ;; in visibly different states. Nothing had noticed because `drive` serialised whatever
+  ;; the licence said; it became load-bearing the day the runtime took it.
+  (let [child (shape/shape
+               (shape/state :k1 [:map] {:initial true})
+               (shape/state :ka [:map [:a :int]] {:final true})
+               (shape/state :kb [:map [:b :int]] {:final true})
+               (shape/event :a [:map [:a :int]])
+               (shape/event :b [:map [:b :int]])
+               (shape/transition :k1 :a :ka)
+               (shape/transition :k1 :b :kb))
+        host (shape/shape
+              (shape/state :p [:map [:a {:optional true} :int] [:b {:optional true} :int]]
+                           {:initial true :machine child})
+              (shape/state :out [:map] {:final true})
+              (shape/event :a [:map [:a :int]])
+              (shape/event :b [:map [:b :int]])
+              (shape/event :fin [:map])
+              (shape/transition :p :a :p)
+              (shape/transition :p :b :p)
+              (shape/transition :p :fin :out))]
+    (is (= [:no] (map :verdict (check/confluence child)))
+        "the child proves its own pair is order-dependent")
+    (is (every? #{:unknown} (map :verdict (check/confluence host)))
+        "so the host may claim nothing about any pair pending where that child lives")
+    (is (= {} (check/commuting host))
+        "and licenses nothing, which is the only safe answer")
+    (testing "the two orders really do differ, which is what makes :unknown necessary"
+      (let [step (c/compile host)
+            s0 (c/initial host {})
+            ab (reduce step s0 [{:id :a :a 1} {:id :b :b 2}])
+            ba (reduce step s0 [{:id :b :b 2} {:id :a :a 1}])]
+        (is (not= ab ba))))))
+
+(deftest a-general-diamond-is-licensed-and-not-only-a-self-loop
+  ;; `form` has the TRIVIAL diamond, ta = tb = x = s. `join` has the real one: four
+  ;; distinct nodes and two routes that rejoin, which is what `commutes` implements and
+  ;; what a self-loop shortcut would have refused to see.
+  (let [j (ts/join)]
+    (is (= [{:in :verifying :pair [:eval :test] :verdict :yes}] (vec (check/confluence j))))
+    (is (= {:verifying #{#{:eval :test}}} (check/commuting j)))
+    (testing "and the proof holds when run: both orders land in one identical state"
+      (let [step (c/compile j)
+            s0 (c/initial j {})
+            e {:id :eval :eval {:ok true}} t {:id :test :test {:ok false}}]
+        (is (= (reduce step s0 [e t]) (reduce step s0 [t e])))))))
+
 (deftest commuting-is-plain-data-the-async-layer-can-hold
   ;; Why it is a VALUE and not a closure: the async layer is handed this the way it is
   ;; handed a compiled step, so it still knows nothing of shapes — and a person can print
@@ -363,3 +414,74 @@
     (is (str/includes? src "judged [verdict=:green]"))
     (is (str/includes? src "judged [verdict=:red]"))
     (is (not (str/includes? src "$eval")) "a closure in a picture is the failure mode")))
+
+;;; ------------------------------------------------------------------ the laws
+
+(deftest a-commutative-combine-licenses-a-shared-key
+  ;; THE WIDENING, and the reason the naive merge was the real limit. :offer-a and :offer-b
+  ;; write THE SAME key, so under last-write-wins this pair could never be licensed however
+  ;; independent the work behind it was. It is licensed now.
+  (let [f (ts/fanning)]
+    (is (= {:choosing #{#{:offer-a :offer-b}}} (check/commuting f)))
+    (testing "and take the combine's promise away and the licence goes with it"
+      (let [plain (shape/shape
+                   (shape/state :choosing [:map [:best {:optional true} ts/Impl]]
+                                {:initial true})
+                   (shape/state :chosen [:map [:best {:optional true} ts/Impl]] {:final true})
+                   (shape/event :offer-a [:map [:best ts/Impl]])
+                   (shape/event :offer-b [:map [:best ts/Impl]])
+                   (shape/event :settle [:map])
+                   (shape/transition :choosing :offer-a :choosing)
+                   (shape/transition :choosing :offer-b :choosing)
+                   (shape/transition :choosing :settle :chosen))]
+        (is (= {} (check/commuting plain))
+            "a shared key with no commutative combine is exactly as unlicensable as before")))))
+
+(deftest laws-refutes-and-never-proves
+  ;; Generation can REFUTE a law and cannot prove one, so the verdicts are :no with a
+  ;; witness or :unknown, and never :yes. Both laws are worth having and they catch
+  ;; different mistakes.
+  (testing ":commutes — a tie with no canonical winner leaks argument order"
+    (let [ties (fn [a b] (if (>= (:score a) (:score b)) a b))
+          bad (shape/shape
+               (shape/state :s [:map [:best {:combine ties :combine/commutes true} ts/Impl]]
+                            {:initial true})
+               (shape/event :p [:map [:best ts/Impl]])
+               (shape/transition :s :p :s))
+          v (first (filter (comp #{:commutes} :law) (check/laws bad)))]
+      (is (= :no (:verdict v)))
+      (is (some? (:witness v)) "and it hands over the values that disagree")
+      (is (apply not= (:answers v)))))
+  (testing ":closed — a combine that changes the type would make every edge into the state a lie"
+    (let [v (first (check/laws (shape/shape
+                                (shape/state :s [:map [:n {:combine str} :int]]
+                                             {:initial true})
+                                (shape/event :p [:map [:n :int]])
+                                (shape/transition :s :p :s))))]
+      (is (= [:closed :no] [(:law v) (:verdict v)]))
+      (is (string? (:answer v)) "str answered a string where an :int was declared")))
+  (testing "an honest combine is :unknown, which is all generation can honestly say"
+    (is (every? #{:unknown} (map :verdict (check/laws (ts/fanning))))))
+  (testing "and it is SEEDED, so a check that answers differently each call is not one"
+    (is (= (check/laws (ts/fanning)) (check/laws (ts/fanning))))))
+
+(deftest generation-cannot-reach-every-violation
+  ;; THE MEASUREMENT THAT DECIDED THE DESIGN, kept as a test because it is the reason
+  ;; `compile` verifies the same claim at runtime. A plausible domain rule — a pinned choice
+  ;; wins outright — is NOT commutative, and no amount of generated data finds it, because
+  ;; malli will not invent the string "pinned".
+  (let [sticky (fn [a b] (if (= "pinned" (:by a)) a (ts/better a b)))
+        liar (shape/shape
+              (shape/state :s [:map [:best {:combine sticky :combine/commutes true} ts/Impl]]
+                           {:initial true})
+              (shape/event :p [:map [:best ts/Impl]])
+              (shape/event :q [:map [:best ts/Impl]])
+              (shape/transition :s :p :s)
+              (shape/transition :s :q :s))]
+    (is (every? #{:unknown} (map :verdict (check/laws liar {:samples 14})))
+        "2,744 triples and nothing found")
+    (is (= {:s #{#{:p :q}}} (check/commuting liar))
+        "so the pair IS licensed on a false promise — which is what the runtime check is for")
+    (testing "and the promise really is false"
+      (let [s {:score 0 :by "m"} a {:score 5 :by "pinned"} b {:score 9 :by "z"}]
+        (is (not= (sticky (sticky s a) b) (sticky (sticky s b) a)))))))

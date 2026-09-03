@@ -106,7 +106,14 @@
 (defn state
   "A state: an id, the malli schema of its DATA, and optionally {:initial true} or
    {:final true}. The schema form is compiled here, so what a shape stores is always
-   a compiled schema and MapSchema is honest rather than aspirational."
+   a compiled schema and MapSchema is honest rather than aspirational.
+
+   A KEY MAY SAY HOW A PATCH LANDS ON IT, as properties on its own map entry:
+
+     (state :best [:map [:best {:combine better :combine/commutes true} Impl]])
+
+   Without one a key REPLACES, which is what a merge always did. See `combines-of` for why
+   the combine is a closure and the promise is data."
   {:malli/schema [:function [:=> [:cat Id MapSchema] StateDef]
                             [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]}
   ([id schema] (state id schema nil))
@@ -208,6 +215,40 @@
   [s]
   (into {} (for [[k props child] (m/children (m/schema s))]
              [k {:optional? (boolean (:optional props)) :schema child}])))
+
+(defn combines-of
+  "{k {:combine f :commutes? bool :schema S}} for a :map schema — how each key that
+   declares one is APPLIED when a patch lands on it, and what it promises about that.
+
+   A NAIVE MERGE IS WHAT THIS REPLACES, and it was the reason the concurrency licence was
+   so narrow. `merge` is last-write-wins, so two patches touching one key were never
+   licensed; and `merge` cannot express a change relative to what the state holds, which is
+   what forces a {:sees} view — and a view makes a pair unlicensable from the other side.
+   Both halves of Bernstein's condition traced back to one operation.
+
+   THE COMBINE IS A CLOSURE AND NOT A NAMED OPERATION, deliberately: in real work merging
+   is domain logic — keep the best-scoring implementation with its provenance, deduplicate
+   review comments by line — and a fixed vocabulary of :+ and :max expresses none of it.
+   That is allowed here where it is refused for a GUARD because the two are on opposite
+   sides of one line: a guard decides WHERE THE MACHINE GOES, which is structural and must
+   be decided from the guard's own shape, while a combine decides WHAT A VALUE IS, inside a
+   state, exactly as a handler's body always has.
+
+   WHAT CANNOT BE A CLOSURE IS THE PROMISE. No function yields its own algebra, so
+   :combine/commutes is declared as DATA beside it, and it is the only thing `commutes`
+   reads. It is checked and not trusted: `check/laws` refutes it by generation, and
+   `compile` verifies it on the concrete values at the moment a licence is actually taken.
+
+   IT IS DECLARED ON THE NODE and never on an event, because the same key must combine the
+   same way however it arrives. Per-edge algebra would prove nothing."
+  {:malli/schema [:=> [:cat MapSchema] :map]}
+  [s]
+  (into {} (for [[k props child] (m/children (m/schema s))
+                 :when (or (contains? props :combine)
+                           (contains? props :combine/commutes))]
+             [k {:combine (:combine props)
+                 :commutes? (boolean (:combine/commutes props))
+                 :schema child}])))
 
 (defn finite-values
   "The values this schema describes, where they are FINITE and can simply be tried, and
@@ -416,6 +457,20 @@
             k (mu/keys (:schema p))
             :when (#{:id :instance :sub} k)]
         {:problem :reserved-declared :id (:id p) :key k})
+      ;; 6b — a combine and the promise it makes. Both are REFERENTIAL: whether the thing
+      ;; declared is a function, and whether a law was declared with nothing to be a law
+      ;; about. Whether the law is TRUE is a different question and not answerable here —
+      ;; check/laws refutes it by generation and compile verifies it on the values.
+      (for [p state
+            :when (m/validate MapSchema (:schema p))
+            [k {:keys [combine]}] (combines-of (:schema p))
+            :when (and (some? combine) (not (ifn? combine)))]
+        {:problem :combine-not-a-function :id (:id p) :key k})
+      (for [p state
+            :when (m/validate MapSchema (:schema p))
+            [k {:keys [combine commutes?]}] (combines-of (:schema p))
+            :when (and (nil? combine) commutes?)]
+        {:problem :law-without-combine :id (:id p) :key k})
       ;; 7 — a nested machine must be able to START. Entering a node with one enters that
       ;; child at its own initial state with NO data, so a child whose first state insists
       ;; on some is a nesting that could never begin. Answerable from the parts alone,
@@ -500,6 +555,15 @@
   [shape]
   (for [e (uber/edges shape)]
     (into {:from (uber/src e) :to (uber/dest e)} (uber/attrs shape e))))
+
+(defn combines
+  "{k {:combine f :commutes? bool :schema S}} for a NODE — what its own schema declares
+   about how a patch lands on each key. Empty for a node that declares none, which is
+   every node written before this existed: a key with no combine REPLACES, which is what
+   `merge` always did. See `combines-of`."
+  {:malli/schema [:=> [:cat Shape Id] :map]}
+  [shape id]
+  (combines-of (uber/attr shape id :schema)))
 
 (defn enter-schema
   "What a state is validated against ON ENTER: its own schema with :id written in, and
