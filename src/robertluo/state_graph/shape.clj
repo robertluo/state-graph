@@ -88,10 +88,18 @@
         [:sees {:optional true} MapSchema]])
 
 (def TransDef
-  "An edge: which event moves the machine from where to where, and nothing else. What
-   handles the event is the EVENT's to say — see EventDef. The TARGET is still the
-   graph's, because A -submit-> B beside C -submit-> D is what a multidigraph is for."
-  [:map [::kind [:= :transition]] [:from Id] [:event Id] [:to Id]])
+  "An edge: which event moves the machine from where to where. What handles the event is
+   the EVENT's to say — see EventDef. The TARGET is still the graph's, because
+   A -submit-> B beside C -submit-> D is what a multidigraph is for.
+
+   :when IS A GUARD, and it is a SCHEMA over the event rather than a predicate over
+   anything: this edge fires only for events the schema admits. It is to a transition what
+   :sees is to an event — an optional map schema, declared where the thing it constrains
+   lives. A schema is DATA, so a guard can be drawn, compared and REASONED ABOUT, which a
+   closure could never be: `disjoint` is what proves two guards on one [state, event] can
+   never both fire, and without that proof the shape is refused."
+  [:map [::kind [:= :transition]] [:from Id] [:event Id] [:to Id]
+        [:when {:optional true} MapSchema]])
 
 ;;; -------------------------------------------------------------- constructors
 
@@ -163,10 +171,161 @@
 
 (defn transition
   "An edge: from a state, on an event, to a state. Three keywords and no functions —
-   what handles the event belongs to the event."
-  {:malli/schema [:=> [:cat Id Id Id] TransDef]}
-  [from event to]
-  {::kind :transition :from from :event event :to to})
+   what handles the event belongs to the event.
+
+   {:when <a map schema>} GUARDS IT: the edge fires only for events that schema admits, so
+   one event can lead two ways and the shape says which. The guard describes the event's
+   PAYLOAD — what it carries, without :id and :instance, exactly as a state's schema
+   describes the state without them.
+
+     (transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+     (transition :written :judged :fault       {:when [:map [:verdict [:= :red]]]})
+
+   TWO GUARDED EDGES MUST BE PROVABLY DISJOINT or the shape is refused: determinism is this
+   library's contract, and an ordered `first match wins` is not available to a graph whose
+   out-edges are a SET. There is no :else — an event no guard admits fires no edge, which
+   is `ignored`, and the reduction stays total."
+  {:malli/schema [:function [:=> [:cat Id Id Id] TransDef]
+                            [:=> [:cat Id Id Id [:maybe :map]] TransDef]]}
+  ([from event to] (transition from event to nil))
+  ([from event to opts]
+   (cond-> {::kind :transition :from from :event event :to to}
+     (:when opts) (assoc :when (m/schema (:when opts))))))
+
+;;; ------------------------------------------------------- schemas, compared
+
+(def primitive-types
+  "Types no single value belongs to two of, so two schemas differing here are a PROOF and
+   not a guess. Deliberately small: enough for the common mistake, and not a lattice of
+   every type malli has. :double is in only because malli's :int rejects a double and its
+   :double rejects an int, which was checked rather than assumed."
+  #{:int :double :string :keyword :boolean :symbol :uuid})
+
+(defn entries-of
+  "{k {:optional? bool :schema S}} for a :map schema. m/children gives [k props child]
+   triples with props nil where there are none."
+  {:malli/schema [:=> [:cat MapSchema] :map]}
+  [s]
+  (into {} (for [[k props child] (m/children (m/schema s))]
+             [k {:optional? (boolean (:optional props)) :schema child}])))
+
+(defn finite-values
+  "The values this schema describes, where they are FINITE and can simply be tried, and
+   nil where they are not. This is the lever that decides a guard against anything at all —
+   `disjoint` uses it to separate two guards, and `check/coverage` to ask whether a set of
+   them leaves a gap."
+  {:malli/schema [:=> [:cat Schema] [:maybe [:set :any]]]}
+  [s]
+  (case (m/type (m/schema s))
+    (:= :enum) (set (m/children (m/schema s)))
+    nil))
+
+(defn- bounds
+  "[lo hi] for a numeric schema, each end [value exclusive?] or nil, and the whole nil
+   where the schema is not numeric or says nothing. Malli spells a bound two ways — the
+   :min/:max properties of :int and :double, and the comparator schemas, which carry it as
+   their only child — and both are decidable, which is what keeps `attempts under three`
+   from having to become a tag."
+  [s]
+  (let [p (m/properties s) c (first (m/children s))]
+    (case (m/type s)
+      (:int :double) (when (or (:min p) (:max p))
+                       [(when-let [v (:min p)] [v false])
+                        (when-let [v (:max p)] [v false])])
+      :>  [[c true] nil]
+      :>= [[c false] nil]
+      :<  [nil [c true]]
+      :<= [nil [c false]]
+      nil)))
+
+(defn- apart?
+  "Does a's upper bound sit at or below b's lower bound, with at least one of them
+   excluding the meeting point?"
+  [[_ hi] [lo _]]
+  (boolean
+   (when (and hi lo)
+     (let [[hv hx] hi [lv lx] lo]
+       (and (number? hv) (number? lv)
+            (or (< hv lv) (and (= hv lv) (or hx lx))))))))
+
+(declare ^:private dis)
+
+(defn- dis-map
+  "ONE conflicting key is enough, which is the whole structural difference from
+   subsumption: `admits` needs EVERY key of its target to hold, and this needs only one to
+   be impossible. A key optional in BOTH conflicts with nothing, a value being free to
+   leave it out.
+
+   IT NEVER ANSWERS :no. Proving two map schemas OVERLAP means producing a value that
+   satisfies both, and one shared key agreeing is not that — another key may still refuse."
+  [a b]
+  (let [ea (entries-of a) eb (entries-of b)
+        insisted (fn [e] (for [[k v] e :when (not (:optional? v))] k))]
+    (if (or
+         ;; a shared key, insisted on by at least one side, whose children cannot both hold
+         (some (fn [[k va]]
+                 (when-let [vb (get eb k)]
+                   (and (or (not (:optional? va)) (not (:optional? vb)))
+                        (= :yes (dis (:schema va) (:schema vb))))))
+               ea)
+         ;; a CLOSED schema has no room for a key the other side insists on
+         (and (:closed (m/properties a)) (some #(not (contains? ea %)) (insisted eb)))
+         (and (:closed (m/properties b)) (some #(not (contains? eb %)) (insisted ea))))
+      :yes
+      :unknown)))
+
+(defn- dis
+  [a b]
+  (let [at (m/type a) bt (m/type b)
+        fa (finite-values a) fb (finite-values b)]
+    (cond
+      ;; a finite domain decides it against ANY schema, and a value that satisfies both is
+      ;; a proof of overlap rather than a failure to prove separation
+      fa (if (some #(m/validate b %) fa) :no :yes)
+      fb (if (some #(m/validate a %) fb) :no :yes)
+      (and (= :map at) (= :map bt)) (dis-map a b)
+      (and (primitive-types at) (primitive-types bt) (not= at bt)) :yes
+      :else (let [ba (bounds a) bb (bounds b)]
+              (if (and ba bb (or (apart? ba bb) (apart? bb ba)))
+                :yes
+                :unknown)))))
+
+(defn disjoint
+  "Can NO value satisfy both schemas? :yes, :no, or :unknown.
+
+   THE SIBLING OF check/admits, and partial for the same reason: it never lies, and
+   :unknown is an answer rather than a failure. Same two levers — the primitive types, and
+   a finite domain that can simply be TRIED — plus numeric bounds, which subsumption has no
+   use for and a guard does.
+
+   What it can PROVE:
+   - a finite domain none of whose values the other schema accepts;
+   - a shared key whose two child schemas cannot both hold, the map combinator being an OR
+     where subsumption's is an AND;
+   - a CLOSED schema with no room for a key the other side insists on;
+   - two numeric ranges that do not meet.
+
+   :no means PROVEN OVERLAP and comes only from a finite domain, where the value that
+   satisfies both is the proof. Two map schemas are never proven to overlap here — that
+   needs a value, not an argument."
+  {:malli/schema [:=> [:cat Schema Schema] [:enum :yes :no :unknown]]}
+  [a b]
+  (dis (m/schema a) (m/schema b)))
+
+(defn accepted
+  "The schema of the events a transition FIRES ON: the event's own schema with the edge's
+   :when merged over it, so a guard REFINES rather than replaces —
+   (mu/merge [:map [:verdict [:enum :green :red]]] [:map [:verdict [:= :green]]]).
+
+   The sibling of check/produced, and there for the same reason: `produced` is what a
+   transition hands its target and this is what it takes, and both have to compose the way
+   the step composes or a check is answering about something that never runs. Takes a
+   transition as `transitions` reads one back, so both the referential check and the
+   structural ones ask it the same question."
+  {:malli/schema [:=> [:cat :map] [:maybe MapSchema]]}
+  [t]
+  (let [w (:when t)]
+    (cond-> (:schema t) (and w (:schema t)) (mu/merge w))))
 
 ;;; -------------------------------------------------------------------- checks
 
@@ -221,9 +380,24 @@
         {:problem :unknown-state :in (names t) :key k :id id})
       (for [t transition :when (not (event-ids (:event t)))]
         {:problem :unknown-event :in (names t) :id (:event t)})
-      ;; 3 — determinism. Without it `compile` is a search and no check is answerable.
-      (for [[[from ev] ts] (group-by (juxt :from :event) transition) :when (< 1 (count ts))]
-        {:problem :ambiguous :from from :event ev :count (count ts)})
+      ;; 3 — determinism, which is the CONTRACT and not a nicety. Two edges on one
+      ;; [state, event] are legal where guards make them exclusive, and what makes them
+      ;; safe is that no one event can fire both. So this is the one check that must prove
+      ;; SAFETY rather than report a proven fault: not-provably-disjoint is a fault.
+      ;; AN UNGUARDED EDGE BESIDE ANY OTHER IS THE SIMPLEST CASE OF IT and needs no special
+      ;; handling — with no :when, `accepted` is the bare event schema, which is disjoint
+      ;; from nothing. And an ordered `first match wins` is not the alternative: ubergraph
+      ;; keeps out-edges in a SET, so there is no order to fall back on and the proof is
+      ;; the whole of the safety.
+      (let [schema-of (into {} (map (juxt :id :schema)) event)]
+        (for [[[from ev] ts] (group-by (juxt :from :event) transition)
+              :when (and (< 1 (count ts)) (m/validate MapSchema (schema-of ev)))
+              [a b] (for [[i x] (map-indexed vector ts), y (drop (inc i) ts)] [x y])
+              :let [fires #(accepted {:schema (schema-of ev) :when (:when %)})
+                    verdict (disjoint (fires a) (fires b))]
+              :when (not= :yes verdict)]
+          {:problem :ambiguous :from from :event ev
+           :to [(:to a) (:to b)] :verdict verdict}))
       ;; 4 — the catalogue's only moment. This is what replaces the dead-event check,
       ;; which cannot be a graph query once the catalogue has been denormalised away.
       (for [id (sort (remove fired event-ids))]
@@ -232,13 +406,16 @@
       (let [inits (filterv :initial state)]
         (when (not= 1 (count inits))
           [{:problem :initial :count (count inits) :ids (mapv :id inits)}]))
-      ;; 6 — :id and :instance are the MACHINERY'S words, not a state's. A state
-      ;; redeclaring either would be describing something written over it on every
-      ;; entry: :id by the edge, :instance by whoever started the run.
-      (for [s state
-            k (mu/keys (:schema s))
+      ;; 6 — :id, :instance and :sub are the MACHINERY'S words, and neither a state nor
+      ;; an EVENT may claim one. A state redeclaring :id would be describing something
+      ;; written over it on every entry; an event's schema describes its PAYLOAD, what it
+      ;; carries, and :id and :instance are not carried but ridden in — which is why the
+      ;; step conforms an event against its schema with those keys taken off.
+      (for [p (concat state event)
+            :when (m/validate MapSchema (:schema p))
+            k (mu/keys (:schema p))
             :when (#{:id :instance :sub} k)]
-        {:problem :reserved-declared :id (:id s) :key k})
+        {:problem :reserved-declared :id (:id p) :key k})
       ;; 7 — a nested machine must be able to START. Entering a node with one enters that
       ;; child at its own initial state with NO data, so a child whose first state insists
       ;; on some is a nesting that could never begin. Answerable from the parts alone,
@@ -272,7 +449,8 @@
         (uber/add-directed-edges*
          (for [t transition]
            [(:from t) (:to t)
-            (assoc (catalogue (:event t)) :event (:event t))])))))
+            (cond-> (assoc (catalogue (:event t)) :event (:event t))
+              (:when t) (assoc :when (:when t)))])))))
 
 ;;; ------------------------------------------------------------------- reading
 

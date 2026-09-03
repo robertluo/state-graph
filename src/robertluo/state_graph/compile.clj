@@ -10,7 +10,8 @@
 
    Requires the shape and malli. It knows nothing of streams or databases."
   (:refer-clojure :exclude [compile])
-  (:require [malli.util :as mu]
+  (:require [malli.core :as m]
+            [malli.util :as mu]
             [robertluo.state-graph.shape :as shape]))
 
 (def State
@@ -80,30 +81,62 @@
                     (assoc ctx :value value :errors errors)))
     value))
 
+(defn- payload
+  "The event without the machinery's own keys. A SCHEMA OVER AN EVENT DESCRIBES WHAT IT
+   CARRIES — its own schema and any guard alike — exactly as a state's schema describes the
+   state without :id, :instance and :sub. Those keys ride in the value so the step can read
+   them; they are not part of what the event says.
+
+   The HANDLER still gets the whole event. What is narrowed is what is CHECKED, which is
+   what has to agree with what a guard is checked against, or the two would be reasoning
+   about different values."
+  [event]
+  (dissoc event :id :instance))
+
 (defn index
   "Everything the step looks up, computed once — :edges keyed by [state-id event-id],
    which is what determinism buys, and :machines keyed by the node that nests one.
+
+   THE VALUE IS A VECTOR OF CANDIDATES, because a guard lets one event lead two ways. It
+   is still a LOOKUP and never a search: the candidates were proved DISJOINT before the
+   shape was built, so at most one can admit an event and the order they sit in cannot
+   matter — which is just as well, ubergraph keeping out-edges in a set.
 
    RECURSIVE, because nesting is: a child's own index sits under its parent's node, so a
    step or an `admits?` can descend without recomputing anything."
   {:malli/schema [:=> [:cat shape/Shape] :map]}
   [sh]
-  {:edges (into {}
-                (for [{:keys [from event to handler out sees schema]} (shape/transitions sh)]
-                  [[from event] {:to to :handler handler :out out :sees sees
-                                 :event-schema schema
-                                 :patch-schema (shape/patch-schema sh to)
-                                 :enter-schema (shape/enter-schema sh to)}]))
+  {:edges (reduce (fn [m {:keys [from event to handler out sees schema] :as t}]
+                    (update m [from event] (fnil conj [])
+                            {:to to :handler handler :out out :sees sees
+                             :when (:when t)
+                             :event-schema schema
+                             :patch-schema (shape/patch-schema sh to)
+                             :enter-schema (shape/enter-schema sh to)}))
+                  {} (shape/transitions sh))
    :machines (into {}
                    (for [[id child] (shape/machines sh)]
                      [id {:shape child :index (index child)}]))})
 
+(defn- candidates
+  "Every edge this state has for this event's ID, guards not yet consulted. One reading,
+   so that `entry` and the step's fall-through cannot disagree about whether there was an
+   edge to refuse."
+  [idx state event]
+  (get-in idx [:edges [(:id state) (:id event)]]))
+
 (defn- entry
   "What the step needs for this state and this event, or nil where no edge admits it.
    ONE definition of the lookup, because `admits?` publishes the same answer and two
-   readings of it could drift into disagreeing."
+   readings of it could drift into disagreeing.
+
+   A GUARDED CANDIDATE IS TRIED AGAINST THE EVENT'S PAYLOAD, and an unguarded one admits
+   whatever reaches it. Nothing here decides between two that both match, because the
+   constructor refused a shape where two could."
   [idx state event]
-  (get-in idx [:edges [(:id state) (:id event)]]))
+  (let [carried (payload event)]
+    (some (fn [c] (when (or (nil? (:when c)) (m/validate (:when c) carried)) c))
+          (candidates idx state event))))
 
 (defn admits?
   "Whether this machine has a transition for this event HERE — the step's own lookup,
@@ -191,7 +224,7 @@
            (if-let [{:keys [to handler out sees event-schema patch-schema enter-schema]}
                     (entry idx state event)]
              (let [ctx {:from (:id state) :event (:id event) :to to}]
-               (conform! event-schema event (assoc ctx :crossing :event))
+               (conform! event-schema (payload event) (assoc ctx :crossing :event))
                ;; A VIEW IS A SEAM AND IS CHECKED HERE TOO. The static check proves what it
                ;; can from the schemas; this holds in production and gives the diagnosis
                ;; `the state did not provide the view` rather than a nil inside a handler.
@@ -242,7 +275,18 @@
                                                (dissoc :sub))
                                      sub (assoc :sub (:first sub))))
                                  (assoc ctx :crossing :enter)))))
-             (pure (ignored state event)))))))))
+             ;; NO EDGE ADMITTED IT — but `every guard refused` and `there was no edge`
+             ;; are different things, and only one of them may be a defect. Where edges
+             ;; exist, the event is conformed against their schema before the miss is
+             ;; believed: A GUARD IS A REFINEMENT OF A SCHEMA THE EVENT MUST ALREADY
+             ;; SATISFY, so a malformed one throws here rather than being reported as an
+             ;; ordinary miss. A genuine miss — a well-formed event no guard wanted — is
+             ;; still `ignored`, and the reduction stays total.
+             (let [cs (candidates idx state event)]
+               (when (seq cs)
+                 (conform! (:event-schema (first cs)) (payload event)
+                           {:from (:id state) :event (:id event) :crossing :event}))
+               (pure (ignored state event))))))))))
 
 (defn initial
   "The first state, ENTERED THROUGH THE SAME VALIDATION as every other one. The shape

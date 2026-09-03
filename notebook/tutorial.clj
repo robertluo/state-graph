@@ -24,10 +24,12 @@
 ;; A part is a plain map, so a shape is something you can build with `map`, `for`, or
 ;; anything else that makes data. Exactly one state carries `{:initial true}`.
 ;;
-;; An **event** is shaped by a schema too, and it *carries its handler*. The handler takes
-;; the event alone — never the state it is about to change — and answers a map that is
-;; **merged into** the state. The last argument declares that map's schema, which is what
-;; makes the static check further down possible.
+;; An **event** is shaped by a schema too, and it *carries its handler*. By default the
+;; handler takes *the event alone* — nothing of the state it is about to change — and answers
+;; a map that is **merged into** the state. The last argument declares that map's schema, which
+;; is what makes the static check further down possible. Where a handler genuinely does need
+;; something from the state it is changing, the **event declares what it may see**: visibility
+;; from the inside is declared, never automatic, and *Reading the state* below is that half.
 
 (sg/event :start [:map [:who :string]] (fn [e] {:who (:who e)}) [:map [:who :string]])
 
@@ -432,7 +434,8 @@
 
 ;; `:sub` belongs to the machinery, exactly as `:id` and `:instance` do: it is seeded when the
 ;; node is entered, dropped on the way out, restarted if the node is re-entered, and a handler
-;; that answers `{:sub ...}` is simply overwritten. And a child is an ordinary shape, so the
+;; that answers `{:sub ...}` is **refused** — an event is the only way a machine transitions,
+;; so naming `:sub` is asking for a move nobody granted. And a child is an ordinary shape, so the
 ;; static checks recurse into it and report its faults under the node that hosts it:
 
 (sg/problems
@@ -455,15 +458,98 @@
 ;; ### The limit, said plainly
 ;;
 ;; **The escape is unconditional.** Nothing stops `:ship` firing while the payment is half
-;; done, because that would be a guard and v1 has none:
+;; done, because "only when the child has finished" is a fact about the *state*, and a guard
+;; — the next section — reads the *event*:
 
 (mapv (juxt :id (comp :id :sub))
       (reductions order-step (sg/initial order {}) [{:id :checkout} {:id :ship}]))
 
-;; So deciding *when* is the producer's job — which is the same answer v1 gives to branching,
-;; and the child's state is on every result, so a producer can see exactly what it needs to
-;; decide. A door left open, not designed: a node could declare where to go when its child
-;; finishes, which is the statechart done-transition and needs no event queue here.
+;; So deciding *when* is the producer's job, and the child's state is on every result, so a
+;; producer can see exactly what it needs to decide. A door left open, not designed: a node
+;; could declare where to go when its child finishes, which is the statechart
+;; done-transition and needs no event queue here.
+
+;; ## Branching: a guard is a schema
+;;
+;; Every machine branches. The question worth asking is **where the deciding lives** — and
+;; there are only two answers. Put it in a handler, or in whatever code feeds the machine its
+;; events, and the branch is a `cond` somewhere else: the drawing cannot show it, `problems`
+;; cannot check it, and a reader has to go and find it. Put it **on the edge, as data**, and
+;; both can.
+
+(def judged
+  (sg/event :judged [:map [:verdict [:enum :green :red]]
+                          [:fault {:optional true} [:string {:min 1}]]]
+            (fn [e] (select-keys e [:fault]))
+            [:map [:fault {:optional true} [:string {:min 1}]]]))
+
+;; That handler is deliberately *not* a pure lift. `:verdict` is **routing information** — it
+;; tells the edge where to go, and no state holds it — so a lift, which answers every key the
+;; schema declares, would answer a key the target does not admit and the patch check would
+;; refuse it. A guarded event usually spells its handler out for exactly that reason.
+
+(def review
+  (sg/shape
+   (sg/state :written     [:map [:code :string]] {:initial true})
+   (sg/state :implemented [:map [:code :string]] {:final true})
+   (sg/state :faulted     [:map [:code :string] [:fault {:optional true} [:string {:min 1}]]])
+   judged
+   (sg/event :again [:map] (constantly {}) [:map])
+   (sg/transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+   (sg/transition :written :judged :faulted     {:when [:map [:verdict [:= :red]]]})
+   (sg/transition :faulted :again :written)))
+
+(picture review)
+
+;; The branch is in the picture, in Harel's own notation — `judged [verdict=:green]`. One
+;; event, two arrows, and what separates them is written down:
+
+(let [step (sg/compile review)
+      s0   (sg/initial review {:code "(defn answer [] 42)"})]
+  [(step s0 {:id :judged :verdict :green})
+   (step s0 {:id :judged :verdict :red :fault "it threw"})])
+
+;; `:when` is to a transition what `:sees` is to an event: an optional map schema, declared
+;; where the thing it constrains lives. It describes the event's **payload** — what the event
+;; carries, without `:id` and `:instance`, exactly as a state's schema describes the state
+;; without them.
+;;
+;; ### Two edges must be PROVABLY exclusive
+;;
+;; This is the one check that demands proven *safety* rather than reporting a proven fault,
+;; because determinism is the contract. Guards that might both hold are refused, and there is
+;; no declaration order to fall back on — a graph's out-edges are a set, not a list:
+
+(shape/problems (sg/state :a [:map] {:initial true})
+                (sg/state :b [:map])
+                (sg/state :c [:map] {:final true})
+                (sg/event :go [:map [:v [:enum :x :y :z]]] (constantly {}) [:map])
+                (sg/transition :a :go :b {:when [:map [:v [:enum :x :y]]]})
+                (sg/transition :a :go :c {:when [:map [:v [:enum :y :z]]]}))
+
+;; Asked of the parts, because `sg/shape` would REFUSE to build that one — determinism is
+;; referential, so a machine nobody can predict never gets to exist. `:y` could fire either. Change one to `[:= :x]` and
+;; it is provable and allowed. What can be proved: a finite domain (`[:= v]`, `[:enum …]`),
+;; disjoint types, a closed map with no room for a key the other side insists on, and numeric
+;; ranges that do not meet. Anything else answers `:unknown` — and `:unknown` is refused,
+;; because a guard the library cannot separate is a machine nobody can predict.
+;;
+;; ### There is no `:else`
+;;
+;; An event no guard admits fires no edge, which is the `ignored` you have already seen. So a
+;; single guard is a **filter** as much as a branch, and the reduction stays total:
+
+(let [step (sg/compile review)
+      faulted (step (sg/initial review {:code "x"}) {:id :judged :verdict :red :fault "boom"})]
+  [(= faulted (step faulted {:id :judged :verdict :red})) ; :faulted has no :judged edge
+   (:id (step faulted {:id :again}))])
+
+;; A **malformed** event is still a defect, though, and still throws — a guard refines a
+;; schema the event must already satisfy, so a verdict that is not in the enum is not a miss:
+
+(-> (try ((sg/compile review) (sg/initial review {:code "x"}) {:id :judged :verdict :amber})
+         (catch clojure.lang.ExceptionInfo e (ex-data e)))
+    (select-keys [:crossing :event :errors]))
 
 ;; ## Reading the state, and what a state holds
 ;;
@@ -573,6 +659,18 @@
 (require '[robertluo.state-graph.check :as check])
 
 (check/commuting pipeline)
+
+;; `check/coverage` is the other one worth knowing, and it lives down here rather than in
+;; `problems` for a reason: it says whether the guards on a `[state, event]` leave a gap, and
+;; **a gap is not a fault** — it is exactly what a filter is for. So it is published rather
+;; than complained about. The review machine has no gap; `:green` and `:red` are the whole of
+;; the enum, and that is provable:
+
+(check/coverage review)
+
+;; Take one of those two edges away and the verdict becomes
+;; `{:verdict :no :witness {:verdict :red}}` — not an error, but the value that proves an
+;; event can reach nothing from there, which is worth knowing either way.
 
 ;; So `sg/run` serialises within a machine, always, and says so rather than pretending.
 ;;

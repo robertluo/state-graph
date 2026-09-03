@@ -191,3 +191,75 @@
   ;; over it on every entry.
   (is (= [{:problem :reserved-declared :id :s :key :sub}]
          (shape/problems (shape/state :s [:map [:sub :map]] {:initial true})))))
+
+;;; ----------------------------------------------------------------------- guards
+
+(deftest disjoint-never-lies
+  ;; What licenses two edges on one [state, event]: a PROOF that no one event can fire
+  ;; both. Every :yes below is decidable, and the last two are the check declining to
+  ;; guess rather than failing — :unknown is an answer.
+  (doseq [[verdict a b]
+          [[:yes [:map [:v [:= :green]]]      [:map [:v [:= :red]]]]
+           [:yes [:map [:v :int]]             [:map [:v :string]]]
+           [:yes [:map {:closed true}]        [:map [:fault :string]]]
+           [:yes [:map [:n [:int {:max 2}]]]  [:map [:n [:int {:min 3}]]]]
+           [:yes [:map [:n [:< 3]]]           [:map [:n [:>= 3]]]]
+           [:yes [:= :a]                      [:= :b]]
+           [:no  [:= :a]                      [:enum :a :b]]
+           [:unknown [:map [:v [:= :green]]]  [:map [:v [:enum :green :red]]]]
+           [:unknown [:map [:n [:int {:min 0 :max 5}]]] [:map [:n [:int {:min 3}]]]]
+           [:unknown [:map [:v {:optional true} :int]]
+                     [:map [:v {:optional true} :string]]]]]
+    (is (= verdict (shape/disjoint a b)) (pr-str [a b])))
+
+  (testing "a key OPTIONAL ON BOTH SIDES conflicts with nothing, a value being free to
+            leave it out — which is the one place the map rule is not simply `some key
+            disagrees`"
+    (is (= :yes (shape/disjoint [:map [:v :int]] [:map [:v {:optional true} :string]]))
+        "insisted on by one side is enough")))
+
+(deftest a-guard-refines-the-event-rather-than-replacing-it
+  ;; `accepted` is check/produced's sibling and has the same job: compose what the step
+  ;; composes, or a check answers about something that never runs.
+  (is (= [:map [:v [:= :green]]]
+         (m/form (shape/accepted {:schema (m/schema [:map [:v [:enum :green :red]]])
+                                  :when   (m/schema [:map [:v [:= :green]]])}))))
+  (is (= [:map [:v [:enum :green :red]]]
+         (m/form (shape/accepted {:schema (m/schema [:map [:v [:enum :green :red]]])})))
+      "and with no guard it is the event's own schema, so one reading serves both"))
+
+(deftest two-edges-on-one-event-must-be-PROVABLY-exclusive
+  ;; The one check here that demands proven SAFETY rather than reporting a proven fault,
+  ;; because determinism is the contract. And an ordered `first match wins` is not the
+  ;; alternative on offer: ubergraph keeps out-edges in a SET.
+  (let [parts [(shape/state :a [:map] {:initial true})
+               (shape/state :b [:map])
+               (shape/state :c [:map] {:final true})
+               (shape/event :go [:map [:v [:enum :x :y :z]]] (constantly {}) [:map])]
+        problems-of (fn [& ts] (apply shape/problems (concat parts ts)))]
+
+    (testing "guards that cannot both hold are two legal edges"
+      (is (= [] (problems-of (shape/transition :a :go :b {:when [:map [:v [:= :x]]]})
+                             (shape/transition :a :go :c {:when [:map [:v [:= :y]]]})))))
+
+    (testing "guards that might both hold are refused, and the fault says which two"
+      (is (= [{:problem :ambiguous :from :a :event :go :to [:b :c] :verdict :unknown}]
+             (problems-of (shape/transition :a :go :b {:when [:map [:v [:enum :x :y]]]})
+                          (shape/transition :a :go :c {:when [:map [:v [:enum :y :z]]]})))))
+
+    (testing "an UNGUARDED edge beside a guarded one needs no special case — with no
+              :when there is nothing to refine, so it is disjoint from nothing"
+      (is (= [:ambiguous]
+             (mapv :problem
+                   (problems-of (shape/transition :a :go :b)
+                                (shape/transition :a :go :c {:when [:map [:v [:= :y]]]}))))))))
+
+(deftest an-event-may-not-declare-the-machinery-s-words-either
+  ;; An event's schema describes its PAYLOAD — what it carries. :id and :instance ride in
+  ;; the value so the step can read them, and the step conforms the event with those keys
+  ;; taken off, so declaring one would be describing something that is never checked.
+  (is (= [{:problem :reserved-declared :id :go :key :id}]
+         (shape/problems (shape/state :a [:map] {:initial true})
+                         (shape/state :b [:map])
+                         (shape/event :go [:map [:id :keyword]] (constantly {}))
+                         (shape/transition :a :go :b)))))

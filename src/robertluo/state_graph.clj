@@ -141,9 +141,14 @@
 
 (defn transition
   "An edge: from a state, on an event, to a state. What handles the event belongs to the
-   event, so two edges firing one event cannot disagree about it."
-  [from event to]
-  (shape/transition from event to))
+   event, so two edges firing one event cannot disagree about it.
+
+   {:when <a map schema>} GUARDS IT, so one event can lead two ways and the SHAPE says
+   which rather than a closure somewhere else. Two guarded edges on one [state, event]
+   must be provably disjoint or the shape is refused; an event no guard admits fires
+   nothing, which is `ignored`."
+  ([from event to] (shape/transition from event to))
+  ([from event to opts] (shape/transition from event to opts)))
 
 (defn shape
   "The parts as a graph, or a throw carrying what is wrong with them in ex-data.

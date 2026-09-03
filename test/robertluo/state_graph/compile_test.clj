@@ -432,3 +432,55 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a valid sees"
                           (step (c/initial g {}) {:id :go}))
         "and when it was not, the crossing says so rather than the handler finding a nil")))
+
+;;; ----------------------------------------------------------------------- guards
+
+(defn- judging
+  "One event leading two ways, which is the whole of what a guard is for. The verdict is
+   a fact the world reports; where it SENDS the machine is the shape's to say."
+  []
+  (shape/shape
+   (shape/state :written     [:map [:code :string]] {:initial true})
+   (shape/state :implemented [:map [:code :string]] {:final true})
+   (shape/state :faulted     [:map [:code :string] [:fault :string]])
+   (shape/event :judged [:map [:verdict [:enum :green :red]]
+                              [:fault {:optional true} [:string {:min 1}]]]
+                (fn [e] (select-keys e [:fault]))
+                [:map [:fault {:optional true} [:string {:min 1}]]])
+   (shape/transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+   (shape/transition :written :judged :faulted     {:when [:map [:verdict [:= :red]]]})
+   (shape/transition :faulted :judged :written     {:when [:map [:verdict [:= :green]]]})))
+
+(deftest a-guard-decides-which-edge-fires
+  (let [g (judging)
+        step (c/compile g)
+        s0 (c/initial g {:code "(defn answer [])"})]
+    (is (= :implemented (:id (step s0 {:id :judged :verdict :green}))))
+    (is (= {:id :faulted :code "(defn answer [])" :fault "it threw"}
+           (step s0 {:id :judged :verdict :red :fault "it threw"}))
+        "and the other way carries what that branch needs")))
+
+(deftest an-event-no-guard-admits-fires-nothing
+  ;; There is no :else, and none is wanted: the fallback every guarded FSM needs is one
+  ;; this library already had. A well-formed event no guard wants simply misses, the
+  ;; reduction stays total, and a layer above reports :fired false.
+  (let [g (judging)
+        step (c/compile g)
+        faulted (step (c/initial g {:code "x"}) {:id :judged :verdict :red :fault "boom"})]
+    (is (= faulted (step faulted {:id :judged :verdict :red :fault "again"}))
+        ":faulted only goes back on :green, so a second :red is a miss and not a move")
+    (is (false? (c/admits? (c/index g) faulted {:id :judged :verdict :red :fault "again"}))
+        "and `admits?` says so without taking the step, guards and all")
+    (is (true? (c/admits? (c/index g) faulted {:id :judged :verdict :green})))))
+
+(deftest a-refused-guard-and-a-malformed-event-are-not-the-same-thing
+  ;; Only one of the two may be a defect. A guard is a REFINEMENT of a schema the event
+  ;; must already satisfy, so where edges exist the event is conformed before the miss is
+  ;; believed — otherwise a typo in a verdict would be swallowed as an ordinary miss.
+  (let [g (judging)
+        step (c/compile g)
+        s0 (c/initial g {:code "x"})]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a valid event"
+                          (step s0 {:id :judged :verdict :amber})))
+    (is (= s0 (step s0 {:id :nothing-fires-this}))
+        "while an event with no edge at all is still the quiet miss it always was")))

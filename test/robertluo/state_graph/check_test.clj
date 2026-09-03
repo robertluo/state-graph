@@ -292,3 +292,74 @@
     (is (not= (reduce step init [{:id :sum} {:id :set :to 9}])
               (reduce step init [{:id :set :to 9} {:id :sum}]))
         "and the order really is observable — :total 2 one way, 18 the other")))
+
+;;; ----------------------------------------------------------------------- guards
+
+(defn- guarded
+  "Two guards on one event, and a third state whose way out is one guard only — so this
+   fixture has both an exhaustive branch and a deliberate FILTER in it."
+  []
+  (shape/shape
+   (shape/state :written     [:map] {:initial true})
+   (shape/state :implemented [:map] {:final true})
+   (shape/state :faulted     [:map])
+   (shape/event :judged [:map [:verdict [:enum :green :red]]] (constantly {}) [:map])
+   (shape/transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+   (shape/transition :written :judged :faulted     {:when [:map [:verdict [:= :red]]]})
+   (shape/transition :faulted :judged :written     {:when [:map [:verdict [:= :green]]]})))
+
+(deftest coverage-publishes-a-gap-and-never-faults-one
+  ;; `admits` and `disjoint` run against a PROBE — the event's schema with one key pinned
+  ;; to one value of a finite domain. Two structural checks off one subsumption function,
+  ;; which is what `views` did first.
+  (let [g (guarded)
+        verdict (fn [from] (->> (check/coverage g) (filter #(= from (:from %))) first))]
+    (is (= {:from :written :event :judged :verdict :yes} (verdict :written))
+        "every value of the verdict enum reaches an edge")
+    (is (= {:from :faulted :event :judged :verdict :no :witness {:verdict :red}}
+           (verdict :faulted))
+        "and where one reaches none, the value that proves it is published")
+
+    (testing "A GAP IS NOT A FAULT. An event no guard admits fires no edge, which is
+              `ignored` — legal, and exactly what a lone guard used as a filter is for"
+      (is (= [] (check/problems g))))))
+
+(deftest an-unguarded-edge-covers-whatever-the-others-refuse
+  (let [g (shape/shape
+           (shape/state :a [:map] {:initial true})
+           (shape/state :b [:map])
+           (shape/state :c [:map] {:final true})
+           (shape/event :go [:map [:v [:enum :x :y :z]]] (constantly {}) [:map])
+           (shape/transition :a :go :b {:when [:map [:v [:= :x]]]})
+           (shape/transition :b :go :c))]
+    (is (= [{:from :a :event :go :verdict :no :witness {:v :y}}
+            {:from :b :event :go :verdict :yes}]
+           (vec (check/coverage g))))))
+
+(deftest a-guarded-pair-is-not-reasoned-about-for-concurrency
+  ;; Where a guard decides the target, `both admitted` stops being a fact about the shape
+  ;; and starts depending on the events themselves, so the diamond cannot be looked up.
+  ;; :unknown is the honest answer; it costs only a licence that was never taken.
+  (let [g (shape/shape
+           (shape/state :idle [:map] {:initial true})
+           (shape/state :done [:map] {:final true})
+           (shape/event :tick [:map] (constantly {}) [:map])
+           (shape/event :go   [:map [:v [:enum :x :y]]] (constantly {}) [:map])
+           (shape/transition :idle :tick :idle)
+           (shape/transition :idle :go :done {:when [:map [:v [:= :x]]]})
+           (shape/transition :idle :go :idle {:when [:map [:v [:= :y]]]}))]
+    (is (= [{:in :idle :pair [:go :tick] :verdict :unknown}]
+           (vec (check/confluence g)))
+        "the guarded event appears in the listing, because leaving it out would be a
+         quiet gap in what this publishes")
+    (is (= {} (check/commuting g))
+        "and nothing is licensed off an :unknown")))
+
+(deftest a-guard-is-drawn-on-the-arrow
+  ;; Harel's own notation, event [guard], and a guard here is a SCHEMA — so it can be read
+  ;; rather than merely named. That is what makes the branch visible in the picture at all,
+  ;; which is the whole reason a guard is data and not a closure.
+  (let [src (check/dot (guarded))]
+    (is (str/includes? src "judged [verdict=:green]"))
+    (is (str/includes? src "judged [verdict=:red]"))
+    (is (not (str/includes? src "$eval")) "a closure in a picture is the failure mode")))

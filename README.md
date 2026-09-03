@@ -52,7 +52,9 @@ Three definitions and no more.
   map's schema, which is what makes the static check above possible, and a `{:sees …}` **view**
   where it does need to read the state. See below.
 - A **transition** is an edge: from a state, on an event, to a state. Two different events
-  may join the same pair of states, so the shape is a multi-digraph.
+  may join the same pair of states, so the shape is a multi-digraph. It may carry a
+  `{:when …}` **guard** — a schema over the event — so that one event leads two ways and
+  the shape says which. See below.
 - A state may **nest a whole machine** — `{:machine sh}` — which is how a machine big enough
   to matter stays readable. See below.
 
@@ -211,6 +213,65 @@ The limit, said plainly: **the escape is unconditional.** Nothing stops `:ship` 
 payment is half done, because that would be a guard and v1 has none. Deciding *when* is the
 producer's job — and the child's state is on every result, so a producer can see it.
 
+## A conditional transition: a guard is a schema
+
+One event, two ways, and **the branch is in the shape** rather than in a closure somewhere
+else:
+
+```clojure
+(sg/event :judged [:map [:verdict [:enum :green :red]]
+                        [:fault {:optional true} [:string {:min 1}]]]
+          (fn [e] (select-keys e [:fault]))
+          [:map [:fault {:optional true} [:string {:min 1}]]])
+
+(sg/transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+(sg/transition :written :judged :faulted     {:when [:map [:verdict [:= :red]]]})
+```
+
+`:when` is to a transition what `:sees` is to an event — an optional map schema, declared
+where the thing it constrains lives. It describes the event's **payload**: what the event
+carries, without `:id` and `:instance`, exactly as a state's schema describes the state
+without them.
+
+**A guard is a schema and not a predicate**, and that is the whole design. A schema is data,
+so a guard can be drawn on the arrow, and — the part that pays — it can be *reasoned about*:
+
+```clojure
+(sg/shape ...
+          (sg/event :go [:map [:v [:enum :x :y :z]]] (constantly {}) [:map])
+          (sg/transition :a :go :b {:when [:map [:v [:enum :x :y]]]})
+          (sg/transition :a :go :c {:when [:map [:v [:enum :y :z]]]}))
+;; ExceptionInfo: The shape has problems
+;;   {:problems [{:problem :ambiguous :from :a :event :go :to [:b :c] :verdict :unknown}]}
+```
+
+`:y` could fire either edge. This is **referential** — answerable from the parts alone — so
+it runs inside the constructor and a machine nobody can predict never gets built.
+`shape/problems` asks the same question of the parts without throwing.
+
+**Two edges on one `[state, event]` must be provably disjoint or the shape is refused.**
+This is the one check that demands proven *safety* rather than reporting a proven fault,
+because determinism is the contract: `compile` stays a lookup, and there is no ordered
+"first match wins" to fall back on. `shape/disjoint` proves it from a finite domain
+(`[:= v]`, `[:enum …]`), from disjoint types, from a closed map with no room for a key the
+other side insists on, or from numeric bounds that do not meet — and answers `:unknown`
+rather than guessing, which is why an unprovable pair is refused.
+
+**There is no `:else`.** An event no guard admits fires no edge, which is `ignored` — the
+reduction stays total and the stream reports `:fired false`. So a lone guard is a **filter**
+as well as a branch. A malformed event is still a defect and still throws: a guard refines a
+schema the event must already satisfy.
+
+`check/coverage` publishes whether the guards on a `[state, event]` leave a gap, with the
+value that proves it — and it is **never a fault**, because a gap is exactly what a filter
+is for:
+
+```clojure
+(check/coverage sh)
+;=> ({:from :faulted :event :judged :verdict :no :witness {:verdict :red}}
+;    {:from :written :event :judged :verdict :yes})
+```
+
 ## Reading the state: a declared view
 
 A handler takes the event alone, which is what keeps it reusable across states. When it does
@@ -341,10 +402,14 @@ Said plainly, because each is a design decision and not an oversight.
   Identity is the shape's to say, and a handler naming where it lands is asking for a
   transition it was not given. A handler may not raise an event either; a cascade is spelled
   as the caller feeding the next one.
-- **No guards.** A state and an event have exactly one target, which is what makes the
-  compiled step a lookup and every static check answerable. Branching is spelled as two
-  different events, which pushes the decision onto whoever produces the event — and it is
-  why a nested machine's escape is unconditional.
+- **A guard reads the event, never the state.** Branching on what the state already holds
+  is not expressible: the guard is over the *cause*, and the cause is the event. Where a
+  decision depends on the state, whoever produces the event reports it as a fact the guard
+  can read. It is also why a nested machine's escape is unconditional — "only when the
+  child has finished" is a fact about the state.
+- **Two edges on one event must be provably disjoint**, so a guard `disjoint` cannot
+  separate — two overlapping ranges, a bare predicate — is refused rather than resolved by
+  declaration order. There is no order to resolve it with: out-edges are a set.
 - **State-dependent update must be declared.** By default a handler answers from the event
   alone, which is what keeps it reusable. To compute from what the state already holds it
   declares a `{:sees …}` view — so the dependence is visible in the shape, narrowed to the
@@ -371,7 +436,7 @@ Said plainly, because each is a design decision and not an oversight.
 
 | | |
 |---|---|
-| `state` `event` `transition` `shape` | build a machine, nesting where it helps |
+| `state` `event` `transition` `shape` | build a machine, nesting and guarding where it helps |
 | `problems` `draw!` `dot` | look at it |
 | `compile` `initial` | the reduction |
 | `run` | the stream |

@@ -476,15 +476,155 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - EXTENDED 2026-08-31: the catalogue now carries the HANDLER and its :out as well as the event's
       schema, for the same reason and by the same mechanism. See :a-handler-belongs-to-the-event."
 
-   :v1-is-deterministic
-   "DECIDED 2026-08-30. NO GUARDS. A state and an event have exactly one target, which is what
-    makes `compile` a LOOKUP rather than a search and what makes every static check answerable.
-    - The consequence, said out loud: :submit -> :accepted | :rejected is INEXPRESSIBLE. Branching
-      must be spelled as two different events, which pushes the decision onto whoever PRODUCES the
-      event, and that is sometimes the wrong place. This is the first thing to revisit.
-    - It costs nothing to defer: an edge already carries an attribute map, so a guard is a key in
-      it and not a change of shape. What it will cost when it comes is the compiler (an ORDERED
-      search over a node's out-edges) and the checker (a considerably harder question)."
+   :a-guard-is-a-schema-over-the-event
+   "DESIGNED WITH THE AUTHOR AND BUILT 2026-09-03. How a conditional transition is spelled.
+    - WHAT IT REPLACES, and the entry it replaces is GONE at the author's word, so what that one
+      said is here instead. :v1-is-deterministic, DECIDED 2026-08-30: NO GUARDS, a state and an
+      event having exactly one target, which made `compile` a LOOKUP rather than a search and
+      every static check answerable — at the cost that :submit -> :accepted | :rejected was
+      INEXPRESSIBLE and branching had to be spelled as two different events, pushing the decision
+      onto whoever PRODUCED the event. It called itself the first thing to revisit, and this is
+      that. DETERMINISM IS NOT WHAT WAS GIVEN UP: it stays the contract, and the whole of the
+      change is that it is now PROVEN rather than had for free.
+    - WHAT STARTED IT, the author's: `a hidden transition is something we want to avoid`.
+      ../coder's machine is {:shape <a graph> :act <state id -> fn>} — A MAP WITH TWO HALVES AND
+      ONLY ONE OF THEM IS A GRAPH — and its `judging` picks between the two edges out of :written
+      with an ordinary `if`. The drawing shows both arrows and NOTHING SAYS WHICH ONE FIRES;
+      neither `problems` nor `subsumption` can see the `if`. That is the fault coder's own
+      notebook diagnoses in its earlier version — `a transition hidden inside an event handler` —
+      moved one level out and given a nicer name.
+    - THE DISTINCTION IS EXTERNAL AGAINST HIDDEN. A person clicking approve is EXTERNAL and the
+      machine never claimed to model them. A step of your own workflow that runs the code and
+      then picks the edge is HIDDEN. And v1 makes the second unavoidable: with the target a
+      function of [state, event-id] alone, A DATA-DEPENDENT BRANCH CANNOT BE IN THE SHAPE AT ALL,
+      so `no hidden transitions` and `no guards` cannot both hold.
+    - THE GRAMMAR: {:when <a map schema>} on a transition, and nothing else added. :when IS TO A
+      TRANSITION WHAT :sees IS TO AN EVENT — both an optional map schema in the options map, each
+      declared where the thing it constrains lives. :sees projects the STATE for the handler;
+      :when filters the EVENT for the edge.
+        (transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+        (transition :written :judged :fault       {:when [:map [:verdict [:= :red]]]})
+      WHAT WAS TURNED DOWN WAS A MAP WITH THREE MEANINGS IN IT — a dispatch key beside
+      case->target pairs beside an :else — refused by the author on sight and rightly: the tiers
+      are not grammar, they are HOW MUCH THE CHECKER CAN PROVE, which is the same three answers
+      `admits` already gives.
+    - WHY A SCHEMA AND NOT A PREDICATE. A schema is DATA — drawable, storable, comparable, and
+      partially decidable by machinery already here. A predicate is a closure, which is the thing
+      being escaped. And an `:fn` carries a :description, so ONE EXPRESSION IS BOTH THE CHECK AND
+      THE LABEL: the repository's own cross-component rule, and it means a named guard needs no
+      naming mechanism.
+    - WHAT THE OTHER LIBRARIES DO, surveyed the same day. THREE FAMILIES.
+      (A) ORDERED CANDIDATES AND A PREDICATE — UML/Harel, SCXML `cond`, XState, clj-statecharts,
+      python-transitions, Spring: [state, event] yields a LIST, evaluated in DOCUMENT ORDER, first
+      passing guard wins, an unguarded last entry the conventional fallback. The part worth
+      stealing is not the guard but that XSTATE NAMES IT — `guard: isGreen` is a string in a
+      serializable config while the function lives in a separate setup map, which is what lets
+      their visualizer draw EVENT [isGreen]. Which is Harel's own notation, event [guard] /
+      action, unchanged since 1987.
+      (B) PATTERN MATCHING IN HOST CODE — gen_statem, Akka, Rust statig: the branch is ordinary
+      code and there is no graph to check, accepted deliberately because none of them promised a
+      drawable one. gen_statem matches on the EVENT'S CONTENT, which is this proposal with a
+      language's pattern matcher in place of a schema.
+      (C) DETERMINIZE ON THE INPUT VALUE — Automat compiling an NFA to a DFA, and table-driven
+      lexers generally: the table is keyed by input VALUE and nondeterminism is resolved before
+      anything runs. This proposal is in C.
+    - AND FAMILY A IS THE ONE THIS GRAPH CANNOT HAVE, measured rather than assumed:
+      ubergraph/core.clj:284 stores node-info as {:out-edges {dest-id #{edge}} :in-edges ...} —
+      A SET. There is no edge order to recover, so DOCUMENT-ORDER FIRST-MATCH IS NOT
+      REPRESENTABLE, and a priority number would be order smuggled back in as data. Determinism
+      here has to be PROVEN rather than ordered — the same shape of constraint as
+      :the-event-catalogue-is-denormalised, forced by ubergraph and not chosen.
+    - HENCE THE RULE, sharper for being forced: DECIDABLE GUARDS BRANCH, AND AN :fn GUARD MAY
+      ONLY APPEAR ALONE on its [from event]. A lone :fn is a FILTER — `:again only while under
+      budget` — and it cannot threaten the lookup, having nothing to be ambiguous with.
+    - :ambiguous INVERTS, AND SHOULD. Everywhere else this checker reports only PROVEN faults;
+      here it must demand PROVEN SAFETY — two edges on one [from event] whose guards are not
+      provably disjoint are a fault. The asymmetry is principled: determinism is the CONTRACT and
+      not a nicety, and a shape that cannot prove it is deterministic is not one.
+    - THERE IS NO :else, and it is the fallback concept the whole of family A needs and this
+      library already had: no guard matching means no edge admits the event, which is `ignored` —
+      the reduction stays total and the stream says :fired false. See
+      :an-ignored-event-is-not-an-error-but-is-not-silent.
+    - CLOSED MAPS ARE THE AUTHOR'S CORRECTION, and they make the checker STRONGER. `Absence is
+      awkward to guard on` was said and is wrong: {:closed true} is already this library's
+      vocabulary — `patch-schema` closes a map for exactly this reason. It gives `disjoint?` a
+      SECOND decidable rule beside `a shared key whose value schemas are disjoint`: A CLOSED
+      SCHEMA THAT DOES NOT NAME k IS DISJOINT FROM ONE THAT REQUIRES k. So `green means no :fault
+      key` is decidable rather than a nudge towards inventing a tag.
+      AND THE PAYLOAD CONVENTION IS THE ANSWER TO WHAT THAT COSTS, the author's, decided
+      2026-09-03: A GUARD DESCRIBES THE EVENT WITHOUT THE MACHINERY KEYS. An event map carries
+      :id, and :instance where a run is named — :sub is a state's alone — so a guard is checked
+      against (dissoc event :id :instance), exactly as a state's schema describes the state
+      without :id, :instance and :sub. One convention, applied in a third place, and without it
+      a closed guard would fail on :id every time.
+      AND IT CANNOT STOP AT THE GUARD, which is the part worth knowing before agreeing to it.
+      An event's own :schema is conformed against the WHOLE event map today and gets away with
+      it because malli maps are open. Leave that alone and the exhaustiveness check compares a
+      guard over the PAYLOAD against a schema over the WHOLE MAP — TWO SCHEMAS ABOUT DIFFERENT
+      VALUES, which is the drift :a-partial-subsumption-checker exists to refuse: what is checked
+      has to be what runs. So the event's :schema is conformed against the payload too — which
+      also makes a CLOSED EVENT SCHEMA usable, an event carrying exactly these keys and no more,
+      unwritable today.
+      WHAT THAT BREAKS is small and is probably a correction: an event declaring :id or :instance
+      in its own schema validates today and would stop. :reserved-declared checks STATES ONLY, so
+      the symmetric check on events is part of this change rather than an extra one.
+    - THE CHECKERS ARE THREE, designed 2026-09-03, and NONE OF THEM IS NEW MACHINERY.
+      `accepted` IS THE SIBLING OF `produced` and exists for the same reason — what is checked
+      has to be what runs. It is the schema of the events a transition FIRES ON: the event's
+      payload schema with the edge's :when merged over it, so
+      (mu/merge [:map [:verdict [:enum :green :red]]] [:map [:verdict [:= :green]]]) is the
+      refinement. BOTH CHECKS BELOW RUN ON IT and never on the bare :when, or a guard the event
+      schema already contradicts would look satisfiable. `produced` is what comes OUT of a
+      transition and `accepted` is what goes IN.
+      `disjoint` IS THE SIBLING OF `admits`: the same three answers, and the same two levers —
+      the seven pairwise-disjoint primitives, and a finite domain that can simply be TRIED. One
+      inversion, and it is the whole structural difference: THE MAP COMBINATOR FLIPS. `sub-map`
+      is an AND over keys, every one of which must be admitted; `dis-map` is an OR, ONE
+      conflicting key being enough. A key OPTIONAL IN BOTH conflicts with nothing, a value being
+      free to omit it.
+      AND :no COMES WITH A WITNESS, which is the part worth having. [:= v] against a schema that
+      accepts v does not merely fail to prove disjointness, it PROVES OVERLAP and hands over the
+      value — so an :ambiguous fault carries {:witness {:verdict :green}}: here is an event that
+      would fire two edges. For maps the same trick assembled — collect the per-key witnesses,
+      build the candidate map, m/validate it against both. A VALIDATED WITNESS IS A PROOF and not
+      an inference, which is the `just try it` lever `sub` already uses for a finite domain.
+      `coverage` IS THE SIBLING OF `subsumption` AND `views`, one verdict per [from event] group,
+      and it is the other two RUN AGAINST A PROBE — the event schema with one key pinned to one
+      value of a finite domain. :no where every guard is `disjoint` from probe(k,v), a PROVEN GAP
+      carrying {k v} as its witness; :yes where some guard `admits` probe(k,v) for every v, or
+      where any edge in the group is unguarded; :unknown otherwise. Two structural checks off one
+      subsumption function for the SECOND time — `views` did it first, see :what-visibility-taught.
+    - `problems` GAINS ONE FAULT AND NOT TWO. :ambiguous, restated: two edges on one [from event]
+      whose `accepted` schemas are not provably disjoint. COVERAGE IS PUBLISHED AND NEVER
+      FAULTED, because a gap means no edge admits the event, which is `ignored` — legal,
+      first-class, and exactly what a lone :fn filter is FOR. Faulting it would make `problems`
+      report a SUSPICION, which is the one thing it has never done.
+    - WHAT IT COSTS AT RUNTIME: compile's index maps [from event] to a small VECTOR of candidates,
+      each tried with m/validate; disjointness is what makes set order irrelevant, so there is
+      nothing to sort and nothing to order. One unguarded candidate is today's path at today's
+      cost.
+    - NUMERIC BOUNDS ARE THE THIRD LEVER, taken 2026-09-03 at the author's word. Without it
+      [:int {:max 2}] against [:int {:min 3}] is SAME-TYPE, so `disjoint` answers :unknown and the
+      pair is REFUSED as a branch — which is precisely the `attempts > 3` case, forced back into
+      being a tag the driver reports for no reason but the checker's ignorance. With it, maxA <
+      minB is a PROOF: compare :min/:max on numeric schemas, and malli's :> :>= :< :<= comparator
+      schemas, which carry their bound as their child. Numeric bounds are the second-commonest
+      guard after tags, and a checker that turned every one of them into a tag would be refusing
+      what malli can already decide.
+    - THE DRAWING IS HAREL'S: judged [:verdict :green], or the :description where there is one,
+      again [under budget]. A guard is STRUCTURAL — it changes where you go — which is the test
+      :a-node-is-labelled-by-its-id set for anything wanting into a label. The form is truncated,
+      the 1,183-character lesson holding.
+    - WHAT IS NOT TAKEN: A GUARD OVER THE STATE. A guard is over the CAUSE, and the cause is the
+      event. THE DRIVER REPORTS A FACT AND THE SHAPE DECIDES WHAT THE FACT MEANS is the whole
+      move; coder's driver today does both, and turning `a fault string exists` into `go to
+      :fault` is precisely the hidden transition. A {:sees}-style guard over the state is a DOOR,
+      named and not designed — it would be the machine deciding, which
+      :an-event-is-the-only-way-a-transition-happens refuses.
+    - BUILT THE SAME DAY, and README.md says so first, as :source-of-truth requires: the
+      transition bullet, a section of its own, and two limits where `No guards` used to be.
+      What the building taught, including one hole this design did not see, is in
+      :what-guards-taught."
 
    :parallel-is-across-instances
    "DECIDED 2026-08-31. `Automatically parallel` means ACROSS INSTANCES and nothing else: events
@@ -616,7 +756,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     - THE COST, said out loud: A -submit-> B and C -submit-> D SHARE one handler and one :out, where
       before they could differ. The static check gets harder for it, and rightly — submit's :out must
       now satisfy B's schema AND D's. Where two edges genuinely need different data, that is two
-      events, which is what :v1-is-deterministic already says about branching."
+      events, which is what this library says about branching wherever a guard cannot be
+      declared — see :a-guard-is-a-schema-over-the-event."
 
    :an-ignored-event-is-not-an-error-but-is-not-silent
    "DECIDED 2026-08-31. An event the current state has no transition for is NOT AN ERROR — the
@@ -990,9 +1131,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       built out of already-built children, so none can contain itself.
     - THE COST, said out loud: THE ESCAPE IS UNCONDITIONAL. Nothing stops the parent leaving
       while the child is half done, because `only when the child has finished` is a GUARD and
-      :v1-is-deterministic has none. Deciding when is the producer's job — the same answer v1
-      gives to branching — and the child's state is on every result, so a producer can see what
-      it needs. Turned down deliberately: making the parent's edges wait for a final child,
+      there are none. AND :a-guard-is-a-schema-over-the-event WOULD NOT CHANGE IT, which is worth
+      knowing before anyone expects it to: a guard there is over the EVENT, and `the child has
+      finished` is a fact about the STATE. Deciding when is the producer's job — the same answer
+      this library gives to branching — and the child's state is on every result, so a producer
+      can see what it needs. Turned down deliberately: making the parent's edges wait for a final child,
       which would have made ABORT inexpressible, and abort is the commoner need.
     - THE DOOR, NAMED AND NOT DESIGNED: a node could declare where to go when its child
       FINISHES — {:machine sh :done :shipped} — which is the statechart done-transition and
@@ -1128,6 +1271,14 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     NOTHING IS UNBUILT. What is left is not a layer but a licence not taken: async/drive serialises
     always, and the concurrency `check/commuting` proves to be safe is a GAP with a reason, recorded
     in :two-events-in-flight-at-once.
+    AND A TRANSITION MAY BE GUARDED, 2026-09-03, which is the one thing the deleted
+    :v1-is-deterministic said this library would never do: {:when <a map schema>} on a transition,
+    so one event leads two ways and THE SHAPE SAYS WHICH. `shape/disjoint` proves two guards on
+    one [state, event] can never both fire and the constructor refuses them where it cannot;
+    `check/coverage` publishes whether they leave a gap, and never faults one, a gap being
+    `ignored` and legal. The guard is drawn on the arrow in Harel's own notation. See
+    :a-guard-is-a-schema-over-the-event and :what-guards-taught. The counts above are older than
+    this: it is 88 tests and 257 assertions now, and 41 instrumented functions.
     AND THERE IS A TUTORIAL, 2026-09-01, this component being a release candidate:
     notebook/tutorial.clj, a Clay notebook rendered by `clojure -X:notebook` to docs/tutorial.html,
     which is gitignored because it is derived. It works the facade through in order and ends with a
@@ -1473,6 +1624,57 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       manifold on the classpath of the test: a child handler answering a `delay` is dereferenced
       by the synchronous `then` through two levels of nesting. Same trick as
       :what-the-handler-move-taught, one layer deeper."
+
+   :what-guards-taught
+   "VERIFIED BY RUNNING on 2026-09-03, building :a-guard-is-a-schema-over-the-event.
+    - `disjoint` COULD NOT LIVE BESIDE `admits`, which the design had assumed it would. The
+      ambiguity check is REFERENTIAL — a shape whose determinism cannot be proven must not be
+      CONSTRUCTIBLE, so it has to answer before the graph exists — and `check` sits above
+      `shape`. So `primitive-types` and `entries-of` MOVED DOWN into shape, and check now reads
+      them from there. Subsumption and disjointness are siblings A LAYER APART, one asked about
+      the built graph and one answerable from the parts, over one vocabulary. THE LESSON: where
+      a check lives is decided by WHEN IT MUST ANSWER and not by what it resembles.
+    - `dis-map` NEVER ANSWERS :no, so the witness the design promised for :ambiguous is not
+      there. Proving two MAP schemas OVERLAP needs a VALUE, and one shared key agreeing is not
+      one — another key may still refuse. The fault carries :verdict instead, which at map
+      level is always :unknown. THE WITNESS DID LAND IN `coverage`, where the probe pins one key
+      to one value so the value is in hand: a gap publishes {:witness {:verdict :red}}. Same
+      idea, and it works only where something CONSTRUCTS the value.
+    - AND A HOLE THE DESIGN DID NOT SEE, found by running it: A MALFORMED EVENT THAT FAILED
+      EVERY GUARD LOOKED LIKE AN ORDINARY MISS. Selection happens before `conform!`, so :amber
+      where the enum says :green or :red matched no candidate and came back as `ignored` —
+      conflating a DEFECT with a legitimate miss, which is the one thing this library is careful
+      about everywhere else. Fixed by conforming against the group's event schema when nothing
+      matched: A GUARD IS A REFINEMENT OF A SCHEMA THE EVENT MUST ALREADY SATISFY, so a bad
+      event throws and a well-formed one no guard wanted is still ignored. `candidates` is a
+      separate reading for exactly this, so `entry` and the fall-through cannot come to disagree
+      about whether there was an edge to refuse.
+    - THE PURE LIFT AND A TAG DO NOT COMPOSE, which is the first friction a user meets. A
+      discriminating key is ROUTING INFORMATION and the target state does not hold it, so a
+      pure-lift handler answers it and the CLOSED patch schema refuses it — correctly, by
+      :an-event-is-the-only-way-a-transition-happens. A guarded event therefore usually spells
+      its handler out, (fn [e] (select-keys e [...])), or its targets declare the tag. Neither
+      rule is wrong; they simply meet here, and it is better met on this page than in anger.
+    - NUMERIC BOUNDS COST SIX LINES, as predicted, and cover both spellings malli has: the
+      :min/:max PROPERTIES of :int and :double, and the COMPARATOR schemas :> :>= :< :<=, which
+      carry their bound as their only child. [:int {:max 2}] against [:int {:min 3}] is :yes;
+      two ranges that OVERLAP are :unknown and not :no, proving overlap needing a value again.
+    - THE NUMBERS: the suite went 77 tests to 88, and 257 assertions, both suites green. The
+      instrument count went 36 to 41 and agrees with the independent ns-publics count, so no
+      public function was added without a schema. clj-kondo is CLEAN over src, test and
+      notebook.
+    - AND clj-kondo IS AN ALIAS AND NOT A BINARY, which cost a wrong claim before the author
+      corrected it: `clojure -M:lint --lint src test notebook`, the alias being in every
+      component's deps.edn with :replace-deps. There is no `clj-kondo` on the path and none is
+      wanted. The root CLAUDE.md's ONE NAME PER JOB list names the test, repl and notebook
+      commands and NOT this one, which is why it was looked for in the wrong place.
+    - THE TUTORIAL GAINED A SECTION, and writing it found two bugs the suite could not: both
+      `problems` examples asked the FACADE, whose `problems` takes a BUILT shape — and
+      :ambiguous is REFERENTIAL, so the constructor throws and there is no shape to ask about.
+      The page now asks `shape/problems` of the PARTS, which is what that layer is for, and the
+      README shows the throw instead, that file's own idiom for a referential fault. RENDERING
+      THE NOTEBOOK IS WHAT CAUGHT IT: `clojure -X:notebook` runs every cell, and a tutorial
+      example that cannot run is a lie a test suite will never see."
 
    :graphviz-and-the-devenv
    "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is

@@ -10,7 +10,8 @@
    writing the machine, and they are the checks no other FSM library has.
 
    Requires the shape, ubergraph and malli."
-  (:require [malli.core :as m]
+  (:require [clojure.string :as str]
+            [malli.core :as m]
             [malli.util :as mu]
             [robertluo.state-graph.shape :as shape]
             [ubergraph.alg :as alg]
@@ -78,28 +79,18 @@
 
 ;;; ------------------------------------------------------------------ subsumption
 
-(def ^:private disjoint-types
-  "Types no single value belongs to two of, so a produced one and a wanted one that
-   differ here is a PROOF and not a guess. Deliberately small: enough to catch the
-   common mistake — a handler answering a string where the target wants an int — and
-   not a lattice of every type malli has. :double is in only because malli's :int
-   rejects a double and its :double rejects an int, which was checked rather than
-   assumed."
-  #{:int :double :string :keyword :boolean :symbol :uuid})
+;; `primitive-types` and `entries-of` live in `shape` and not here. They are pure malli
+;; reasoning with no graph in them, and the REFERENTIAL checks need them: `disjoint`, which
+;; proves two guards on one [state, event] can never both fire, has to answer before the
+;; shape exists. So subsumption and disjointness are siblings a layer apart — one asked
+;; about the built graph, one answerable from the parts — reading the same vocabulary.
 
 (declare ^:private sub)
 
-(defn- entries-of
-  "{k {:optional? bool :schema S}} for a :map schema. m/children gives [k props child]
-   triples with props nil where there are none."
-  [s]
-  (into {} (for [[k props child] (m/children s)]
-             [k {:optional? (boolean (:optional props)) :schema child}])))
-
 (defn- sub-map
   [target produced]
-  (let [t (entries-of target)
-        p (entries-of produced)
+  (let [t (shape/entries-of target)
+        p (shape/entries-of produced)
         closed? (:closed (m/properties target))
         verdicts
         (concat
@@ -134,7 +125,7 @@
       (= := pt) (if (m/validate target (first (m/children produced))) :yes :no)
       (= :enum pt) (if (every? #(m/validate target %) (m/children produced)) :yes :no)
       (and (= :map tt) (= :map pt)) (sub-map target produced)
-      (and (disjoint-types tt) (disjoint-types pt)) :no
+      (and (shape/primitive-types tt) (shape/primitive-types pt)) :no
       :else :unknown)))
 
 (defn admits
@@ -149,7 +140,7 @@
    What it can PROVE:
    - a required key of the target that the produced value may not have — the common
      bug by a distance, a handler that forgot to set something;
-   - a value whose type cannot be the wanted one (see disjoint-types);
+   - a value whose type cannot be the wanted one (see shape/primitive-types);
    - a [:= v] or an [:enum ...], where the values are finite and can simply be tried."
   {:malli/schema [:=> [:cat shape/Schema shape/Schema] [:enum :yes :no :unknown]]}
   [target produced]
@@ -210,13 +201,85 @@
                 (admits sees (shape/enter-schema sh from))
                 :undeclared)}))
 
+(defn- domains
+  "{k #{v}} for every key an event INSISTS on whose values are FINITE — the only keys a
+   coverage question can be decided on. An OPTIONAL key is no use: an event may leave it
+   out, and no probe on it would say anything about that event."
+  [s]
+  (into {} (for [[k e] (shape/entries-of s)
+                 :let [f (shape/finite-values (:schema e))]
+                 :when (and f (not (:optional? e)))]
+             [k f])))
+
+(defn- covers
+  "The verdict for one group of edges sharing a source and an event."
+  [ts]
+  (let [schema (:schema (first ts))
+        guards (mapv shape/accepted ts)
+        ;; AN UNGUARDED EDGE TAKES EVERYTHING THE OTHERS REFUSE, so there is nothing to
+        ;; decide and no finite key needed to decide it on. Without this the general path
+        ;; answers :unknown for the commonest group there is — one plain edge whose event
+        ;; carries nothing to pin.
+        probe  (fn [k v] (mu/merge schema [:map [k [:= v]]]))
+        per-key
+        (for [[k dom] (domains schema)]
+          (let [answers (for [v (sort-by str dom)
+                              :let [p (probe k v)]]
+                          (cond
+                            (some #(= :yes (admits % p)) guards) :covered
+                            (every? #(= :yes (shape/disjoint % p)) guards) [:gap v]
+                            :else :unknown))]
+            (cond
+              (every? #{:covered} answers) {:verdict :yes}
+              (some vector? answers) {:verdict :no
+                                      :witness {k (second (first (filter vector? answers)))}}
+              :else nil)))]
+    (or (when (some (complement :when) ts) {:verdict :yes})
+        (first (filter (comp #{:yes} :verdict) per-key))
+        (first (filter (comp #{:no} :verdict) per-key))
+        {:verdict :unknown})))
+
+(defn coverage
+  "Do the guards on a [state, event] leave a GAP? One verdict per group of edges sharing a
+   source and an event, as PLAIN DATA — and NEVER A FAULT, which is the point of it.
+
+   IT IS `admits` AND `disjoint` RUN AGAINST A PROBE — the event's schema with one key
+   pinned to one value of a finite domain. Where some guard admits every event matching the
+   probe, that value is covered; where EVERY guard is disjoint from it, that value can
+   reach no edge at all and is a PROVEN GAP, published with the witness that shows it.
+   Two structural checks off one subsumption function, which is what `views` did first.
+
+   :yes where an edge in the group is UNGUARDED — it takes everything the others refuse —
+   or where every value of some insisted-on finite key reaches an edge. :no with a
+   :witness where some value reaches none. :unknown where no finite key decides it.
+
+   AND A GAP IS NOT A FAULT, which is why nothing here reaches `problems`. An event no
+   guard admits fires no edge, and that is `ignored` — legal, first-class, and exactly what
+   a lone guard used as a FILTER is for. Reporting it as a fault would make `problems`
+   publish a suspicion, which it has never done."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (for [[[from ev] ts] (sort-by key (group-by (juxt :from :event) (shape/transitions sh)))]
+    (into {:from from :event ev} (covers ts))))
+
 ;;; ------------------------------------------------------------------ confluence
 
 (defn- targets
   "{[state-id event-id] -> target-id}. What compile's index is, with everything the
-   step needs at runtime left out."
+   step needs at runtime left out.
+
+   GUARDED EDGES ARE LEFT OUT TOO, because with a guard there is no `the` target: which
+   way the machine goes depends on the event and not on the shape alone, so there is
+   nothing here to look up. `commutes` refuses to reason about such a pair rather than
+   reading a target that would be one of two."
   [sh]
-  (into {} (map (juxt (juxt :from :event) :to)) (shape/transitions sh)))
+  (into {} (comp (remove :when) (map (juxt (juxt :from :event) :to)))
+        (shape/transitions sh)))
+
+(defn- guarded
+  "The events some edge guards. A pair involving one of them is :unknown to `commutes`."
+  [sh]
+  (into #{} (comp (filter :when) (map :event)) (shape/transitions sh)))
 
 (defn- declared-out
   "{event-id -> its :out, or nil}. The event's and not the edge's, so one entry serves
@@ -243,11 +306,18 @@
    the write sets alone cannot see it. Measured: before this, a pair whose writes were
    {:total} and {:n} was licensed while one of them read :n, and the two orders answered
    :total 2 and :total 18."
-  [tgt out sees s a b]
+  [tgt guards out sees s a b]
   (let [ta (tgt [s a]), tb (tgt [s b])]
-    (if-not (and ta tb)
+    (cond
+      ;; A GUARDED EVENT IS NOT REASONED ABOUT HERE. Where a guard decides the target,
+      ;; `both admitted` stops being a fact about the shape — it depends on the events
+      ;; themselves — so the diamond cannot be looked up at all. :unknown is the honest
+      ;; answer, and it costs only a licence that was never taken anyway.
+      (or (guards a) (guards b)) :unknown
+      (not (and ta tb))
       ;; not both admitted here, so they are not a concurrent pair at all
       :no
+      :else
       (let [x1 (tgt [ta b]), x2 (tgt [tb a])
             oa (out a), ob (out b)
             ;; an event with no view reads nothing, so a shape with no views is unaffected
@@ -302,14 +372,20 @@
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
   (let [tgt (targets sh)
+        guards (guarded sh)
         out (declared-out sh)
         sees (declared-sees sh)
-        here (fn [s] (sort (for [[[f e] _] tgt :when (= f s)] e)))]
+        ;; read from the edges and not from `targets`, so a GUARDED event still appears in
+        ;; the listing — as :unknown, which is coverage, where leaving it out would be a
+        ;; quiet gap in what this publishes.
+        here (fn [s] (sort (distinct (for [t (shape/transitions sh)
+                                           :when (= s (:from t))]
+                                       (:event t)))))]
     (for [s (sort (shape/states sh))
           :let [es (here s)]
           a es b es
           :when (neg? (compare a b))]
-      {:in s :pair [a b] :verdict (commutes tgt out sees s a b)})))
+      {:in s :pair [a b] :verdict (commutes tgt guards out sees s a b)})))
 
 (defn commuting
   "{state-id #{#{event-a event-b}}} — only the pairs PROVEN to commute, as plain data a
@@ -389,6 +465,31 @@
          (when (shape/final? sh id) " ◼")
          (when child (str " ⊞ " (count (shape/states child)) " states")))))
 
+(defn- guard-label
+  "A guard, short enough to sit on an arrow. Harel's own notation is event [guard], and a
+   guard here is a SCHEMA, so it can be read rather than named: `verdict=:green` where the
+   key is pinned to one value, `verdict∈[:green :red]` where it is a small set, and the
+   schema form otherwise. A :description wins over all three, being what the author wrote.
+
+   TRUNCATED, and not as a nicety: a 1,183-character label once made `dot -Tpng` print a
+   warning and write a ZERO-BYTE file. See :a-node-is-labelled-by-its-id."
+  [w]
+  (let [t (or (:description (m/properties w))
+              (str/join ", "
+                        (for [[k e] (shape/entries-of w)
+                              :let [f (shape/finite-values (:schema e))]]
+                          (cond
+                            (= 1 (count f)) (str (name k) "=" (pr-str (first f)))
+                            (seq f) (str (name k) "∈" (pr-str (vec (sort-by str f))))
+                            :else (str (name k) " " (pr-str (m/form (:schema e))))))))]
+    (cond-> t (< 40 (count t)) (-> (subs 0 39) (str "…")))))
+
+(defn- edge-label
+  [sh e]
+  (let [w (uber/attr sh e :when)]
+    (str (name (uber/attr sh e :event))
+         (when w (str " [" (guard-label w) "]")))))
+
 (defn labelled
   "The shape with its attributes replaced by things a person can read. ubergraph's own
    :auto-label pprints the whole attribute map, which here is a COMPILED malli schema
@@ -396,7 +497,7 @@
   {:malli/schema [:=> [:cat shape/Shape] shape/Shape]}
   [sh]
   (reduce (fn [g e]
-            (uber/set-attrs g e {:label (name (uber/attr sh e :event))}))
+            (uber/set-attrs g e {:label (edge-label sh e)}))
           (reduce (fn [g id]
                     (uber/set-attrs g id (cond-> {:label (node-label sh id)}
                                            (shape/final? sh id) (assoc :shape :doublecircle))))
