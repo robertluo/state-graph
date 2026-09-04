@@ -141,11 +141,19 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     this list is GONE, see :nothing-is-persisted-here.
 
     robertluo.state-graph          — THE FACADE: the vocabulary a user needs, and the only require
-                                     an application should have. Ten functions — state, event,
+                                     an application should have. TWELVE functions — state, event,
                                      transition, shape; problems, draw!, dot; compile, initial;
-                                     run — being the constructors, the checks, and the two doors.
-                                     Requires everything below it, `check` included, which is what
-                                     one require costs. See :the-facade-is-a-vocabulary-and-two-doors
+                                     run; step, drive — being the constructors, the checks, and the
+                                     THREE doors. Requires everything below it, `check` included,
+                                     which is what one require costs.
+                                     See :the-facade-is-a-vocabulary-and-two-doors
+    robertluo.state-graph.drive    — THE CRANK: the door that FINDS its own events, added 2026-09-04
+                                     because `:report` had been declared with nothing here consuming
+                                     it, so two applications wrote the same driver. awaits, awaiting,
+                                     where, advance, step, drive. Synchronous, one machine, and it
+                                     RECURSES INTO A NESTED CHILD and takes a join `confluence`
+                                     proves. Requires shape, compile and check — a SIBLING of async
+                                     and not above it. See :the-crank-is-the-door-report-was-missing
     robertluo.state-graph.async    — A DEFAULT, not the core: manifold streams. Takes a compiled
                                      step FUNCTION, a way to make a first state, a way to make an
                                      OUTPUT VALUE and a `Licence`, all as VALUES, and knows nothing
@@ -525,8 +533,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     manifold on the only path there is. IT IS A PROPERTY AND NOT A SPEECH — `the-two-doors-agree`."
 
    :the-facade-is-a-vocabulary-and-two-doors
-   "TEN FUNCTIONS: state, event, transition, shape; problems, draw!, dot; compile, initial; run. ONE
-    STREAM DOOR AND NOT TWO, `fan` already subsuming `drive`. `problems` IS OPT-IN AND `shape` DOES NOT
+   "TWELVE FUNCTIONS AND THREE DOORS since 2026-09-04: state, event, transition, shape; problems,
+    draw!, dot; compile, initial; run; step, drive. The third door is the CRANK — see
+    :the-crank-is-the-door-report-was-missing, which is also the argument for breaking a surface
+    that had absorbed nesting, completion and the licence without gaining one. ONE
+    STREAM DOOR AND NOT TWO, `fan` already subsuming `async/drive`. `problems` IS OPT-IN AND `shape` DOES NOT
     RUN IT, because A SHAPE YOU CANNOT BUILD IS A SHAPE YOU CANNOT DRAW. RE-EXPORTS ARE DELEGATING
     defns AND NEVER def ALIASES, or malli stops guarding them, and they carry no schema of their own.
     THE FACADE REQUIRES `check`, taken knowingly. NESTING, THE COMPLETION TRANSITION AND THE LICENCE
@@ -562,7 +573,47 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     AMENDS the README rather than contradicting it. datahike left deps.edn and the store namespace left
     :layering, never having been built. WHAT IT COST is the one thing it broke: an audit trail must know
     which event produced which state, which is what forced
-    :the-output-is-a-transition-and-not-a-state."}
+    :the-output-is-a-transition-and-not-a-state."
+
+   :the-crank-is-the-door-report-was-missing
+   "THE AUTHOR'S, 2026-09-04: `again, drive and step, if you have to live with them, add them to the
+    state-graph api` — said after watching a SECOND driver be written in a consumer, and after
+    `park is a general ability, not something every workflow needs to implement by itself`.
+    A DECLARATION WITH NOTHING HERE CONSUMING IT IS HALF A FEATURE, and that was `:report`: the
+    shape could say how an event is FOUND and nothing in this library ever went and found one, so
+    every application wrote the same loop — what does this state await, which of those can I
+    produce, what does the report read, apply it, go round. That loop is `:report`, `:done`,
+    nesting and `confluence`, all of them OURS.
+    - THE DOOR IS `drive` AND ONE TURN OF IT IS `step`, in robertluo.state-graph.drive, with
+      `awaits`, `awaiting`, `where` and `advance` beside them. Synchronous and one machine, which
+      keeps the division the other two doors already had: `compile` is the pure core, `async` is
+      the concurrent default, and this is the one that FINDS events rather than being fed them.
+    - `awaiting` IS THE WHOLE DRIVING RULE AS ONE VALUE, and it counts what can be REPORTED rather
+      than what is AWAITED. That distinction is the whole of parking: a state offering a driver's
+      event beside a person's escape awaits TWO and is perfectly drivable, and the count-what-is-
+      awaited rule stopped such a machine dead. Four answers — :final, :from :world (the SHAPE's
+      park), :held (the CALLER's, which moves no fingerprint), and :from :driver.
+    - IT RECURSES INTO A LIVE CHILD, which nothing else had needed to. `compile` handles nesting
+      completely — a child's event applied to the parent routes inward and the completion fires —
+      but DISCOVERY does not: a nesting node has no edge for its child's events, so a driver
+      reading only the host's out-edges sees a state that awaits nothing and is not final, and
+      parks for ever on a machine that was ready to go. `:within` on the answer is the path.
+    - AND IT TAKES A JOIN WHERE `confluence` PROVES ONE. Two reportable events out of one state is
+      a fork, and choosing would be inventing an order nobody promised — unless the shape has
+      PROVED the order cannot be observed, which is what confluence answers and what the product
+      construction is for. Where it is not proven the crank says :from :world and stops. THIS IS
+      THE FIRST TIME A STATIC CHECK IS LOAD-BEARING AT RUNTIME on this door, and it is the same
+      move `run` made with the licence.
+    - EVERYTHING ELSE IS INJECTED, per the rule about not threading options through layers we do
+      not own: `:permitted` (what this turn may report), `:on` (told each applied event, which is
+      how a caller writes a transcript), `:context` (handed to compile), `:reports` (given the
+      thunks, so a caller with a stream library pays for the slowest rather than the sum).
+    - WHAT IT COST THE FACADE: two functions, and the surface had absorbed nesting, completion and
+      the licence without gaining one. Worth it because the alternative was every consumer owning
+      a copy — measured, twice.
+    - WHAT IT COST THE CONSUMER: ../coder shrank by 160 lines and NO LONGER REQUIRES THE FACADE AT
+      ALL. What is left of its driver is `recording` — an options map with a fingerprinted `:on`
+      and a loud `:ignored` — which is the only part that was ever about that application."}
 
   :open-questions
   ;; The full case for each is DESIGN.md under `# Open questions`. Settle one WITH THE HUMAN before
@@ -614,7 +665,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   ;; THE PUNCHLINES ONLY — what to do, and what not to re-learn. The account of how each was found is
   ;; DESIGN.md under the same key, and it is worth reading before designing in the same area.
   {:status
-   "EVERY LAYER IS BUILT AND NOTHING IS UNTAKEN. shape, compile, check, async and the facade; the
+   "EVERY LAYER IS BUILT AND NOTHING IS UNTAKEN. shape, compile, check, async, drive and the facade; the
     static checks are reachability, dead ends, traps, subsumption, views, coverage, confluence and
     laws; the runtime TAKES the licence those prove. The store was never built and is not coming.
     AND AN EVENT MAY SAY HOW IT IS REPORTED, 2026-09-04 — {:report :reads} — which is the
@@ -623,7 +674,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     AND A SHAPE HAS A DERIVED ID, 2026-09-04 — `fingerprint` and `canonical` — which is what a
     transcript row needs to say which machine produced it, and which `(hash shape)` cannot be.
     See :a-shape-has-a-derived-id.
-    VERIFIED 2026-09-04 by running it: 137 TESTS, 412 ASSERTIONS, both suites green. Two are
+    AND THERE IS A THIRD DOOR, 2026-09-04 — robertluo.state-graph.drive, `step` and `drive` on the
+    facade — which is the door `:report` was declared without. It finds its own events, recurses
+    into a live nested child, and takes a join `confluence` proves. THE AUTHOR ASKED FOR IT after
+    watching a second consumer write the same loop; see :the-crank-is-the-door-report-was-missing.
+    VERIFIED 2026-09-04 by running it: 147 TESTS, 440 ASSERTIONS, both suites green. Three are
     ^:integration, so THE COMMIT GATE IS A REAL GATE, and that suite NEEDS GRAPHVIZ.
     HOW THE COUNTS ARE CHECKED, and it is A REPL HABIT AND NOT AN ASSERTION — worth knowing before
     trusting a number here. `ts/instrumented` collects and instruments and returns nothing, and NO TEST
@@ -632,7 +687,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     that agree is what says no public function was added without a schema, and a disagreement has twice
     meant a STALE REPL rather than a missing schema. MAKING IT AN ASSERTION IS THREE LINES and nobody
     has; until somebody does, a count written down here is a measurement and not a guarantee.
-    THE FACADE IS TEN FUNCTIONS and has been since 2026-09-01. clj-kondo clean over src, test, notebook.
+    THE FACADE IS TWELVE FUNCTIONS: ten from 2026-09-01, and `step` and `drive` added 2026-09-04. clj-kondo clean over src, test, notebook.
     AND THERE IS A TUTORIAL: notebook/tutorial.clj, rendered by `clojure -X:notebook` to
     docs/tutorial.html, gitignored because it is derived. RENDERING IT IS A TEST THE SUITE CANNOT BE —
     it runs every cell, and it has caught two bugs no test would have."

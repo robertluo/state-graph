@@ -55,6 +55,24 @@
                      (fn [tos] (mapv (fn [f t] (shape/transition f e t)) froms tos))
                      (gen/vector (gen/elements sids) (count froms))))))))))))
 
+(def gen-driven-shape
+  "A well-formed shape EVERY EVENT OF WHICH A DRIVER CAN REPORT — `gen-shape` with a
+   `:report` on each event, so the crank always has something to find.
+
+   THE REPORT ANSWERS NOTHING, which is what keeps the properties structural: what is
+   being asked is whether the crank applies events the machine admits and whether it
+   has any memory, and a report that wrote data would make a failure ambiguous between
+   the driving and the merging."
+  (gen/fmap
+   (fn [parts]
+     (map (fn [p]
+            (if (= :event (:robertluo.state-graph.shape/kind p))
+              (shape/event (:id p) [:map] (constantly {}) nil
+                           {:reads [:map] :report (constantly {})})
+              p))
+          parts))
+   gen-shape))
+
 (def gen-event
   "An event to feed a generated shape — mostly ones it knows, sometimes ones it does
    not, because what an unadmitted event does is half of what `compile` promises."

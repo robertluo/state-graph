@@ -468,7 +468,7 @@ declaration buys, and it is a distinction the shape could not previously make: a
 waiting on a reported event is one a driver can advance by itself, and a state waiting on an
 unreported one is *parked* until somebody outside says what happened. `shape/reports` answers
 which are which, so a driver reads the machine instead of being handed the same knowledge a
-second time.
+second time — and **the driver is `sg/drive`**, below.
 
 **It is not an internal event.** The machine still does not move itself — there is no queue,
 no run-to-completion, and the reduction is untouched. This is the shape telling a caller
@@ -518,11 +518,89 @@ knowing before trusting one:
 It carries **no name**. What a machine is called is a fact about the job rather than about the
 graph, and belongs to whoever owns the job.
 
-## Two doors, one machine
+## The crank: driving a machine that finds its own events
+
+`:report` says how an event is found. **`drive` is what goes and finds them** — a caller this
+library ships, like `run`, and the door that declaration was missing.
+
+```clojure
+(def machine
+  (sg/shape
+   (sg/state :idle    [:map] {:initial true})
+   (sg/state :fetched [:map [:page :string]])
+   (sg/state :saved   [:map [:page :string]] {:final true})
+   (sg/event :fetch [:map [:page :string]]
+             {:reads [:map] :report (fn [_] {:page (slurp "…")})})
+   (sg/event :approve [:map])
+   (sg/transition :idle    :fetch   :fetched)
+   (sg/transition :fetched :approve :saved)))
+
+(sg/drive machine [])
+;=> [{:page "<html>" :id :fetch}]
+```
+
+**A run is the vector of events**, and driving stops on its own. It stopped here because
+`:approve` has no `:report` — nobody but the world can supply it:
+
+```clojure
+(drive/awaiting machine (sg/drive machine []))
+;=> {:at :fetched :awaits #{:approve} :from :world}
+```
+
+`awaiting` is the whole driving rule as one value, and it answers four ways: `{:final true}`
+is over, `{:from :world}` is the machine's own park, `{:from :driver :event e}` is something
+to go and find out, and `{:held true}` is *this run's* park — what the caller said not to do
+this turn:
+
+```clojure
+(drive/awaiting machine [] {:permitted #{}})
+;=> {:at :idle :awaits #{:fetch} :from :driver :event :fetch :held true}
+```
+
+That last one is why supervising a run is an option and not a state: `:held` is nowhere in the
+graph, so a workflow watched and a workflow left alone are the **same machine** with the same
+fingerprint. `advance` is the door a person hands an event in by:
+
+```clojure
+(drive/advance machine (sg/drive machine []) {:id :approve})
+;=> [{:page "<html>" :id :fetch} {:id :approve}]
+```
+
+**It counts what can be reported, not what is awaited.** A state offering a driver's event
+beside a person's escape awaits two and is perfectly drivable.
+
+**It reports into the machine that is running.** A nesting node has no edge for its child's
+events, so the crank follows `:sub` as deep as it goes and asks the innermost machine first —
+`:within` on the answer is the path of hosts.
+
+**And it takes a join where `confluence` proves one.** Two reportable events out of one state
+is a fork, and choosing between them would invent an order the shape never promised — unless
+the shape has proved the order cannot be observed, which is exactly what the product
+construction gives you:
+
+```clojure
+(drive/awaiting joined [])
+;=> {:at :asked :awaits #{:write :draft} :from :driver :events [:draft :write]}
+```
+
+Both are found in one turn and applied in an order the shape has already said makes no
+difference. Where it is *not* proven, the crank says `:from :world` and stops. The reports go
+through `:reports`, which defaults to running them in order — hand it one that runs them at
+once and a proven join costs the slower of the two rather than the sum.
+
+Everything the crank is given is a value or a function: `:data`, `:instance`, `:context`,
+`:permitted`, `:on` (told each applied event — where a caller writes a transcript) and
+`:reports`. It stores nothing.
+
+```clojure
+(sg/drive machine [] {:on #(println (:from %) "->" (:to %))})
+```
+
+## Three doors, one machine
 
 A shape compiles to an ordinary function of a state and an event. **The caller owns the
-lifecycle either way** — the stream door is the same reduction with the loop shipped, not a
-different kind of machine.
+lifecycle in all three** — the stream door is the same reduction with the loop shipped, and the
+crank is the same reduction with the events found rather than fed. Not three kinds of machine.
 
 ### The reduction
 
@@ -787,13 +865,15 @@ Said plainly, because each is a design decision and not an oversight.
 | `problems` `draw!` `dot` | look at it |
 | `compile` `initial` | the reduction |
 | `run` | the stream |
+| `step` `drive` | the crank — one turn, and the loop |
 
 Plus the schemas it publishes: `Instance`, `State`, `Event`, `Transition`.
 
 Underneath, and directly usable — the facade is the convenience, these are the truth:
 `.shape` (the graph and its referential checks), `.compile` (shape → function), `.check`
-(the static checks and the drawing), `.async` (manifold streams: `drive` for one machine,
-`fan` for many). Nothing below `.async` requires manifold.
+(the static checks and the drawing), `.drive` (the crank: `awaits`, `awaiting`, `where`,
+`advance`, `step`, `drive`), `.async` (manifold streams: `drive` for one machine, `fan` for
+many). Nothing below `.async` requires manifold, `.drive` included.
 
 Dependencies: ubergraph, malli, manifold, test.check. Drawing needs graphviz installed.
 

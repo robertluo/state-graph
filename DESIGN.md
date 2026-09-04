@@ -1211,6 +1211,105 @@ becomes of that is the caller's. It AMENDS THE README rather than merely contrad
 
 ---
 
+## :the-crank-is-the-door-report-was-missing
+
+The author's, 2026-09-04, and the second time they had said it: *"again, `drive` and `step`, if
+you have to live with them, add them to the state-graph api"* — after watching a driver be
+written in a consumer for the second time, and immediately after *"park is a general ability,
+not something every workflow needs to implement by itself"*.
+
+### What was actually wrong
+
+`:an-event-may-say-how-it-is-reported` added `{:report :reads}` and stopped there, on the
+argument that this is *"the shape telling a caller HOW an event would be found, and a caller
+choosing to ask"*. That argument is still right about the SEMANTICS — the machine does not move
+itself, there is no queue, and `:a-handler-causes-nothing` is untouched. It was wrong about the
+SURFACE. A declaration nothing in the library consumes is half a feature, and the half that was
+missing turned out to be the same forty lines in every consumer:
+
+```
+what does this state await
+which of those did the shape give a :report
+what view does that report read
+run it, put the event id on, apply it
+go round
+```
+
+None of that is an application's. It is `:report`, `:done`, nesting and `confluence` — all of
+them this library's own concepts — and the way we found out is that it got written twice.
+
+### Why the count-what-is-awaited rule was wrong
+
+The first driver's rule was: one out-edge and it drives, none and it is final, several and the
+world chooses. That is wrong the moment a state offers a driver's event *beside* a person's
+escape — an interruptible step, or a state a human may abandon. It awaits two, one of them is
+reportable, and the run stopped dead. Measured on a shape whose `problems` was `[]`.
+
+The rule is **how many can be REPORTED**, and `awaiting` is that rule as one value:
+
+| answer | meaning |
+| --- | --- |
+| `{:final true}` | over |
+| `{:from :world}` | the SHAPE's park — an event only a person can supply, the same on every run |
+| `{:held true}` | the CALLER's park — this run's choice, and it moves no fingerprint |
+| `{:from :driver :event e}` | go and find it out |
+| `{:from :driver :events [a b]}` | a join, proven either way round |
+
+The two parks being different is the whole of why supervision is general: `:held` is not in the
+graph, so a workflow watched and a workflow left alone are the same machine.
+
+### Nesting: `compile` was complete and discovery was not
+
+Worth stating precisely, because the asymmetry is surprising. `compile` handles a nested child
+completely — an event applied to a parent whose child is live routes inward, the child's own
+vocabulary decides, and when the child reaches a final state the completion transition fires and
+the `:yield` is harvested, all in one step. Verified by hand before the crank was written.
+
+DISCOVERY is what was missing. A nesting node has no edge for its child's events — the child's
+catalogue is the child's — so a driver reading the host's out-edges sees a node that awaits
+nothing and is not final, and parks for ever on a machine that was ready to go. So the crank
+follows `:sub` as deep as it goes and asks the innermost machine first, which is `inner first`
+in the one place it had not yet been applied. `:within` on the answer is the path of hosts, and
+`:on` carries it too, so a history can say where inside a machine something happened.
+
+### The join, and a static check finally being load-bearing here
+
+Two reportable events out of one state is a fork. A driver that picked one would be inventing an
+order the shape never promised — **unless the shape has proved the order cannot be observed**,
+which is exactly what `check/confluence` answers and exactly what the product construction of
+`:a-join-is-the-product-and-the-licence` produces. So:
+
+- every distinct pair among the reportable events is `:yes` in `confluence` → take them all, in
+  one turn, through `:reports`, applied in a fixed order the shape has said makes no difference
+- anything else → `:from :world`, and the caller settles it
+
+A pair of the SAME event is not asked about; nothing is being chosen between. This is the second
+place a static check is load-bearing at runtime — `run` taking the licence was the first — and it
+is the answer to *"can the two writers start in parallel"*: the shape says whether they may, and
+`:reports` is where a caller puts the concurrency. The library stays synchronous and depends on
+no stream library at this layer.
+
+### What it cost
+
+Two functions on the facade, which had absorbed nesting, the completion transition and the
+licence without gaining one. That is a real cost and the alternative was worse: every consumer
+owning a copy of a loop that is about shapes. Measured twice before it was moved.
+
+The consumer shrank by 160 lines and **no longer requires the facade at all** — it needs
+`shape/fingerprint` to stamp a transcript row and nothing else. What is left of its driver is an
+options map: a fingerprinted `:on` and a loud `:ignored`. That is the part that was ever about
+that application, and it is four lines.
+
+### Not taken
+
+- **A concurrent crank.** `:reports` is an injection, so the library neither depends on manifold
+  at this layer nor decides how many threads anybody has. The concurrent door is still `run`.
+- **A budget, a retry limit, a give-up rule in `drive`.** Those are EDGES, where they can be
+  drawn and checked. `drive` needs no counter because the stopping rule is in the shape — which
+  is the only reason a loop belongs in a library at all, and it is why the consumer's `drive`
+  was correctly deleted the first time and correctly restored now that it presumes nothing.
+
+
 # Open questions
 
 

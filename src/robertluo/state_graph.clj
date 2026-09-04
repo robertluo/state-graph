@@ -3,7 +3,7 @@
    have.
 
    BUILD a shape out of states, events and transitions; LOOK at it with `problems`, `draw!`
-   and `dot`, which is what having a graph buys; then RUN it through one of two doors.
+   and `dot`, which is what having a graph buys; then RUN it through one of three doors.
 
    A NODE MAY NEST A WHOLE MACHINE — {:machine sh} on a state — which is how a big problem
    stays readable. See `state`.
@@ -12,8 +12,8 @@
    the keys its schema names, and a handler reads only through a view its event declares —
    {:sees <a map schema>} on `event`, which is also how a machine accumulates.
 
-   TWO DOORS, ONE MACHINE, AND THE CALLER OWNS THE LIFECYCLE IN BOTH. That is the whole
-   answer to who owns it, and the doors are not two designs:
+   THREE DOORS, ONE MACHINE, AND THE CALLER OWNS THE LIFECYCLE IN ALL OF THEM. That is the
+   whole answer to who owns it, and the doors are not three designs:
 
      the reduction — (reduce (compile sh) (initial sh {}) events), the README's own
                      headline sentence. A step is an ordinary function of a state and an
@@ -25,6 +25,17 @@
                      accumulator exactly as it lives in reduce's; there is no cell
                      holding it and no object to own. `run` is a CALLER THIS LIBRARY
                      SHIPS, not a second kind of machine.
+
+     the crank     — (drive sh []) -> the run. The events are FOUND rather than fed: the
+                     shape says which event each state awaits and `:report` says how to
+                     go and find it out. One machine, synchronous, and it STOPS ON ITS
+                     OWN — at a final state, at an event only the world can supply, or
+                     wherever the caller said not yet. `step` is one turn of it.
+
+   THE CRANK IS THE DOOR `:report` WAS MISSING, and it was added late because two
+   applications had already written it. An event may declare how it is FOUND and nothing
+   here consumed that, so every driver rewrote the same loop — which is a fact about a
+   SHAPE and not about anybody's application.
 
    IT STORES NOTHING. What comes out of `run` is what happened — the event, the state it
    produced, and whether it fired at all — which is everything an audit trail or a trace
@@ -45,6 +56,7 @@
   (:require [robertluo.state-graph.async :as async]
             [robertluo.state-graph.check :as check]
             [robertluo.state-graph.compile :as compile]
+            [robertluo.state-graph.drive :as drive]
             [robertluo.state-graph.shape :as shape]))
 
 ;;; ---------------------------------------------------------------- vocabulary
@@ -231,6 +243,34 @@
    never spells :instance again, here or in a handler, which could not reach it anyway."
   ([sh data] (compile/initial sh data))
   ([sh instance data] (compile/initial sh instance data)))
+
+;;; ------------------------------------------------------------------ the crank
+
+(defn step
+  "One turn of the crank: find what this state is waiting to be told, go and find it out,
+   and answer the run with the event saying it.
+
+   A run that is over, PARKED on an event only the world can report, or HELD by what the
+   caller permitted this turn comes back UNCHANGED. `drive/awaiting` says which of the
+   three it was, and takes the same options.
+
+   IT IS NOT `(compile sh)`, which answers the next STATE from an event you already have.
+   This one finds the event."
+  ([sh events] (drive/step sh events))
+  ([sh events opts] (drive/step sh events opts)))
+
+(defn drive
+  "Turn the crank until the machine stops moving, and answer the run it got to.
+
+   IT NEEDS NO COUNTER, which is the only reason a loop belongs in a library: the stopping
+   rule is IN THE SHAPE, so a budget or a give-up rule is an EDGE where it can be drawn and
+   checked. Driving from [] runs the whole machine and driving from a run carries it on —
+   there is no second code path for resuming, because carrying on is what this already is.
+
+   See `robertluo.state-graph.drive` for the rest of the vocabulary: `awaiting`, `where`
+   and `advance`, which is the door a person hands an event in by."
+  ([sh events] (drive/drive sh events))
+  ([sh events opts] (drive/drive sh events opts)))
 
 ;;; ----------------------------------------------------------------- the stream
 
