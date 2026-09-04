@@ -17,47 +17,37 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   :one-line "A finite state machine whose SHAPE is a graph — so a graph library can draw it,
              check it and store it, and a compiler can turn it into an ordinary Clojure function."
   :why-it-exists
-  "SAID BY THE AUTHOR 2026-09-01, and it is the frame everything else here sits in: THIS LIBRARY
-   EXISTS FOR THE SIBLING COMPONENT'S AGENT WORKFLOWS. smart-boundary needs a different concrete
-   workflow per scenario, and the two ways to write that in ordinary code are both bad — a lot of
-   long, nearly identical code, or worse, a configuration format pretending to unify them at the
-   surface. A state machine is the third way.
-   - COMPLEX IS NOT DIFFICULT. What those workflows need is GLUE, and glue is what a machine
-     replaces. The argument is about VOLUME rather than cleverness, which is why it is convincing.
-   - MACHINES COMPOSE, and nesting made that easier still — see :a-machine-can-nest-in-a-node.
-     Across scenarios most parts are the SAME and only the ASSEMBLY differs: a state, an event
-     with its handler, and a whole shape are all plain values, so an assembly is
-     (apply shape (concat parts wiring)) and one child nests into two parents with nothing to
-     alias. MEASURED rather than assumed, with one edge worth knowing before anybody designs a
-     parts library — see :what-the-parts-library-showed.
-   - A WORKFLOW MOSTLY IN DATA IS STORABLE AND DRAWABLE, which is what the README claims for the
-     graph and what the agent case actually needs: a person has to be able to SEE the workflow an
-     agent is running.
-   - AUDITABILITY AND STATIC CHECKING ARE THE POSITION. For an agent workflow the two questions
-     that matter are `what happened` and `could this ever have worked`; the transition results
-     answer the first and `problems` answers the second, before anything runs.
-   - THE PARALLELISM CLAIM, SAID CAREFULLY. `The first FSM that supports parallelism` is not the
-     claim to make in public: Harel statecharts have had orthogonal regions since 1987, every
-     workflow engine runs steps at once, and :parallel-is-across-instances puts orthogonal regions
-     deliberately OUT of scope — so it argues against this project's own design. What is
-     defensible is narrower and stronger. ONE CALL RUNS THOUSANDS OF INSTANCES AT ONCE, each
-     serialised, with real backpressure. A HANDLER MAY ANSWER A DEFERRED, so an instance waiting
-     on a model call holds no thread, which is the property that decides whether an agent workflow
-     scales at all. And CONCURRENCY CAN BE PROVEN: check/confluence answers statically which
-     pending pairs may be applied in order of completion, and no other FSM library appears to
-     answer that question at all. Raised in the same conversation and not disputed."
+  "THIS LIBRARY EXISTS FOR THE SIBLING COMPONENT'S AGENT WORKFLOWS, said by the author 2026-09-01.
+   A different concrete workflow per scenario, and the two ways to write that in ordinary code are
+   both bad — a lot of long, nearly identical code, or a configuration format pretending to unify
+   them at the surface. A state machine is the third way. FOUR CLAIMS, in one line each: complex is
+   not difficult, and what those workflows need is GLUE; machines COMPOSE, so an assembly is
+   (apply shape (concat parts wiring)); a workflow mostly in DATA is storable and drawable, and a
+   person has to be able to SEE what an agent is running; and AUDITABILITY AND STATIC CHECKING are
+   the position — `what happened` and `could this ever have worked`.
+   AND SAY THE PARALLELISM CLAIM CAREFULLY. `The first FSM that supports parallelism` is NOT the
+   claim to make in public — Harel had orthogonal regions in 1987, and this design puts them out of
+   scope, so it argues against itself. What is defensible is narrower and stronger: one call runs
+   THOUSANDS OF INSTANCES at once with real backpressure; a handler may answer a DEFERRED, so an
+   instance waiting on a model call holds no thread; and CONCURRENCY CAN BE PROVEN statically, which
+   no other FSM library appears to do. See DESIGN.md :why-it-exists."
 
   :source-of-truth
-  "README.md is the specification and this file is its reading. Where the two disagree the README
-   wins and this file is wrong — say so and fix it.
-   REWRITTEN 2026-09-01 TO THE FINISHED SHAPE, at the author's instruction, so the README now
-   documents the library that EXISTS rather than the one to build: every example in it was run
-   against the code before it was written down. What that changes for a reader of this file is that
-   PROPOSED is no longer a category — everything is built — and a divergence is now a bug in one of
-   the two files rather than a gap in the repository. The README still wins.
-   THE README ALSO CARRIES THE LIMITS, deliberately: no guards, no state-dependent update, a merge
-   cannot remove a key, no internal events, no persistence, and the licensed concurrency not taken.
-   A user meeting one of those should meet it in the README and not in a surprise."
+  "THREE FILES, AND EACH WINS ABOUT SOMETHING DIFFERENT.
+   README.md IS THE SPECIFICATION and beats both of the others. Every example in it was run against
+   the code before it was written down, so PROPOSED is not a category: everything is built, and a
+   divergence is a bug in one of the three. It also carries the LIMITS deliberately — no
+   state-dependent update without a view, no internal events, no persistence, no orthogonal regions
+   — so a user meets one of those in the README and not in a surprise.
+   THIS FILE IS THE OPERATIONAL AUTHORITY: the rules, the layering, the constraints, the workflow,
+   one paragraph per decision, and the traps worth not re-learning. It is loaded in full every
+   session, which is why every entry in it is short.
+   DESIGN.md IS THE ARGUMENT behind each of those paragraphs — why a decision was made, what was
+   turned down and why, and the full account of what running it taught. READ ON DEMAND, and READ IT
+   BEFORE REOPENING A QUESTION or proposing something an entry records as refused. Each of its
+   headings is a key in this file's :design or :project-knowledge, so `DESIGN.md :some-key` is a
+   grep away. Where the two appear to disagree, THIS file is right about WHAT was decided and
+   DESIGN.md is right about WHY, and the disagreement is a bug to fix in one of them."
 
   :constraints
   {:tests-clojure-test true
@@ -67,6 +57,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    :notebook-cmd "clojure -X:notebook"
    :test-cmd-fast "clojure -M:dev:test unit"
    :test-cmd-gate "clojure -M:dev:test integration"
+   :lint-cmd "clojure -M:lint --lint src test notebook — an ALIAS, not a binary on the path"
    :eval-mechanism :nrepl-exclusive
    :malli-shapes-all-data true
    :malli-function-schemas true
@@ -98,7 +89,9 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     of each namespace — a plain :reload alone does NOT recover, the stale objects being in malli's
     registry rather than ours"
    "A REPL whose classpath predates a new dependency CANNOT be repaired from inside — neither
-    clojure.repl.deps/add-lib nor sync-deps has worked here. After touching deps.edn, restart it"
+    clojure.repl.deps/add-lib nor sync-deps has worked here. After touching deps.edn, restart it.
+    A JVM also INHERITS ITS PATH AT LAUNCH, so a REPL started before graphviz was installed cannot
+    draw however current the devenv is: start it from inside the devenv"
    "ALWAYS read the full error message before acting — do not skip or guess"
    "After every edit, read the file back to verify the edit landed correctly"
    "Inspect the source code for the bug BEFORE running REPL tests — do not test blindly"
@@ -125,71 +118,63 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     validates against its own schema, replaying a prefix and then the rest equals replaying the
     whole — and those hold whatever the handlers do"
    "EVERYTHING A TEST OPENS IS RELEASED IN A `finally`. `finally` is release and is NOT the
-    forbidden try/catch. In the sibling project one un-closed Datalevin environment kept the JVM
-    alive after the suite had finished, because its executor threads are not daemons. NOTHING HERE
-    OPENS A DATABASE ANY MORE (see :nothing-is-persisted-here), so what this now governs is files
-    and streams — and a STREAM has a second obligation the rule does not cover: a deref of a
-    machine that never resolves hangs the suite, so every deref in a stream test is BOUNDED"
+    forbidden try/catch. NOTHING HERE OPENS A DATABASE ANY MORE, so what this governs is files and
+    streams — and a STREAM has a second obligation: a deref of a machine that never resolves hangs
+    the suite, so EVERY DEREF IN A STREAM TEST IS BOUNDED"
    "COMMIT GATE: clojure -M:dev:test integration passes. The fast suite is for every save"
-   "EDITING THIS FILE BY STRING REPLACEMENT? ANCHOR ON A KEY *AND ITS OPENING QUOTE*. A bare
-    `:some-key` matches its own PROSE REFERENCES, of which every decision here has several, and
-    an indented reference contains the same characters as a top-level key — so a replacement
-    aimed at an entry lands INSIDE another entry's string, silently, and the file stops
-    parsing. This cost two repairs on 2026-09-01 alone, both caught by the edn check below and
-    neither visible to a bracket balance."
-   "THIS FILE IS DATA, SO CHECK IT BY PARSING IT. An unterminated string is INVISIBLE to a bracket
-    balance — it shifts which quotes pair with which and leaves every { and } matched — so a
-    balance check passes a file that no reader can read. Two entries were added with no closing
-    quote on 2026-08-31 and the balance check said fine each time; what caught it was
-    clojure.edn/read-string, which answered `Invalid number: 2026-08-31.` because it was reading
-    prose as data. Verify with (clojure.edn/read-string (subs s (index-of s \"{:statechart/id\")))
-    and nothing weaker. (smart-boundary/AGENTS.md did NOT parse — `Duplicate key: a` — and it
-    predated any of this; the file was removed 2026-09-02 with that component, so the finding is
-    only a reminder that an unparsed AGENTS.md can live for weeks without anybody noticing.)"]
+   "A DECISION BELONGS IN ONE PLACE. This file is loaded in full every session, so an entry here is a
+    PARAGRAPH and the argument for it is DESIGN.md under the same key. When a decision changes, change
+    BOTH — the paragraph and the entry — or they drift and the pointer starts lying. When one is
+    ADDED, add both. Superseded reasoning goes to git history and not into either file"
+   "EDITING THIS FILE: IT IS DATA, SO CHECK IT BY PARSING IT, and anchor a string replacement on a
+    key AND ITS OPENING QUOTE. A bare `:some-key` matches its own PROSE REFERENCES, of which every
+    decision here has several, so a replacement aimed at an entry lands INSIDE another entry's
+    string, silently, and the file stops parsing. An unterminated string is INVISIBLE to a bracket
+    balance — it shifts which quotes pair with which and leaves every { and } matched — so verify
+    with (clojure.edn/read-string (subs s (index-of s \"{:statechart/id\"))) and nothing weaker.
+    Three repairs so far, every one caught by the parse and none by a balance check.
+    THE FORMATTER HOOK fires on the file-writing TOOLS and not on a shell heredoc, and it will
+    reflow a whole source file on first touch — see :what-completion-taught"]
 
   :layering
-  ["EVERY LAYER IS NOW BUILT, 2026-09-01, and the store that was in this list is GONE — see
-    :nothing-is-persisted-here. What is left is four namespaces and one arrow through them.
+  ["EVERY LAYER IS BUILT. Four namespaces and one arrow through them; the store that was once in
+    this list is GONE, see :nothing-is-persisted-here.
 
-    robertluo.state-graph          — BUILT 2026-09-01. THE FACADE: the vocabulary a user needs, and
-                                     the only require an application should have. Ten functions —
-                                     state, event, transition, shape; problems, draw!, dot; compile,
-                                     initial; run — being the constructors, the checks, and the two
-                                     doors. Requires everything below it, `check` included, which is
-                                     what one require costs. See
-                                     :the-facade-is-a-vocabulary-and-two-doors
-    robertluo.state-graph.async    — BUILT 2026-08-31. A DEFAULT, not the core: manifold streams.
-                                     Takes a compiled step FUNCTION, a way to make a first state and
-                                     a way to make an OUTPUT VALUE, all as VALUES, and knows nothing
+    robertluo.state-graph          — THE FACADE: the vocabulary a user needs, and the only require
+                                     an application should have. Ten functions — state, event,
+                                     transition, shape; problems, draw!, dot; compile, initial;
+                                     run — being the constructors, the checks, and the two doors.
+                                     Requires everything below it, `check` included, which is what
+                                     one require costs. See :the-facade-is-a-vocabulary-and-two-doors
+    robertluo.state-graph.async    — A DEFAULT, not the core: manifold streams. Takes a compiled
+                                     step FUNCTION, a way to make a first state, a way to make an
+                                     OUTPUT VALUE and a `Licence`, all as VALUES, and knows nothing
                                      of shapes, schemas or graphs. `drive` is one machine,
                                      serialised; `fan` partitions on :instance and runs one per
-                                     machine, concurrently. Both answer {:states :done}, two
-                                     different things under two names
+                                     machine, concurrently. Both answer {:states :done}
     robertluo.state-graph.compile  — shape -> (fn [state event] state'). The only namespace that
                                      turns data into a function, and the only one both defaults are
                                      above in spirit and below in the arrow: they take its OUTPUT
-                                     as a value, so neither requires it
-    robertluo.state-graph.check    — BUILT. What the graph BUYS: the static checks and the
-                                     drawing, which answer the same question by different means.
-                                     `yields` and `continued` joined it 2026-09-03 with the
-                                     completion transition — `yields` being `admits` for the
-                                     THIRD time and `continued` the sibling of `produced`.
-                                     A SIBLING of compile, not a part of shape: nothing here is on
-                                     the runtime path, and an application shipping a working shape
-                                     never loads it. Requires shape, ubergraph and malli — AND
-                                     malli.generator since 2026-09-03, `laws` refuting a declared
-                                     combine law by generation, which means the facade now loads
-                                     test.check as well. Knowingly; see :what-the-combine-taught
+                                     as a value, so neither requires it. `phases` splits the step
+                                     into a PATCH half and an APPLY half; the step is BUILT from
+                                     the two, so the one-call and two-call doors cannot drift
+    robertluo.state-graph.check    — What the graph BUYS: the static checks and the drawing, which
+                                     answer the same question by different means. A SIBLING of
+                                     compile, not a part of shape: nothing here is on the runtime
+                                     path, and an application shipping a working shape never loads
+                                     it. Requires shape, ubergraph, malli and malli.generator —
+                                     the last since `laws`, which means the facade loads test.check
+                                     as well. Knowingly; see :what-the-combine-taught
     robertluo.state-graph.shape    — THE BOTTOM: the graph itself. Pure data plus constructors,
                                      ubergraph underneath, the malli schemas of a shape, and the
-                                     REFERENTIAL checks — the ones answerable from the parts alone.
-                                     A node may carry a whole SHAPE as its :machine, so the type
-                                     is recursive and every layer above recurses with it.
-                                     Requires ubergraph and malli only
+                                     REFERENTIAL checks — the ones answerable from the parts alone,
+                                     `disjoint` among them. A node may carry a whole SHAPE as its
+                                     :machine, so the type is recursive and every layer above
+                                     recurses with it
 
-    The default sits BELOW the facade rather than beside it because of the nesting rule — a
-    child may not require its parent — and it costs nothing, since it does not need the facade's
-    vocabulary: what it needs is a function and some data, handed over as values."]
+    The default sits BELOW the facade rather than beside it because of the nesting rule — a child
+    may not require its parent — and it costs nothing, since what it needs is a function and some
+    data, handed over as values."]
 
   :layering-rule
   "A namespace NESTED under another is BELOW it: robertluo.state-graph.shape requiring
@@ -197,2229 +182,692 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    ABOVE the facade it is a SIBLING of it and named accordingly — robertluo.state-graph-x, never
    robertluo.state-graph.x. The name has to agree with the direction of the arrow."
 
+
   :design
+  ;; ONE PARAGRAPH PER DECISION. The argument for each — what was turned down, what it cost, what
+  ;; was measured — is DESIGN.md under the same key. Read that before reopening one.
   {:the-shape-is-a-graph
-   "Three definitions and no more, straight from the README:
-    - A STATE is a node, shaped by a malli schema, VALIDATED ON ENTER. Entering is the only moment
-      a state's schema can be checked, and it is the moment a bad transition becomes visible.
-    - An EVENT is shaped by a malli schema too. An event is a value, not a keyword with baggage.
-    - A TRANSITION is an edge, keyed BY EVENT ONLY — not by (state, event) — carrying a function
-      that handles the event and whose RETURN VALUE IS APPLIED TO the state. `Applied to`, not
-      `is`: what a handler answers is a change, and the state is what the change lands on.
-    Consequence, and it decides the ubergraph call: two different events may join the same pair of
-    states, so the shape is a MULTI-digraph and an edge needs an attribute map. A plain digraph
-    would silently keep one of the two.
-    DECIDED 2026-08-30: :initial IS A NODE ATTRIBUTE, exactly one per shape. The reachability check
-    needs a root and so does the drawing, so the shape has to know it — while the starting DATA
-    stays an argument to the reduction. A node and its value are different things and only the
-    first belongs in the graph."
+   "Three definitions and no more. A STATE is a node, shaped by a malli schema, VALIDATED ON ENTER.
+    An EVENT is shaped by a schema too, and is a value rather than a keyword with baggage. A
+    TRANSITION is an edge keyed BY EVENT ONLY, carrying a function whose RETURN VALUE IS APPLIED TO
+    the state. Two events may join one pair of states, so the shape is a MULTI-digraph. :initial is a
+    NODE ATTRIBUTE, exactly one per shape, while the starting DATA stays an argument to the reduction."
 
    :what-the-graph-buys
-   "The whole argument for not writing another FSM library. A shape that is a graph can be:
-    - DRAWN, so a person can see the machine they described rather than read it;
-    - CHECKED STATICALLY, which is the part that pays: a state with no in-edge is unreachable, a
-      state with no out-edge and no :final is a dead end, an event no transition mentions is dead
-      code, and a transition whose handler cannot produce a value the target's schema admits is a
-      bug findable WITHOUT RUNNING ANYTHING. That last one is what having malli on the nodes is
-      for, and it is the check worth building first because it is the one no other FSM library has;
-    - STORED, so the machine's own history is queryable in the same shape as its definition."
+   "The whole argument for not writing another FSM library: a shape that is a graph can be DRAWN, so
+    a person SEES the machine; CHECKED STATICALLY, which is the part that pays; and STORED. The check
+    worth building first is the one no other FSM library has — a transition whose handler cannot
+    produce a value the target's schema admits is a bug findable WITHOUT RUNNING ANYTHING."
 
    :compilation-and-lifecycle
-   "(compile shape) -> a pure function of a state and an event answering the next state. The
-    lifecycle of an instance is then (reduce step initial events), and that is the whole runtime:
-    no object, no atom, no protocol. Everything else in this library is a way of getting events
-    into that reduction or getting RESULTS out of it — which is exactly why a stream is a layer
-    above and not the core, and why `run` is a caller this library ships rather than a second kind
-    of machine. See :the-caller-owns-the-lifecycle."
+   "(compile shape) -> a pure function of a state and an event. The lifecycle is (reduce step initial
+    events) and that is the whole runtime: no object, no atom, no protocol. Everything else is a way
+    of getting events into that reduction or results out of it, which is why a stream is a layer
+    above and not the core."
 
    :the-defaults-are-batteries
-   "Async is a DEFAULT. Someone with their own stream library must be able to use the compiled
-    function directly and lose nothing, so it may not take a shape as an argument — and it does not:
-    it is handed a step, a way to make a first state and a way to make an output value, all as
-    VALUES.
-    - REVISED 2026-09-01, twice over. Persistence is no longer a default because it is no longer
-      anything at all, see :nothing-is-persisted-here. And `neither may be required by the facade's
-      core path` did NOT survive the facade being built: robertluo.state-graph requires .async, so
-      requiring the facade loads manifold. What the rule was protecting survives one level down —
-      robertluo.state-graph.compile requires no manifold and never will — and that is the honest
-      statement of it. See :the-facade-is-a-vocabulary-and-two-doors, where `check` costs the same
-      way for the same reason."
+   "Async is a DEFAULT. Someone with their own stream library must use the compiled function directly
+    and lose nothing, so it takes a step, an initial-of, a result-of and a licence, all as VALUES,
+    and never a shape. THE HONEST STATEMENT OF THE RULE: the facade DOES load manifold; what it
+    protects survives one level down, robertluo.state-graph.compile requiring none and never will."
 
    :two-kinds-of-check-and-two-places-for-them
-   "DECIDED 2026-08-31, when target 2 was built. shape/problems is REFERENTIAL — answerable from
-    the PARTS alone, so it runs inside the constructor and a bad shape never exists. check/problems
-    is STRUCTURAL — it needs the built graph, so it is a separate namespace and opt-in.
-    - WHY A NAMESPACE AND NOT MORE OF shape, which :layering originally said: nothing in `check` is
-      on the runtime path. compile does not require it, and an application shipping a working shape
-      never loads a graph algorithm. The checks are for the person WRITING the machine.
-    - THE DRAWING IS IN THERE TOO, and it belongs: an unreachable state is obvious in a picture and
-      invisible in a map literal. Same question, different means.
-    - REACHABILITY IS A TRAVERSAL FROM THE ROOT, not `has no in-edge`, and the difference is not
-      academic: two states that reach only each other both have in-edges and are both unreachable.
-      The suite has exactly that island in it, because the weaker check passes it."
+   "shape/problems is REFERENTIAL — answerable from the PARTS alone, so it runs inside the constructor
+    and a bad shape never exists. check/problems is STRUCTURAL — it needs the built graph, so it is a
+    separate namespace and opt-in, off the runtime path. REACHABILITY IS A TRAVERSAL FROM THE ROOT
+    and not `has no in-edge`: two states reaching only each other both have in-edges and are both
+    unreachable. WHERE A CHECK LIVES IS DECIDED BY WHEN IT MUST ANSWER, not by what it resembles.
+    THE FAULT VOCABULARY. A fault is a map carrying :problem, the id it is about, :within
+    [<host node> ...] where nested, and a :witness where something could construct one.
+      REFERENTIAL, refused by the constructor — :unused-event, :reserved-declared (a state declaring
+      :id, :instance or :sub), :machine-cannot-start, :ambiguous, :done-cycle, :done-with-edges,
+      :reads-without-report
+      STRUCTURAL, reported by check/problems — :unreachable, :dead-end, :trap, :target-refuses,
+      :view-unavailable, :yield-unavailable, :reads-unavailable
+      PUBLISHED AND NEVER FAULTED, being coverage rather than fault — subsumption, views, coverage,
+      confluence, commuting, laws"
 
    :a-partial-subsumption-checker
-   "DECIDED 2026-08-31. `admits` answers :yes, :no or :unknown, and IT NEVER LIES. Malli has no
-    subsumption — m/validate answers about a VALUE, and nothing asks whether schema A is admitted
-    by schema B — so it is written here, structurally over :map entries.
-    - WHAT IT CAN PROVE, and each is decidable rather than heuristic: a REQUIRED key the produced
-      value may not have (the common bug by a distance, a handler that forgot to set something, and
-      it covers `optional where the target insists` too); a value whose TYPE cannot be the wanted
-      one, over seven primitives verified PAIRWISE disjoint rather than assumed — :int and :double
-      included, malli rejecting each for the other; and a [:= v] or an [:enum ...], where the values
-      are finite and can simply be tried.
-    - :unknown IS AN ANSWER AND NOT A FAILURE, and problems reports only the PROVEN faults. A
-      checker that cries about what it could not work out is a checker people turn off. `subsumption`
-      publishes every verdict, :unknown and :undeclared included, so the check's own COVERAGE is
-      readable — which is a better thing to have than a checker that pretends to be total.
-    - WHAT IS CHECKED IS WHAT RUNS: `produced` composes the schema in the order compile composes the
-      value — the source's own schema, the declared :out merged over it, the target's :id assoc'd
-      last. If those two ever disagree the check is worthless, so they are written to be read side
-      by side.
-    - AN EDGE WITH NO :out IS :undeclared AND NOT A FAULT. That declaration is what the whole check
-      is FOR; without it there is nothing to say about a closure.
-    - SOUNDNESS IS TESTED BY GENERATION, which is a genuinely independent second opinion: where
-      `admits` says :yes, values generated from the produced schema must all validate against the
-      target. That direction is the one worth paying for — a checker saying :no where it should say
-      :unknown merely nags, one saying :yes where it should say :no HIDES A BUG.
-    - THE TRAP CHECK IT NAMED AS NOT BUILT IS NOW BUILT, 2026-08-31 — see
-      :a-trap-is-what-a-cycle-hides. It cost five lines, as predicted, and the exception that made
-      it wait turned out to belong inside `finishable` rather than bolted onto the check."
+   "`admits` answers :yes, :no or :unknown, and IT NEVER LIES — malli has no subsumption, so it is
+    written here structurally over :map entries. It proves a REQUIRED key that may be missing, a TYPE
+    that cannot match (seven primitives verified pairwise disjoint), and a finite domain that can be
+    TRIED. :unknown IS AN ANSWER AND NOT A FAILURE: `problems` reports only PROVEN faults, and a
+    checker that cries about what it could not work out is one people turn off. WHAT IS CHECKED MUST
+    BE WHAT RUNS — `produced` composes in the order compile composes, and `continued`, `accepted` and
+    `yields` are the same discipline for the other crossings. Soundness is tested BY GENERATION."
 
    :the-first-target
-   "DECIDED 2026-08-30. The first target is THE SPINE: robertluo.state-graph.shape and
-    robertluo.state-graph.compile, ending in a working (reduce step initial events). No async, no
-    datahike, no drawing, and deliberately NOT the static checks.
-    - Not the checks first, though they are the differentiator, and this is the whole argument: a
-      check written over a shape that nothing has ever run is a check over a shape that is probably
-      wrong. `compile` is the cheapest thing that can say whether the shape is expressive enough,
-      and it is small. The checks are target 2 and cost almost nothing once the shape stands."
+   "The first target was THE SPINE — shape and compile — and deliberately NOT the checks, though they
+    are the differentiator. The argument is worth keeping for the next such decision: a check written
+    over a shape nothing has ever run is a check over a shape that is probably wrong."
 
    :a-shape-is-code
-   "DECIDED 2026-08-30, by the author, and it decides more than it looks like it does: A STATE
-    MACHINE SHAPE IS CODE. The README's `pure clojure data with convinient functions as
-    constructors` means you WRITE it as data, not that it ROUND-TRIPS as data. It is built at
-    namespace load, its handlers are real closures, its schemas are compiled once.
-    - What that kills: every argument from EDN, from =, from storability. Those were the only
-      objections to the shape BEING an Ubergraph, so the shape is an Ubergraph — nodes carrying
-      their schema as attributes, the multi-digraph carrying two events between one pair of states,
-      and the checks and the drawing reading it directly with no parallel map to keep in sync.
-    - And it settles persistence without a separate argument: a shape that is code is not something
-      datahike reloads a machine FROM, so what is stored is HISTORY. Shape versioning is out of v1.
-      The README says as much in its own words — `a machines states, events, transitions become
-      history`."
+   "A STATE MACHINE SHAPE IS CODE. You WRITE it as data; it does not ROUND-TRIP as data. Built at
+    namespace load, handlers are real closures, schemas compiled once. THAT KILLS every argument from
+    EDN, from =, from storability — which were the only objections to the shape BEING an Ubergraph,
+    so it is one. And it settles persistence: what is stored is HISTORY, not the shape. It is also
+    what licenses a COMBINE to be a closure."
 
    :a-state-has-an-id
-   "DECIDED 2026-08-30. A state is a MAP with an identity field, :id — one word, and the same word
-    in both places it is needed: the NODE in the graph is the :id, and the runtime value carries
-    :id saying which node it is in. FORCED as well as chosen: the compiled step is
-    (fn [state event] state') and has to know whose out-edges to search, so the identity cannot
-    live only in the graph. An event is a map with :id for the same reason, and the compiler
-    matches an edge on it.
-    - A node's own schema describes the REST of the map. What is validated on enter is the DERIVED
-      (mu/merge [:map [:id [:= <node>]]] <node schema>), never written by hand — so `validate on
-      enter` also checks that the machine landed where it thought it did.
-    - THE EDGE ALWAYS WINS. A handler answers a map that is MERGED, so a handler could write :id
-      and move the machine sideways past the edge meant to decide the target. The compiler assocs
-      the target's :id AFTER the merge, so a handler's :id is simply overwritten. Identity is the
-      shape's to say, not a handler's."
+   "A state is a MAP with :id — the same word in both places it is needed, the NODE in the graph and
+    the runtime value saying which node it is in. FORCED: the step is (fn [state event] state') and
+    must know whose out-edges to search. A node's schema describes the REST of the map, and what is
+    validated on enter is the DERIVED merge, never written by hand. THE EDGE ALWAYS WINS — the target's
+    :id is assoc'd AFTER the merge, and a handler that tries to write one is now REFUSED."
 
    :a-handler-never-sees-the-state
-   "DECIDED 2026-08-30, by the author, and it is the sharpest decision here: a handler takes THE
-    EVENT ALONE — (handler event) — and never the state it is about to change.
-    - WHAT IT DOES NOT FORBID, added 2026-09-01 when nesting was built and a reader will
-      otherwise think it does: THE STEP may depend on the state as much as it likes, and
-      already does — the edge lookup, the merge, :id and :instance written afterwards. So a
-      NESTED machine, whose child step needs the child's current state, sits inside the
-      compiler and not inside a handler. See :a-machine-can-nest-in-a-node.
-    - AND IT IS NOW `NEVER THE STATE` RATHER THAN `NEVER ANYTHING`, 2026-09-01: an event may
-      declare {:sees <a map schema>}, and its handler is then handed the state PROJECTED onto
-      those keys and validated against them, as a second argument. The reason this entry gives
-      survives intact, which is why it was allowed: the view is declared on the EVENT, so a
-      handler still names what it needs BY SHAPE and stays reusable across every state that
-      satisfies it, and its function schema is still complete off the event definition alone —
-      [:=> [:cat <schema> <sees>] <out>]. What a handler may never do is read what was not
-      declared. See :internal-visibility-is-declared-and-not-automatic. The event is a map
-    and may carry whatever data the change needs; what it may not do is reach into the state.
-    - THE REASON IS DECOUPLING: one handler serves many events and many source states, and states
-      and events then evolve independently. Reuse is the visible payoff.
-    - THE BIGGER PAYOFF IS THE CHECK. A handler with no state in it is a COMPLETE malli function on
-      its own — [:=> [:cat <the edge's event schema>] <the edge's :out>] — both halves coming off
-      the edge and nothing from the graph. So a handler is instrumentable as an ordinary function,
-      and :out stops being an annotation nobody can verify and becomes a claim that can be TESTED
-      generatively: generate events from the event schema, run the handler, check the answer, with
-      no state and no machine anywhere near it. (handler state event) would have needed the source
-      node's schema in that signature, welding the handler to one node.
-    - THE COST, ACCEPTED AND SAID OUT LOUD: NO STATE-DEPENDENT UPDATE. :total after :add-item
-      cannot see the old total; nor can a counter. Two places that goes. The history layer has
-      every event, so a derived total is a QUERY rather than a state field. And when it must live
-      in the state, the move that keeps this decoupling is to let the NODE'S SCHEMA declare how a
-      key COMBINES (:n by +), so the handler still answers {:n 1} and the accumulation is DATA ON
-      THE NODE rather than a closure.
-    - AND THAT COST IS LIFTED WHERE A VIEW IS DECLARED, 2026-09-01: :total after :add-item CAN see
-      the old total, and a counter can count, by declaring {:sees [:map [:total :int]]} and
-      answering {:total (+ ...)}. The dependence is then visible in the shape rather than hidden in
-      a closure, which is the whole difference. What stays true is the DEFAULT — a handler with no
-      view answers from the event alone and is reusable everywhere.
-    - THAT DOOR IS SHUT, 2026-09-01, by the author who had named it here on 2026-08-30, and the
-      reason is worth more than the door was: A COMBINE IS A MECHANISM WITH NO POLICY. It can only
-      ever GROW. What a task wants is the last n, or a summary, or one field from three steps back,
-      and `:messages by conj` expresses none of those — while in the domain this library was built
-      for, THE PILE IS THE COST, context being metered. So the accumulation question was the wrong
-      question, and the right one is who may SEE what: :internal-visibility-is-declared-and-not-automatic.
-    - AND THE DOOR IS OPEN AGAIN, 2026-09-03, THROUGH A DIFFERENT WALL. The objection above is
-      about ACCUMULATION POLICY — what a state should KEEP — and it stands exactly as written: a
-      combine that only grows is still the wrong answer to that question, and `:messages by conj`
-      is still refused. What was reopened is a different question that this reasoning never
-      covered: not what to keep, but HOW A PATCH LANDS. The author put it in one line —
-      `in real life, merging is a domain/task related job` — and it is the answer to why the
-      concurrency licence was so narrow rather than to anything about context. A combine declared
-      COMMUTATIVE lets two events write one key and still be licensed. See
-      :a-combine-is-how-a-patch-lands, and note what did NOT change: a key with no combine
-      REPLACES, so nothing written before this behaves differently."
+   "The sharpest decision here: a handler takes THE EVENT ALONE — (handler event), or (handler event
+    seen) where the event declares a {:sees} view. THE REASON IS DECOUPLING, and THE BIGGER PAYOFF IS
+    THE CHECK: a handler with no state in it is a COMPLETE malli function on its own, both halves off
+    the event definition and nothing from the graph, so :out becomes a claim testable generatively.
+    It constrains HANDLERS ONLY — the STEP is state-dependent all over, which is why a nested
+    machine's step lives in the COMPILER. THE COST: no state-dependent update by default. Two doors
+    out — a VIEW and a COMBINE — and ACCUMULATION POLICY stays refused, a combine that only grows
+    being a mechanism with no policy when THE PILE IS THE COST."
 
    :internal-visibility-is-declared-and-not-automatic
-   "BUILT 2026-09-01, both halves, the same day it was designed — and the design below stands as
-    written, with what the building taught recorded at the end of it.
-    THE QUESTION, PUT BY THE AUTHOR 2026-09-01. From OUTSIDE, an
-    observer sees every transition and can have the whole history — that is what the results
-    stream is. From INSIDE, can an observer — a handler, or another state — get at information?
-    And the constraint that decides the shape of any answer: IT IS THE CONSTRUCTOR OF THE MACHINE
-    WHO DECIDES, never the library automatically, because too broad a data visibility from the
-    inside brings security problems easily.
-    - WHAT WAS WITHDRAWN FIRST, so the design is not read as answering it: `an agent handler must
-      see the accumulated context` is too strong — plenty of steps are input to output and want
-      nothing from the past — and the combining-key door is refused outright, see
-      :a-handler-never-sees-the-state. Accumulation was the wrong axis.
-    - THERE ARE TWO HALVES AND ONLY ONE MECHANISM WOULD SERVE BOTH. READING: may a handler see
-      anything. HOLDING: what does a state keep, which is the same question because a state that
-      holds everything makes every read a read of everything.
-    - THE READ HALF: A VIEW DECLARED ON THE EVENT.
-      (event id schema handler out {:sees <a map schema>}), and the step passes the projection as a
-      SECOND ARGUMENT — (handler event seen) — where a view is declared and (handler event) where
-      none is, so nothing existing changes.
-      DECLARED ON THE EVENT AND NOT ON THE NODE, because that is what keeps the original reason
-      intact: the handler names what it needs BY SHAPE rather than by node, so it stays reusable
-      across every state that satisfies the view. That is STRONGER reuse than today's `sees
-      nothing`, not weaker — a handler needing a goal cannot be written at all right now.
-      AND THE FUNCTION SCHEMA STAYS COMPLETE: [:=> [:cat <the event's schema> <the view>] <out>],
-      both halves still off the event definition and nothing off the graph.
-    - THE CHECK COSTS NOTHING, WHICH IS THE STRONGEST ARGUMENT FOR THIS SHAPE. `admits` already
-      answers it, with the view as TARGET and the source state's schema as PRODUCED. Measured
-      2026-09-01, all four verdicts: a state carrying the key and more answers :yes; a state
-      without it :no; a state whose key is the wrong type :no; and A STATE THAT ONLY OPTIONALLY HAS
-      IT ALSO :no, which is right — a view that must be there cannot rest on a maybe. So `this
-      handler asks to see what this state cannot provide` becomes a PROVEN fault, before anything
-      runs.
-    - THE HOLD HALF: PROJECT AT THE DOOR. A node holds exactly what it declares — the merged value
-      is projected onto the keys of its enter-schema on entry. VISIBILITY IS THEN BOUNDED BY
-      ABSENCE rather than by permission, which is stronger than any read rule, and it dissolves
-      `a merge cannot remove a key` at the same time. It is one call in the step.
-      IT IS ALSO THE ANSWER TO `OR ANOTHER STATE`: a state seeing another state's data IS the
-      merge, today unconditional and undeclared, and under projection it is exactly what the
-      node's schema says. One mechanism, both halves.
-    - HOW BROAD IT IS TODAY, measured rather than argued: a node whose schema is [:map [:y :int]]
-      declares (:id :instance :y) and RECEIVES {:x 7 :id :b :y 1}, the :x having come from the
-      state before it, and it validates because malli maps are open. The tutorial shows the same
-      thing as a review's :notes sitting in a published manuscript. So a handler needs no read
-      capability to see stale or sensitive data — it is already in the state it is about to change.
-    - THE EVENT SIDE ALONE DOES NOT GIVE THE SECURITY PROPERTY, and this is where the author's
-      constraint bites hardest: a view declared by the event is least privilege BY THE HANDLER'S
-      OWN WORD, and a careless or shared handler declares {:sees [:map [:token :string]]} and gets
-      it. If a state holds a credential, the DATA OWNER needs the say — the node declares what it
-      EXPOSES, the event declares what it NEEDS, and the check verifies need is within exposure.
-      Two declarations, one handshake, and the default on both sides is DENY, which is exactly
-      today's behaviour and costs nothing to keep.
-    - WHAT MAKES PROJECTION A DECISION AND NOT A ONE-LINER, both said out loud: it is BREAKING,
-      since every node must then declare every key it carries forward — cheap before release and
-      expensive after — and A BARE [:map] STOPS MEANING `anything` AND STARTS MEANING `nothing`,
-      which every generative fixture in this suite relies on. Whether projection is opt-in per node,
-      shape-wide, or a `:keeps` declaration separate from the schema is the open question that goes
-      with it.
-    - PROJECTION WAS TAKEN, and the three-way open question that went with it is closed by
-      MEASUREMENT rather than argument: projecting always cost exactly ONE test in the whole suite,
-      an async fixture whose state schema was a bare [:map] while its handler set :mark. It was
-      under-declared, and the fix made it honest; the `form` fixture wanted the same correction.
-      Opt-in-per-node and a separate :keeps declaration existed only to avoid a cost that turned
-      out not to be there, so neither was built.
-    - AND THE ORDER WAS FORCED, which the design did not see: THE VIEW CHECK IS ONLY SOUND UNDER
-      PROJECTION. While a node's schema was a LOWER BOUND on what it held, a key could arrive from
-      three transitions back, so `admits` answering :no proved nothing and `problems` would have
-      condemned shapes that run — against its own promise to report only PROVEN faults. Holding had
-      to land before reading, and the two halves hold each other up.
-    - WHAT IS STILL NOT BUILT is the node-side EXPOSURE, the half that carries the security property
-      against a careless handler. It is additive, and it waits for a real shape to ask."
+   "IT IS THE CONSTRUCTOR OF THE MACHINE WHO DECIDES what is visible from inside, never the library
+    automatically. BOTH HALVES ARE BUILT. THE READ HALF: a view declared ON THE EVENT, so the handler
+    names what it needs BY SHAPE and stays reusable. THE HOLD HALF: PROJECT AT THE DOOR — a node holds
+    exactly what it declares, so visibility is bounded BY ABSENCE rather than by permission, which
+    also dissolved `a merge cannot remove a key`. THE CHECK COSTS NOTHING, `views` being `admits`
+    again. AND THE ORDER WAS FORCED: the view check is only sound UNDER projection, so holding had to
+    land first. Node-side EXPOSURE is not built — see :open-questions."
+
+   :an-event-may-say-how-it-is-reported
+   "THE AUTHOR'S, 2026-09-04, arrived at from a CONSUMER rather than from this library: coder's
+    driver carried a map of `acts` keyed by state, and the author's objection was that it
+    `collects otherwise independent steps into a global map — the integration point should not be
+    spread, the FSM shape already did it`. Right, and the reason it was spread is that THE SHAPE
+    HAD NO PLACE TO SAY IT.
+    - THE GAP WAS ALREADY NAMED HERE and dismissed. :a-join-is-the-product-and-the-licence says
+      `THE ONLY THING THE SHAPE CANNOT SAY is whether an event comes from the DRIVER or from the
+      WORLD — a label and not a feature, and nobody has asked for it`. It is a FEATURE, and what
+      says so is that every driver written against this library has to write that knowledge down
+      a second time, in its own index, where nothing can check it.
+    - THE GRAMMAR: {:report <fn> :reads <a map schema>} on an event. :report goes and finds the
+      fact; :reads is the view of the state it needs, projected and validated exactly as :sees is.
+      AN EVENT WITH NO :report COMES FROM THE WORLD, which is what a park is — so the declaration
+      IS the driver/world distinction, in data.
+    - IT IS SYMMETRIC WITH WHAT AN EVENT ALREADY HAD. :handler/:out/:sees say how an event LANDS;
+      :report/:reads say how it is FOUND. Both halves off one declaration, which is what
+      :a-handler-belongs-to-the-event bought for the first half.
+    - IT IS NOT AN INTERNAL EVENT and does not reopen :a-handler-causes-nothing. The machine does
+      not move itself: this is the shape telling a CALLER how an event would be found, and a
+      caller choosing to ask. No queue, no run-to-completion, and the reduction is untouched.
+    - WHY THE WORK CANNOT SIMPLY GO IN THE HANDLER, which is what was proposed first and is the
+      thing to understand before proposing it again: A GUARD READS THE INCOMING EVENT. `entry`
+      validates the guard against the payload and only THEN runs the handler, so a fact a branch
+      depends on must be on the event when it ARRIVES. A handler computing a verdict computes it
+      after the edge is chosen, and the only way back is two events for one observation — the
+      hidden transition :a-guard-is-a-schema-over-the-event removed.
+    - AND A SHAPE IS A FUNCTION OF ITS ENV, which is the author's other half and what makes the
+      report able to do real work: a consumer writes (defn shape [env] ...) and the reports close
+      over the writer and the REPL as the shape is built. :a-shape-is-code already licensed a
+      closure; this is that, one level out. The shape can still be built with NO env at all —
+      measured in ../coder, where (shape {}) checks and draws for nothing.
+    - `readings` IS `admits` FOR THE FOURTH TIME — `views` was the second, `yields` the third —
+      with the read as TARGET and the source state's schema as PRODUCED. A driver runs a report in
+      the state that AWAITS the event, so that state is what must provide the keys. :undeclared
+      where there is no report, :reads-unavailable where it is PROVEN the state cannot supply it,
+      and an optional key is :no for the same reason a view cannot rest on a maybe.
+    - A :reads WITH NO :report IS REFERENTIAL, being a view nothing will ever be handed.
+    - AND THE PURE LIFT KEPT ITS SHORT FORM, which mattered more than it looks: declaring a report
+      would otherwise have forced the 5-arity and written the event's schema out twice again,
+      undoing :an-event-given-only-a-schema-is-a-pure-lift. A handler is a fn and options are a
+      map, so the 3-arity takes either and says which by type."
 
    :a-handler-answers-a-map-and-declares-it
-   "DECIDED 2026-08-30. A handler's return value is a MAP, MERGED into the state — and the edge
-    also DECLARES the malli schema of that map. Both halves are chosen for one reason, the static
-    check, and for no other.
-    - An opaque (fn [state] state') can never be checked, whatever the graph holds it in, and a
-      diff composes with a schema no better. A merge of two MAP SCHEMAS does:
-      merge(<from schema>, <declared out>) ⊆ <to schema> is decidable WITHOUT RUNNING ANYTHING,
-      which is the check :what-the-graph-buys promises and the only version of it that is real.
-    - MALLI HAS NO SUBSUMPTION. m/validate answers about a VALUE; there is no `is schema A admitted
-      by schema B`. We write a structural one over :map entries — required keys present, each child
-      compatible — and it is deliberately PARTIAL: yes, no, or DON'T KNOW, and don't-know is not a
-      failure. A partial checker that never lies is worth more than a total one that guesses.
-    - The declaration is OPTIONAL per edge. Absent, the check degrades to a GENERATIVE one —
-      generate a state from the source schema and an event from the event schema, run the handler,
-      validate the answer against the target — which is this project's testing style anyway.
-    - REVISED 2026-08-31: the declaration is PER EVENT and no longer per edge, so `optional per edge`
-      now reads `optional per event`. See :a-handler-belongs-to-the-event.
-    - COST, accepted: a merge cannot REMOVE a key. A state that must drop a field is a state the
-      v1 shape cannot express.
-    - THAT COST IS PAID OFF, 2026-09-01, and from the other end than the one it was stated at: the
-      merge is PROJECTED onto the target node's declared keys on entry, so dropping a field is
-      declaring one fewer and a state is exactly what its schema says. What it costs instead is that
-      carrying a key across several states is EXPLICIT, each of them declaring it. See
-      :internal-visibility-is-declared-and-not-automatic."
+   "A handler's return is a MAP, MERGED into the state, and the event DECLARES its schema. Both halves
+    are for the static check and no other reason: an opaque (fn [state] state') can never be checked,
+    and a merge of two MAP SCHEMAS can. The declaration is OPTIONAL per event; absent, `subsumption`
+    says :undeclared rather than faulting. What it costs now is that carrying a key across several
+    states is EXPLICIT — which for a join is not a cost but the whole mechanism."
 
    :the-event-catalogue-is-denormalised
-   "DECIDED 2026-08-30, and FORCED by ubergraph rather than chosen — see :ubergraph-0-9-0. An
-    Ubergraph holds nodes and edges and NOTHING ELSE, so the event catalogue (event id -> malli
-    schema) has nowhere on the graph to live. It is therefore an ARGUMENT to the constructor, which
-    writes each event's schema onto EVERY EDGE that carries it and refuses a shape whose edges
-    disagree about one event. The graph remains the whole shape.
-    - What is lost, and where it goes instead: `an event no transition mentions is dead code`
-      stops being a graph query, because a catalogue no longer exists to be dead relative to. It
-      becomes a CONSTRUCTION-TIME check, which is the only moment the catalogue is in hand — and
-      the disagreement check is a better one than the check it replaces.
-    - WHAT WAS KILLED FIRST, so nobody proposes it again: making the graph bipartite,
-      state --> event --> state, is not merely awkward, it is WRONG. Two transitions on :submit
-      leaving different states would share one event node and FABRICATE paths the shape never
-      said — A -> submit -> D, when all that was declared was A -> submit -> B and C -> submit -> D.
-    - EXTENDED 2026-08-31: the catalogue now carries the HANDLER and its :out as well as the event's
-      schema, for the same reason and by the same mechanism. See :a-handler-belongs-to-the-event."
+   "FORCED by ubergraph rather than chosen: a graph holds nodes and edges and NOTHING ELSE, so the
+    catalogue is an ARGUMENT to the constructor, written onto every edge that carries the event, and a
+    shape whose edges disagree about one event is refused. WHAT WAS KILLED FIRST, so nobody proposes
+    it again: a bipartite state->event->state graph is not merely awkward, it is WRONG — two
+    transitions on :submit would share one event node and FABRICATE paths never declared."
 
    :a-guard-is-a-schema-over-the-event
-   "DESIGNED WITH THE AUTHOR AND BUILT 2026-09-03. How a conditional transition is spelled.
-    - WHAT IT REPLACES, and the entry it replaces is GONE at the author's word, so what that one
-      said is here instead. :v1-is-deterministic, DECIDED 2026-08-30: NO GUARDS, a state and an
-      event having exactly one target, which made `compile` a LOOKUP rather than a search and
-      every static check answerable — at the cost that :submit -> :accepted | :rejected was
-      INEXPRESSIBLE and branching had to be spelled as two different events, pushing the decision
-      onto whoever PRODUCED the event. It called itself the first thing to revisit, and this is
-      that. DETERMINISM IS NOT WHAT WAS GIVEN UP: it stays the contract, and the whole of the
-      change is that it is now PROVEN rather than had for free.
-    - WHAT STARTED IT, the author's: `a hidden transition is something we want to avoid`.
-      ../coder's machine is {:shape <a graph> :act <state id -> fn>} — A MAP WITH TWO HALVES AND
-      ONLY ONE OF THEM IS A GRAPH — and its `judging` picks between the two edges out of :written
-      with an ordinary `if`. The drawing shows both arrows and NOTHING SAYS WHICH ONE FIRES;
-      neither `problems` nor `subsumption` can see the `if`. That is the fault coder's own
-      notebook diagnoses in its earlier version — `a transition hidden inside an event handler` —
-      moved one level out and given a nicer name.
-    - THE DISTINCTION IS EXTERNAL AGAINST HIDDEN. A person clicking approve is EXTERNAL and the
-      machine never claimed to model them. A step of your own workflow that runs the code and
-      then picks the edge is HIDDEN. And v1 makes the second unavoidable: with the target a
-      function of [state, event-id] alone, A DATA-DEPENDENT BRANCH CANNOT BE IN THE SHAPE AT ALL,
-      so `no hidden transitions` and `no guards` cannot both hold.
-    - THE GRAMMAR: {:when <a map schema>} on a transition, and nothing else added. :when IS TO A
-      TRANSITION WHAT :sees IS TO AN EVENT — both an optional map schema in the options map, each
-      declared where the thing it constrains lives. :sees projects the STATE for the handler;
-      :when filters the EVENT for the edge.
-        (transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
-        (transition :written :judged :fault       {:when [:map [:verdict [:= :red]]]})
-      WHAT WAS TURNED DOWN WAS A MAP WITH THREE MEANINGS IN IT — a dispatch key beside
-      case->target pairs beside an :else — refused by the author on sight and rightly: the tiers
-      are not grammar, they are HOW MUCH THE CHECKER CAN PROVE, which is the same three answers
-      `admits` already gives.
-    - WHY A SCHEMA AND NOT A PREDICATE. A schema is DATA — drawable, storable, comparable, and
-      partially decidable by machinery already here. A predicate is a closure, which is the thing
-      being escaped. And an `:fn` carries a :description, so ONE EXPRESSION IS BOTH THE CHECK AND
-      THE LABEL: the repository's own cross-component rule, and it means a named guard needs no
-      naming mechanism.
-    - WHAT THE OTHER LIBRARIES DO, surveyed the same day. THREE FAMILIES.
-      (A) ORDERED CANDIDATES AND A PREDICATE — UML/Harel, SCXML `cond`, XState, clj-statecharts,
-      python-transitions, Spring: [state, event] yields a LIST, evaluated in DOCUMENT ORDER, first
-      passing guard wins, an unguarded last entry the conventional fallback. The part worth
-      stealing is not the guard but that XSTATE NAMES IT — `guard: isGreen` is a string in a
-      serializable config while the function lives in a separate setup map, which is what lets
-      their visualizer draw EVENT [isGreen]. Which is Harel's own notation, event [guard] /
-      action, unchanged since 1987.
-      (B) PATTERN MATCHING IN HOST CODE — gen_statem, Akka, Rust statig: the branch is ordinary
-      code and there is no graph to check, accepted deliberately because none of them promised a
-      drawable one. gen_statem matches on the EVENT'S CONTENT, which is this proposal with a
-      language's pattern matcher in place of a schema.
-      (C) DETERMINIZE ON THE INPUT VALUE — Automat compiling an NFA to a DFA, and table-driven
-      lexers generally: the table is keyed by input VALUE and nondeterminism is resolved before
-      anything runs. This proposal is in C.
-    - AND FAMILY A IS THE ONE THIS GRAPH CANNOT HAVE, measured rather than assumed:
-      ubergraph/core.clj:284 stores node-info as {:out-edges {dest-id #{edge}} :in-edges ...} —
-      A SET. There is no edge order to recover, so DOCUMENT-ORDER FIRST-MATCH IS NOT
-      REPRESENTABLE, and a priority number would be order smuggled back in as data. Determinism
-      here has to be PROVEN rather than ordered — the same shape of constraint as
-      :the-event-catalogue-is-denormalised, forced by ubergraph and not chosen.
-    - HENCE THE RULE, sharper for being forced: DECIDABLE GUARDS BRANCH, AND AN :fn GUARD MAY
-      ONLY APPEAR ALONE on its [from event]. A lone :fn is a FILTER — `:again only while under
-      budget` — and it cannot threaten the lookup, having nothing to be ambiguous with.
-    - :ambiguous INVERTS, AND SHOULD. Everywhere else this checker reports only PROVEN faults;
-      here it must demand PROVEN SAFETY — two edges on one [from event] whose guards are not
-      provably disjoint are a fault. The asymmetry is principled: determinism is the CONTRACT and
-      not a nicety, and a shape that cannot prove it is deterministic is not one.
-    - THERE IS NO :else, and it is the fallback concept the whole of family A needs and this
-      library already had: no guard matching means no edge admits the event, which is `ignored` —
-      the reduction stays total and the stream says :fired false. See
-      :an-ignored-event-is-not-an-error-but-is-not-silent.
-    - CLOSED MAPS ARE THE AUTHOR'S CORRECTION, and they make the checker STRONGER. `Absence is
-      awkward to guard on` was said and is wrong: {:closed true} is already this library's
-      vocabulary — `patch-schema` closes a map for exactly this reason. It gives `disjoint?` a
-      SECOND decidable rule beside `a shared key whose value schemas are disjoint`: A CLOSED
-      SCHEMA THAT DOES NOT NAME k IS DISJOINT FROM ONE THAT REQUIRES k.
-      AND THE EXAMPLE GIVEN FOR IT WAS WRONG, corrected 2026-09-03 by trying it in ../coder.
-      `green means no :fault key is decidable rather than a nudge towards inventing a tag` DOES
-      NOT WORK when the key is one the EVENT'S OWN SCHEMA declares. `accepted` MERGES the guard
-      over that schema, so [:map {:closed true}] against an event declaring
-      [:fault {:optional true} ...] yields a closed map that STILL HAS :fault optional — which
-      is genuinely satisfiable with a fault, so `disjoint` answering :unknown is correct and the
-      shape is rightly refused as :ambiguous. MEASURED. The closed lever reaches a key the event
-      schema does not declare at all, and no further. So the tag was needed after all, and
-      coder's :judged carries {:verdict [:enum :green :red]}.
-      AND THE PAYLOAD CONVENTION IS THE ANSWER TO WHAT THAT COSTS, the author's, decided
-      2026-09-03: A GUARD DESCRIBES THE EVENT WITHOUT THE MACHINERY KEYS. An event map carries
-      :id, and :instance where a run is named — :sub is a state's alone — so a guard is checked
-      against (dissoc event :id :instance), exactly as a state's schema describes the state
-      without :id, :instance and :sub. One convention, applied in a third place, and without it
-      a closed guard would fail on :id every time.
-      AND IT CANNOT STOP AT THE GUARD, which is the part worth knowing before agreeing to it.
-      An event's own :schema is conformed against the WHOLE event map today and gets away with
-      it because malli maps are open. Leave that alone and the exhaustiveness check compares a
-      guard over the PAYLOAD against a schema over the WHOLE MAP — TWO SCHEMAS ABOUT DIFFERENT
-      VALUES, which is the drift :a-partial-subsumption-checker exists to refuse: what is checked
-      has to be what runs. So the event's :schema is conformed against the payload too — which
-      also makes a CLOSED EVENT SCHEMA usable, an event carrying exactly these keys and no more,
-      unwritable today.
-      WHAT THAT BREAKS is small and is probably a correction: an event declaring :id or :instance
-      in its own schema validates today and would stop. :reserved-declared checks STATES ONLY, so
-      the symmetric check on events is part of this change rather than an extra one.
-    - THE CHECKERS ARE THREE, designed 2026-09-03, and NONE OF THEM IS NEW MACHINERY.
-      `accepted` IS THE SIBLING OF `produced` and exists for the same reason — what is checked
-      has to be what runs. It is the schema of the events a transition FIRES ON: the event's
-      payload schema with the edge's :when merged over it, so
-      (mu/merge [:map [:verdict [:enum :green :red]]] [:map [:verdict [:= :green]]]) is the
-      refinement. BOTH CHECKS BELOW RUN ON IT and never on the bare :when, or a guard the event
-      schema already contradicts would look satisfiable. `produced` is what comes OUT of a
-      transition and `accepted` is what goes IN.
-      `disjoint` IS THE SIBLING OF `admits`: the same three answers, and the same two levers —
-      the seven pairwise-disjoint primitives, and a finite domain that can simply be TRIED. One
-      inversion, and it is the whole structural difference: THE MAP COMBINATOR FLIPS. `sub-map`
-      is an AND over keys, every one of which must be admitted; `dis-map` is an OR, ONE
-      conflicting key being enough. A key OPTIONAL IN BOTH conflicts with nothing, a value being
-      free to omit it.
-      AND :no COMES WITH A WITNESS, which is the part worth having. [:= v] against a schema that
-      accepts v does not merely fail to prove disjointness, it PROVES OVERLAP and hands over the
-      value — so an :ambiguous fault carries {:witness {:verdict :green}}: here is an event that
-      would fire two edges. For maps the same trick assembled — collect the per-key witnesses,
-      build the candidate map, m/validate it against both. A VALIDATED WITNESS IS A PROOF and not
-      an inference, which is the `just try it` lever `sub` already uses for a finite domain.
-      `coverage` IS THE SIBLING OF `subsumption` AND `views`, one verdict per [from event] group,
-      and it is the other two RUN AGAINST A PROBE — the event schema with one key pinned to one
-      value of a finite domain. :no where every guard is `disjoint` from probe(k,v), a PROVEN GAP
-      carrying {k v} as its witness; :yes where some guard `admits` probe(k,v) for every v, or
-      where any edge in the group is unguarded; :unknown otherwise. Two structural checks off one
-      subsumption function for the SECOND time — `views` did it first, see :what-visibility-taught.
-    - `problems` GAINS ONE FAULT AND NOT TWO. :ambiguous, restated: two edges on one [from event]
-      whose `accepted` schemas are not provably disjoint. COVERAGE IS PUBLISHED AND NEVER
-      FAULTED, because a gap means no edge admits the event, which is `ignored` — legal,
-      first-class, and exactly what a lone :fn filter is FOR. Faulting it would make `problems`
-      report a SUSPICION, which is the one thing it has never done.
-    - WHAT IT COSTS AT RUNTIME: compile's index maps [from event] to a small VECTOR of candidates,
-      each tried with m/validate; disjointness is what makes set order irrelevant, so there is
-      nothing to sort and nothing to order. One unguarded candidate is today's path at today's
-      cost.
-    - NUMERIC BOUNDS ARE THE THIRD LEVER, taken 2026-09-03 at the author's word. Without it
-      [:int {:max 2}] against [:int {:min 3}] is SAME-TYPE, so `disjoint` answers :unknown and the
-      pair is REFUSED as a branch — which is precisely the `attempts > 3` case, forced back into
-      being a tag the driver reports for no reason but the checker's ignorance. With it, maxA <
-      minB is a PROOF: compare :min/:max on numeric schemas, and malli's :> :>= :< :<= comparator
-      schemas, which carry their bound as their child. Numeric bounds are the second-commonest
-      guard after tags, and a checker that turned every one of them into a tag would be refusing
-      what malli can already decide.
-    - THE DRAWING IS HAREL'S: judged [:verdict :green], or the :description where there is one,
-      again [under budget]. A guard is STRUCTURAL — it changes where you go — which is the test
-      :a-node-is-labelled-by-its-id set for anything wanting into a label. The form is truncated,
-      the 1,183-character lesson holding.
-    - WHAT IS NOT TAKEN: A GUARD OVER THE STATE. A guard is over the CAUSE, and the cause is the
-      event. THE DRIVER REPORTS A FACT AND THE SHAPE DECIDES WHAT THE FACT MEANS is the whole
-      move; coder's driver today does both, and turning `a fault string exists` into `go to
-      :fault` is precisely the hidden transition. A {:sees}-style guard over the state is a DOOR,
-      named and not designed — it would be the machine deciding, which
-      :an-event-is-the-only-way-a-transition-happens refuses.
-    - BUILT THE SAME DAY, and README.md says so first, as :source-of-truth requires: the
-      transition bullet, a section of its own, and two limits where `No guards` used to be.
-      What the building taught, including one hole this design did not see, is in
-      :what-guards-taught."
+   "{:when <a map schema>} on a transition, and nothing else added. :when IS TO A TRANSITION WHAT
+    :sees IS TO AN EVENT. It replaces the old no-guards rule; DETERMINISM IS NOT WHAT WAS GIVEN UP, it
+    stays the contract and is now PROVEN rather than had for free. WHY A SCHEMA AND NOT A PREDICATE: a
+    schema is DATA — drawable, comparable, partially decidable — and an :fn carries a :description, so
+    one expression is both the check and the label. THREE DECIDABLE LEVERS: a shared key whose value
+    schemas are disjoint, a CLOSED schema not naming k, and NUMERIC BOUNDS. THE RULE: decidable guards
+    branch, and an :fn guard MAY ONLY APPEAR ALONE on its [from event]. :ambiguous INVERTS and demands
+    PROVEN SAFETY, which is principled — a shape that cannot prove it is deterministic is not one.
+    THERE IS NO :else: no guard matching is `ignored`, which is legal and first-class, so COVERAGE IS
+    PUBLISHED AND NEVER FAULTED. A GUARD DESCRIBES THE EVENT WITHOUT THE MACHINERY KEYS, checked
+    against (dissoc event :id :instance), and the event's own schema is conformed against the payload
+    too or the two checks would be about different values. NOT TAKEN: a guard over the STATE — a guard
+    is over the CAUSE, and the driver reports a FACT while the shape decides what the fact MEANS."
 
    :a-state-may-say-where-it-goes-when-it-completes
-   "BUILT 2026-09-03, out of a review of this architecture against a DECLARATIVE TRANSITION
-    GRAPH proposal — small transition fragments, a separate declarative assembly, and a
-    token-flow runtime with fork/join/foreach/scope operators. Most of what it asked for was
-    already here or was here BETTER; what it named that was genuinely missing came down to
-    one door this file had already named twice and not opened. See :what-the-review-scored.
-    - THE GRAMMAR: {:done <id>} on a state, and {:yield <a map schema>} beside it where the
-      node nests a machine. Nothing else added, and NO FACADE FUNCTION — a completion
-      transition is an OPTION ON `state`, exactly as nesting is, which is the same check on
-      a feature that :the-facade-is-a-vocabulary-and-two-doors applied to nesting.
-    - ONE RULE, AND IT IS UML'S: A STATE COMPLETES WHEN IT HAS NOTHING LEFT TO DO. A state
-      with no :machine has no activity to finish, so FINISHING IT IS ARRIVING and it is
-      passed straight through. One WITH a machine completes when that child reaches a final
-      state, which is the statechart done-transition. That unification is the whole reason
-      this is small: a simple state and a composite one are not two features.
-    - IT IS NOT A GUARD, and that is what it BUYS rather than what it concedes. One target,
-      unconditional, so `compile` stays a lookup and nothing has to be proved disjoint — and
-      a CYCLE among entry-completing states is then a PROVEN infinite loop rather than a
-      suspicion, an unconditional relation being a plain functional graph. :done-cycle, and
-      it is REFERENTIAL, so a machine that would spin for ever is never built. A cycle
-      THROUGH a nesting node is legal — the events are what break it — and the check knows
-      the exception: a child whose own first state is FINAL makes its parent complete on
-      entry too, which is not academic, being exactly what would make such a cycle infinite.
-      THIS IS :a-handler-causes-nothing'S OWN LEAN TAKEN, at the cheaper end. That entry
-      narrowed the door to `the raise belongs to the STATE, arriving somewhere being what has
-      consequences`, and reasoned that an ENTRY RAISE IS UNCONDITIONAL so the relation is a
-      plain graph and a cycle in it is a fault `problems` may report. All of that is what
-      happened. What did NOT happen is the event queue: a completion is a DETERMINISTIC
-      CONTINUATION resolved inside one step, so there are still no internal events, no
-      run-to-completion, and nothing to drain.
-    - :yield IS WHAT A FINISHED CHILD HANDS UP, and it is HARVESTED AT COMPLETION ONLY. That
-      restriction is not tidiness, it is what makes the check SOUND: completing is the only
-      moment the child is guaranteed to be in a final state, so the yield schema is a
-      GUARANTEE rather than a hope. Taken on an ordinary escape the child could be in any
-      state, `admits` answering :no would prove nothing, and `problems` would condemn shapes
-      that run — which is :what-visibility-taught's dependency running the other way from the
-      design for the THIRD time now.
-      AN ESCAPE IS STILL AN ABORT AND STILL YIELDS NOTHING. Aborting is the commoner need and
-      stays what an event does; :done is how a parent WAITS instead. Both coexist, which is
-      the point — :a-machine-can-nest-in-a-node had only the first.
-    - IT IS A REAL EDGE AND NOT A NODE ATTRIBUTE, and this is the decision the rest rests on.
-      `reachable`, `dead-ends`, `finishable` and `traps` all WALK THE GRAPH, so as an edge
-      all four see it and NONE was told anything; as an attribute, four traversals would each
-      have had to learn about it or condemn correct shapes. It carries no :event, and that
-      absence is the whole distinction: `shape/transitions` reads it to leave these out, so
-      `index`, `coverage`, `commutes` and subsumption-over-events are untouched, and
-      `shape/continuations` is where the other kind is read. NOTHING IS LEFT ON THE NODE —
-      two places saying one thing is how a shape drifts from itself.
-    - `subsumption` COVERS IT AND IS NEVER :undeclared, the one way a completion is checked
-      HARDER than an event edge. An event edge is checkable only where the event declared an
-      :out, a closure's answer being otherwise unknowable; a completion carries NO CLOSURE,
-      so what arrives is the state itself and its schema is known exactly. `continued` is the
-      sibling of `produced` and composes in the same order for the same reason.
-    - `yields` IS `admits` FOR THE THIRD TIME — `views` was the second — with the yield as
-      TARGET and the child's own final state as PRODUCED. EVERY final state is asked, a child
-      being free to finish in any of them, and a yield resting on only some is a yield that
-      is sometimes not there. :yield-unavailable.
-    - THE LICENCE HAD TO LEARN ABOUT IT, and asking was the habit :what-the-phase-split-taught
-      said to keep: if ta CONTINUES, the second patch of a licensed pair is applied where ta
-      continued TO and not at ta, so (tgt [ta b]) is not the lookup that runs. `commutes`
-      refuses s, ta and tb. THE JOIN NODE x IS EXEMPT and that matters rather than being a
-      nicety — both orders were proved to arrive at the SAME x and a continuation is a pure
-      function of the state, so a join's own :complete is exactly where a :done belongs, and
-      refusing it would have lost the licence precisely where
-      :a-join-is-the-product-and-the-licence won it. VERIFIED: the n=2 lattice keeps
-      {:verifying #{#{:eval :test}}} with :complete declaring one.
-    - WHAT IT COSTS AT RUNTIME: one map lookup per transition for a shape declaring none.
-      And `arrive` is now ONE definition of what entering a node means, called by all three
-      places that do it — the first state of a run, the far end of a transition, and the far
-      end of a continuation — where the projection had been written out inline.
-    - ONE RESULT ROW PER EVENT, carrying the state the chain ended in, and the intermediate
-      hops are not published. They are a PURE FUNCTION of the shape and the state, so an
-      auditor holding the shape can reconstruct them; an EVENT is the thing a row could not
-      be reconstructed without. It is also what keeps `the-two-doors-agree` intact — a
-      continuation resolved inside the STEP is passed through by the reduction too, where one
-      emitted by the stream layer would have forced that property to weaken.
-    - THE DRAWING IS UML'S: dashed and UNLABELLED. There is no event to name, and a :yield is
-      about the DATA rather than about where the machine goes, which is the test
-      :a-node-is-labelled-by-its-id set. Verified as a real PNG and not merely as dot source.
-    - WHAT IS NOT TAKEN. A CONDITIONAL COMPLETION — `complete to :a or :b depending on the
-      result` — is a guard over the STATE and stays refused. A NODE STILL HOLDS ONE CHILD, so
-      a parent waiting on SEVERAL independent children is still orthogonal regions and still
-      out; what :a-join-is-the-product-and-the-licence said regions were blocked on is now
-      built for the ONE-CHILD case, so what remains is genuinely about regions rather than
-      about yielding. AND FAN-OUT IS STILL STATIC: `foreach` — one child per element of a
-      runtime list, joined when all are done — cannot be spelled, the width being a runtime
-      value and the lattice for it having to be generated per run. That is the one thing the
-      review named that is still missing, and it is the next thing to design."
+   "{:done <id>} on a state, plus {:yield <a map schema>} where it nests a machine. ONE RULE, UML'S: a
+    state completes when it HAS NOTHING LEFT TO DO, so a plain state completes ON ENTRY and a nesting
+    one when its child reaches a final state — and that unification is why this is small. IT IS NOT A
+    GUARD: one unconditional target, so compile stays a lookup and a CYCLE among entry-completing
+    states is a PROVEN infinite loop, refused referentially. :yield IS HARVESTED AT COMPLETION ONLY,
+    which is what makes the check SOUND — completing is the only moment the child is guaranteed final.
+    AN ESCAPE IS STILL AN ABORT AND YIELDS NOTHING. IT IS A REAL EDGE AND NOT A NODE ATTRIBUTE, which
+    is why `reachable`, `dead-ends`, `finishable` and `traps` needed not one line. Drawn dashed and
+    UNLABELLED. NOT TAKEN: a conditional completion, and a node still holds ONE child."
 
    :parallel-is-across-instances
-   "DECIDED 2026-08-31. `Automatically parallel` means ACROSS INSTANCES and nothing else: events
-    partitioned by instance, one sequential reduction each, run at once. Orthogonal regions inside
-    ONE machine are OUT — that is a statechart and not this, and the shape would have to declare
-    which parts of a state a transition touches before any of it were safe.
-    - WHY ONE MACHINE CANNOT PARALLELISE, and it is a DATA DEPENDENCY rather than anything about
-      manifold: compile selects the handler with (idx [(:id state) (:id event)]), so the handler for
-      event n+1 is unknowable until event n has produced its state. No scheduler breaks that chain.
-      A stream library buys backpressure and non-blocking composition here, and not parallelism.
-    - THE NEAR MISS THAT MAKES THE OPPOSITE SOUND TRUE: handler EXECUTION needs only the event, by
-      :a-handler-never-sees-the-state. It is handler SELECTION that needs the state. So the
-      expensive part is parallelisable in principle and unreachable in practice, because you cannot
-      call what you have not yet chosen.
-    - REVISED 2026-08-31, SAME DAY, and the conclusion survived a change to its reason. The handler
-      is now the EVENT's and is known without the state — see :a-handler-belongs-to-the-event — so
-      handler SELECTION is no longer what forces the sequence. ADMISSION is: a handler runs only
-      where an edge admits it, and whether this state admits this event cannot be known until the
-      previous step has landed. A parallel map over one machine's stream would have to run handlers
-      SPECULATIVELY, and since deferreds exist so that handlers can do I/O, speculation means real
-      effects for events the machine ignores. That was refused; see
-      :an-ignored-event-is-not-an-error-but-is-not-silent. The price is the same price, charged at a
-      different counter.
-    - AND A THIRD REASON, the author's, which holds where both of the others fail. A handler that
-      CAUSES another event makes parallel handlers interleave WRONGLY — not wastefully, wrongly — so
-      even with pure handlers and free speculation the order would be wrong. That is why statecharts
-      have run-to-completion. v1 forbids emission (:a-handler-causes-nothing), so the hazard is shut
-      rather than survived; the argument is recorded because it is the one that would still stand if
-      the other two were answered.
-    - CORRECTED 2026-08-31, and the correction is the author's: EVERY ARGUMENT ABOVE IS ABOUT EVENTS
-      ARRIVING ONE AT A TIME. None of them touches two events PENDING IN THE SAME STATE, which is
-      what an async handler creates and which :one-ordered-stream-per-instance does nothing to
-      prevent — that contract promises arrival ORDER, not one-at-a-time PROCESSING. Both handlers are
-      then selected from the same state, so there is no speculation and no unknown state, and the
-      selection argument simply does not apply. `Across instances` is still where the PARALLELISM is;
-      a narrow CONCURRENCY inside one machine is licensed by the shape, and the whole of it is in
-      :two-events-in-flight-at-once."
+   "`Automatically parallel` means ACROSS INSTANCES and nothing else. Orthogonal regions inside one
+    machine are OUT. WHY ONE MACHINE CANNOT PARALLELISE is a DATA DEPENDENCY and not anything about
+    manifold: ADMISSION — whether this state admits this event is unknown until the previous step
+    lands, so a parallel map would run handlers SPECULATIVELY, and handlers do I/O. A THIRD REASON
+    holds where that fails: a handler that CAUSES an event makes parallel handlers interleave WRONGLY,
+    which is why statecharts have run-to-completion. NONE OF IT TOUCHES two events PENDING in one
+    state, which is :two-events-in-flight-at-once."
 
    :what-is-persisted
-   "SUPERSEDED 2026-09-01 by :nothing-is-persisted-here — NOTHING is persisted BY THIS LIBRARY, and
-    the store namespace was never built. What survives below is the answer to a different and still
-    live question: what a CALLER should keep, and why a shape is not part of it.
-
-    DECIDED 2026-08-31: HISTORY, and not the shape. An append-only log of events and the states they
-    produced — audit and trace, which is what the features list names.
-    - IT WAS NEVER REALLY OPEN, and both authorities already said so. The README says it in its own
-      words — `a machines states, events, transitions become history` — and :a-shape-is-code forces
-      it: a shape built at load time, whose handlers are closures and whose schemas are compiled, is
-      not something a database reloads a machine FROM. What a store holds is what HAPPENED.
-    - So SHAPE VERSIONING IS OUT OF v1 and stays out, with the question it drags behind it: which
-      shape an instance mid-flight belongs to. Nothing in the store needs a shape identity."
+   "SUPERSEDED by :nothing-is-persisted-here. What survives is advice for whoever writes a store
+    OUTSIDE this library: keep HISTORY and not the shape, which :a-shape-is-code forces. SHAPE
+    VERSIONING IS OUT OF v1 and stays out, with the question it drags behind it."
 
    :an-instance-has-an-identity
-   "DECIDED 2026-08-31. An instance is identified by a FIXED FIELD, :instance, and it is written by
-    the CONSTRUCTORS and not by hand — a caller says which machine they mean and never spells the key.
-    - THE NAME IS THE README'S OWN WORD. `A lifecycle of an instance of the FSM can be seen as a
-      reduction on a seq of events` — the specification already calls this thing an instance, so any
-      synonym would be this file overriding the README on a coin flip, which :source-of-truth forbids.
-      It is a PLAIN keyword and not a namespaced one, because it is data a user reads and writes in
-      their own maps, exactly as :id is.
-    - IT IS ON THE EVENT AS WELL AS THE STATE, and the EVENT is the half that is load-bearing.
-      Routing an incoming event to the right reduction is a decision made BEFORE any state is in
-      hand, so the partition key cannot be read off a state. A state carries it so that a stored row
-      says what it belongs to; an event carries it so that there is something to partition on.
-    - IT IS A THIRD IDENTITY AND IT GETS A THIRD NAME. :id on a state is which NODE it is in and :id
-      on an event is its TYPE; see :a-state-has-an-id. A word doing two jobs here would be the bug
-      nobody sees.
-    - nil NAMES NOTHING, refined 2026-08-31 when async/fan forced it. fan keys an event carrying no
-      :instance under nil, so (fn [k] (initial sh k {})) is the call site whether a caller names
-      machines or not, and initial's instance argument is [:maybe Instance] rather than Instance. It
-      asserts nothing that way — Instance is `some?` — AND THAT COSTS NOTHING REAL: the invariant
-      worth having is that no STATE ever carries a nil :instance, and that lives on the enter schema
-      where it is checked on every entry rather than once at the door.
-    - WHAT WAS TURNED DOWN: a key-fn handed to the async layer, leaving the core ignorant that
-      instances exist at all. It is the more decoupled design and it is not the one chosen — a fixed
-      field the constructors own is simpler to document, and it makes a state self-describing to the
-      store with no second argument travelling beside it."
+   "A fixed field, :instance, written by the CONSTRUCTORS and never spelled by a caller. It is on the
+    EVENT as well as the state, and the EVENT is the load-bearing half: routing happens BEFORE any
+    state is in hand. It is a THIRD identity and gets a THIRD name. nil NAMES NOTHING, and the
+    invariant worth having — no STATE ever carries a nil :instance — lives on the enter schema."
 
    :a-handler-may-answer-later
-   "DECIDED 2026-08-31. A handler MAY answer a DEFERRED rather than a plain map, so an instance
-    waiting on I/O does not hold a thread. That is what a stream library is actually for, and with
-    parallelism living across instances it is what stops one slow handler starving the pool.
-    - HOW, WITHOUT PUTTING MANIFOLD UNDER THE CORE. compile never learns what a deferred is. It is
-      parameterised by HOW A VALUE BECOMES AVAILABLE — a `then`, of a value and a continuation, and
-      a `pure`, of a value already available — and it composes the step out of those two and nothing
-      else. The SYNCHRONOUS DEFAULT is (fn [v f] (f v)) and identity, needs no dependency at all, and
-      reproduces today's step exactly, so (reduce (compile sh) init events) is unchanged and every
-      existing test passes untouched. The async layer passes d/chain and d/success-deferred and
-      requires manifold on its own account.
-    - THIS IS THE GLOBAL RULE APPLIED and not a new idea: `do not thread options through layers we do
-      not own — inject a function that closes over them`. The core requires no manifold, so :layering
-      holds and .compile still knows nothing of streams.
-    - THE COST, said out loud: the step's RETURN TYPE is now the caller's to know. Under the default
-      it is a State and under the async layer it is a deferred State, so the :malli/schema on compile
-      cannot say [:=> [:cat State Event] State] for both. Whether that becomes two schemas or one
-      loosened one is an implementation question for the async target.
-    - A DEFERRED UNDER THE SYNCHRONOUS DEFAULT IS DEREFERENCED, decided 2026-08-31 by the author, and
-      it is better than the guard that was going to be recommended: synchronous is exactly what
-      `block until it is available` means, so there is nothing to refuse. The default `then` derefs
-      what it is given when that thing is derefable and passes it along otherwise.
-    - AND IT COSTS NO DEPENDENCY, which is why it fits. clojure.lang.IDeref is CLOJURE'S and not
-      manifold's, and a manifold deferred implements it — that is what makes @d work — so the core
-      tests for IDeref and never learns that manifold exists. A handler's answer is a MAP, and a map
-      is not IDeref, so the common path is untouched.
-    - THE COST, said out loud: the synchronous path can now BLOCK, and with no timeout a handler whose
-      deferred never resolves hangs the reduction forever. clojure.core/deref has a 3-arity taking a
-      timeout, so a bounded wait is available without manifold if it is ever wanted; choosing a
-      default timeout is policy and none is chosen.
-    - VERIFIED 2026-08-31, the day manifold landed, exactly as this entry said to: a manifold
-      Deferred IS a clojure.lang.IDeref and derefs to its value, d/success-deferred likewise, and
-      d/chain takes a plain value as happily as a deferred. Nothing was read and reasoned any more."
+   "A handler MAY answer a DEFERRED, so an instance waiting on I/O holds no thread. HOW, WITHOUT
+    MANIFOLD UNDER THE CORE: compile is parameterised by a `then` and a `pure` and never learns what a
+    deferred is — the global rule applied, not a new idea. `then` IS A BIND AND NOT AN fmap. A deferred
+    under the synchronous default IS DEREFERENCED, and it costs no dependency, IDeref being CLOJURE'S.
+    THE COST: the step's return type is the caller's to know, and the synchronous path can now BLOCK
+    with no timeout, since choosing a default one is policy."
 
    :a-handler-belongs-to-the-event
-   "DECIDED 2026-08-31, by the author, and it is the README's own reading recovered: A HANDLER IS
-    CHOSEN BY THE EVENT ALONE. `Each transitions (by event only, a function handle the event, return
-    value will be applied to a state)` says it, and the first implementation had keyed the handler on
-    [state, event] instead.
-    - WHAT MOVES: the handler and its :out go from the TRANSITION to the EVENT.
-      (event id schema handler) and (event id schema handler out); (transition from event to).
-    - THE TARGET STILL COMES FROM THE GRAPH. Only the HANDLER is the event's; where the machine lands
-      is [state, event] -> to as before, because A -submit-> B beside C -submit-> D is the thing
-      :the-event-catalogue-is-denormalised exists to keep expressible.
-    - WHY IT IS BETTER QUITE APART FROM ANY PARALLELISM, which is the reason to do it: two edges can
-      no longer DISAGREE about a handler, because there is one declaration and not two — a
-      construction-time check is replaced by a shape in which the error cannot be written. And it
-      finishes :a-handler-answers-a-map-and-declares-it: the handler's function schema is
-      [:=> [:cat <the event's schema>] <the event's :out>], so BOTH halves now come from the event
-      definition and nothing at all from the graph.
-    - THE COST, said out loud: A -submit-> B and C -submit-> D SHARE one handler and one :out, where
-      before they could differ. The static check gets harder for it, and rightly — submit's :out must
-      now satisfy B's schema AND D's. Where two edges genuinely need different data, that is two
-      events, which is what this library says about branching wherever a guard cannot be
-      declared — see :a-guard-is-a-schema-over-the-event."
+   "A HANDLER IS CHOSEN BY THE EVENT ALONE — the README's own reading, recovered. The TARGET still
+    comes from the graph. Two edges can no longer DISAGREE about a handler, so a construction-time
+    check is replaced by a shape in which the error cannot be written. THE COST: two edges SHARE one
+    handler and one :out, so :out must satisfy both targets. Where they genuinely differ, that is two
+    events — or, since guards, no :out at all with the runtime crossings enforcing it. A GUARD AND A
+    PER-TARGET PAYLOAD PULL AGAINST EACH OTHER."
 
    :an-ignored-event-is-not-an-error-but-is-not-silent
-   "DECIDED 2026-08-31. An event the current state has no transition for is NOT AN ERROR — the
-    reduction stays total — but the step must SAY it happened, and history is where that is recorded.
-    - WHY NOT AN ERROR: nothing controls the order events arrive in behind a stream, so a :cancel
-      landing after :complete is ordinary traffic and not a defect. A machine that throws on it is a
-      machine every caller needs a policy for.
-    - WHY NOT SILENT EITHER, which is the change: an event that SHOULD have transitioned and did not
-      looks exactly like one that was correctly ignored, and no static check can see a runtime fact.
-      Persistence is history, so an audit trail is precisely the place this belongs.
-    - THE HANDLER DOES NOT RUN. No edge means no :to, so there is no enter-schema to validate against
-      and nothing to apply the data TO. The data is not merged — it is never computed.
-    - AND THAT IS WHAT MAKES IT SAFE, because the alternative is worse than it looks. Malli maps are
-      OPEN BY DEFAULT, so merging a handler's answer into a state with no edge for it would produce a
-      state carrying keys that state never declared AND PASSING ITS OWN ENTER-VALIDATION. Verified;
-      see :what-the-design-conversation-verified. `Able to apply, but wrong` was the author's phrase
-      for it and it is the sharpest hazard this design had."
+   "An event the state has no transition for is NOT AN ERROR — nothing controls arrival order behind a
+    stream — but the step must SAY it happened, since an event that SHOULD have transitioned looks
+    identical to one correctly ignored. THE HANDLER DOES NOT RUN, and that is what makes it safe:
+    malli maps are OPEN, so merging an answer into a state with no edge for it would produce a state
+    carrying undeclared keys AND PASSING ITS OWN VALIDATION. A MALFORMED EVENT IS NOT AN IGNORED ONE
+    — where nothing matches, the event is conformed against the group's schema so a bad one throws."
 
    :one-ordered-stream-per-instance
-   "DECIDED 2026-08-31, by the author, and it is a REQUIREMENT THE LIBRARY STATES rather than an
-    assumption it quietly makes. A machine is fed ONE TOTALLY ORDERED stream of events. A caller with
-    several sources merges them into one order BEFORE the machine sees them, because the caller is
-    the only one who can — the machine has no clock and no way to know two events were concurrent.
-    - WHAT IT BUYS IS A WHOLE FEATURE. If external order is guaranteed then an event this state
-      cannot handle is never EARLY: it is irrelevant, or it is a bug in whoever produced it. So
-      DEFERRED EVENTS — the UML statechart mechanism where a state parks an event and the machine
-      re-delivers it after moving on — are not needed, and are out of v1. That is a per-instance
-      queue, a re-drive on every state change and a deadlock case, all avoided by writing an
-      assumption down instead of leaving it unsaid.
-    - WHERE IT BREAKS, so that nobody is surprised by it: two producers with no shared clock, an
-      at-least-once transport that redelivers, a partitioned queue where one instance's events span
-      partitions. Each is real, and each is the caller's to fix upstream."
+   "A machine is fed ONE TOTALLY ORDERED stream; a caller with several sources merges them BEFORE the
+    machine sees them, because the machine has no clock. IT IS A REQUIREMENT THE LIBRARY STATES. What
+    it buys is a whole feature: an event this state cannot handle is never EARLY, so DEFERRED EVENTS
+    are not needed and are out of v1 — a per-instance queue, a re-drive and a deadlock case avoided by
+    writing an assumption down. WHERE IT BREAKS is the caller's to fix upstream."
 
    :an-event-given-only-a-schema-is-a-pure-lift
-   "THE AUTHOR'S, 2026-09-03: `the event's 4-arg constructor looks very redandunt.` It is, and
-    the redundancy is exact rather than a matter of taste.
-    - WHAT THE FOUR ARGUMENTS SAID: for a handler that only lifts — which is nearly all of them —
-      the event's SCHEMA, a `(fn [e] {:k (:k e)})` per key, and an `:out` that is the schema
-      AGAIN are one fact written three times. Two of the three are transcription, and
-      transcription is where a shape drifts from itself.
-    - SO `(event :brief [:map [:brief Brief]])` is the whole declaration: `lifting` makes the
-      handler out of `mu/keys`, and the :out is the schema. `(event :green [:map])` is an event
-      that carries nothing. The 3-, 4- and 5-arities stay for a handler that does something a
-      `select-keys` does not.
-    - :id AND :instance ARE NOT LIFTABLE, and it falls out rather than being arranged: they are
-      not in the declared schema, so `mu/keys` does not name them — which is the same reason
-      :an-event-is-the-only-way-a-transition-happens refuses a handler that reaches for them.
-      Two rules, one mechanism.
-    - AN OPTIONAL KEY ABSENT FROM THE EVENT IS ABSENT FROM THE PATCH, which is exactly what a
-      patch schema permits, so the short form composes with the check above rather than fighting
-      it.
-    - WHAT IT MEASURED OUT AT: the README's own example lost four lines and gained a column of
-      nothing; coder's task shape went from 13 lines of events to 5.
-    - AND A CONSUMER'S LINT CACHE HAS TO BE REFRESHED. clj-kondo remembered the old arities of a
-      :local/root dependency and reported ten errors for correct code. `rm -rf .clj-kondo/.cache`
-      in the consumer, or the documented --dependencies --copy-configs refresh. Worth knowing
-      before believing a lint that disagrees with a green suite."
+   "`(event :brief [:map [:brief Brief]])` is the whole declaration: `lifting` makes the handler out of
+    mu/keys and the :out is the schema. The 4-arg form said ONE FACT THREE TIMES, and transcription is
+    where a shape drifts from itself. :id and :instance are NOT LIFTABLE and it falls out rather than
+    being arranged. IT DOES NOT COMPOSE WITH A TAG: a discriminating key is routing information the
+    target does not hold, so a guarded event usually spells its handler out. AND A CONSUMER'S LINT
+    CACHE HAS TO BE REFRESHED — `rm -rf .clj-kondo/.cache`. Seen twice."
 
    :an-event-is-the-only-way-a-transition-happens
-   "THE AUTHOR'S, 2026-09-03, and it makes a rule this library already intended into one it
-    ENFORCES: `In a FSM, a state can only transit by an event, so inside a machine, the only way
-    of doing transition is to emit an event. And this hidden transition has to be illegal.`
-    - WHAT WAS ALREADY TRUE: a handler could not move the machine. `compile` projected the answer
-      onto the target's keys and then put :id, :instance and :sub on AFTERWARDS, and this file and
-      three docstrings said `identity is the shape's to say`.
-    - WHAT WAS WRONG WITH IT: SILENCE. A handler answering :id was overwritten without a word, so
-      the rule was a convention the code quietly repaired. That is the same shape of fault as a
-      predicate the model cannot see, and this library's own line answers it — `what throws is a
-      crossing that does not hold; those are defects, not facts about the run`.
-    - AND THE AUTHOR BROADENED IT, which is what makes the fix worth having: `the event's returned
-      data should match the state schema`. So the check is not about identity at all. A handler
-      answers a PATCH, and it is conformed against `shape/patch-schema` — the target's own schema
-      with EVERY KEY OPTIONAL and the map CLOSED.
-        optional  a handler says what changed; what it does not mention the state already holds
-        closed    a key the target does not declare never reached the state anyway — `mu/keys`
-                  dropped it one line later — so a handler computing something that EVAPORATES is
-                  a defect, and closing the patch turns a shrug into a refusal
-    - IDENTITY THEN NEEDS NO SPECIAL CASE, and that is the part to keep. A state schema describes
-      the map WITHOUT :id, :instance and :sub, so naming one is answering an undeclared key and is
-      refused by exactly the rule that refuses a typo. One check, three guarantees, and nothing in
-      it mentions identity.
-    - WHERE IT SITS AND WHY: after :out and before :enter. :out is what a handler PROMISES and is
-      optional, existing for the STATIC check; :answer is what the target ADMITS and is not
-      optional. :enter keeps the one thing only a whole state can be wrong about — A REQUIRED KEY
-      NOBODY SUPPLIED, which a patch is allowed not to mention. All three crossings are still
-      distinct and each is asserted.
-    - WHAT IT COST: four tests, every one of which had asserted the silence — a handler's :id
-      overwritten, its :instance overruled, its :sub replaced by the child's first state, and a
-      wrong-typed value caught at :enter rather than at :answer. Rewriting them is the change:
-      each now asserts the refusal, and the suite went 74/205 to 76/217.
-    - AND THE EMISSION HALF STAYS SHUT. The author reasoned to it independently on the same day:
-      `An internal conditional should generate an event to the event queue. However, in our
-      current design, the machine does not own the event queue.` Which is
-      :a-handler-causes-nothing's own argument arrived at from the other end — see it below, and
-      :one-ordered-stream-per-instance for why the queue is the caller's."
+   "A handler answers a PATCH, conformed against the target's own schema with EVERY KEY OPTIONAL and
+    the map CLOSED. What was already true is that a handler could not move the machine; WHAT WAS WRONG
+    WITH IT WAS SILENCE, the code quietly repairing a convention. Optional because a handler says what
+    CHANGED; closed because a key the target does not declare EVAPORATES, and closing turns a shrug
+    into a refusal. IDENTITY THEN NEEDS NO SPECIAL CASE — naming :id is answering an undeclared key,
+    refused by the rule that refuses a typo. One check, three guarantees. It sits after :out and
+    before :enter, all three crossings staying distinct."
 
    :a-handler-causes-nothing
-   "DECIDED 2026-08-31, and REAFFIRMED by the author 2026-09-03 on the reasoning that the machine
-    does not own an event queue — see :an-event-is-the-only-way-a-transition-happens.
-    In v1 A HANDLER MAY NOT CAUSE ANOTHER EVENT. It answers a data map and that is
-    all it does; a cascade is spelled as the caller feeding the next event.
-    - WHY IT MATTERS: a handler that raises an event is the classic source of SELF-INFLICTED disorder,
-      and it is the reason statecharts have RUN-TO-COMPLETION — one external event processed fully,
-      internal events and all, before the next is accepted. With no emission there are no internal
-      events, so there is no queue to drain and no RTC to implement, and the core stays the reduction
-      the README promises.
-    - IT IS A CONTRACT AND NOT A GUARANTEE, and the difference matters here. :a-handler-may-answer-later
-      allows deferreds precisely so a handler can do I/O, and a handler doing I/O can publish to the
-      very stream feeding this machine. No schema catches that. It is a rule people follow, and the
-      failure mode when they do not is an ordering bug wearing the mask of a logic bug.
-    - AN EXTERNAL EVENT IS THE ULTIMATE SOURCE OF A TRANSITION, said by the author on 2026-08-31 and
-      worth keeping as the principle: the world moves the machine. An INTERNAL event is not a second
-      kind of cause, it is a convenience, and the thing it buys is HANDLER REUSE — that is the whole
-      motivation and it is smaller than `cascades` makes it sound.
-    - THE DOOR, NARROWED. The raise belongs to the STATE — arriving somewhere is what has
-      consequences — and not to the edge or the event. Two reasons that arrive there separately: the
-      programming model is simpler, since a handler still answers a PATCH and the state applies it
-      and only then raises; and an entry raise is UNCONDITIONAL, so the raise-driven relation is a
-      plain graph and a cycle in it PROVES the machine can raise for ever, where a raise conditional
-      on a handler could only ever be reported as possible. That second one is the difference between
-      a fault `problems` may report and a warning it may not.
-    - WHAT IS TURNED DOWN IS THE HANDLER KNOWING. A handler answering both a patch and a set of
-      events to raise undoes :a-handler-answers-a-map-and-declares-it — the answer stops being a map
-      merged into the state, so :out no longer describes it and the static check loses its subject.
-      Reuse does not need it: the state can raise what the handler never mentioned.
-    - AND IT IS NOT DESIGNED, deliberately, 2026-08-31. The handler's signature is UNCHANGED and
-      nothing is owed. If internal events prove common enough in a shape written in anger, design it
-      then, starting from the state-raises lean above. Whoever does should weigh one thing this
-      conversation raised and did not settle: AN INTERNAL RAISE IS A SECOND EVENT SOURCE, and
-      :one-ordered-stream-per-instance pushed source-merging onto the CALLER precisely because the
-      machine has no clock. A queue inside the machine is the machine doing that merging, on an order
-      somebody has to choose.
-    - WHAT WAS TURNED DOWN: a handler answering both a delta and events to raise, {:data {...}
-      :raise [...]}. Least ceremony to write, and it undoes what
-      :a-handler-answers-a-map-and-declares-it bought — the answer stops being a map merged into the
-      state, so :out no longer describes it and the static check loses its subject."
+   "A HANDLER MAY NOT CAUSE ANOTHER EVENT. With no emission there are no internal events, no queue to
+    drain and no run-to-completion. IT IS A CONTRACT AND NOT A GUARANTEE — a handler doing I/O can
+    publish to the stream feeding this machine, and no schema catches it. AN EXTERNAL EVENT IS THE
+    ULTIMATE SOURCE OF A TRANSITION: the world moves the machine. THE DOOR WAS NARROWED to `the STATE
+    raises` and then taken at the cheaper end, as a deterministic CONTINUATION rather than an event,
+    so the cycle check exists and the queue still does not. TURNED DOWN: the handler answering both a
+    patch and events to raise, which would cost :out its subject."
 
    :how-the-step-says-a-thing-was-ignored
-   "DECIDED 2026-08-31, and only decidable once :one-ordered-stream-per-instance and
-    :a-handler-causes-nothing had removed every reason to PARK an event. A THIRD INJECTED FUNCTION,
-    beside the `then` and `pure` of :a-handler-may-answer-later: an `ignored` of a state and an event,
-    defaulting to (fn [state _event] state), which the store layer replaces with one that records.
-    - WHY THIS AND NOT A RICHER RETURN. An outcome value — {:state s :outcome :ignored} — is the
-      STRUCTURAL answer, impossible for a caller to miss, and it was the better choice for as long as
-      `ignored` might have had to grow into `deferred`. With deferral out the signal is two-valued and
-      stays two-valued, and the outcome value's cost is real: (reduce step init events) would stop
-      yielding states, and that reduction is the README's own headline sentence.
-    - identical? IS NOT IT, and it was checked before being recommended rather than after — see
-      :what-the-design-conversation-verified. Metadata on the state is worse still: merge and assoc
-      PRESERVE metadata, so a stale flag would ride into every later state.
-    - THE COST: the guarantee is OPT-IN. A layer that injects nothing gets today's silence. It is the
-      store layer that wants the record and the store layer that injects, so the default is only ever
-      taken by a caller recording nothing anyway."
+   "A THIRD INJECTED FUNCTION, `ignored`, defaulting to (fn [state _event] state). NOT a richer return:
+    an outcome value is the structural answer, and its cost is that (reduce step init events) would
+    stop yielding STATES, which is the README's headline sentence. identical? IS NOT IT — a fired
+    self-loop answering {} returns an identical state — and metadata is worse, merge and assoc
+    preserving it so a stale flag would ride along. See :open-questions on whether it still earns its
+    place."
 
    :a-trap-is-what-a-cycle-hides
-   "BUILT 2026-08-31, and the cheapest thing that was left. `traps` answers the REACHABLE states
-    from which no ending can be reached: the machine stays alive, goes on accepting events, and can
-    never legitimately finish.
-    - IT IS `reachable` RUN BACKWARDS, which is why it was cheap. `finishable` traverses the
-      TRANSPOSED graph from every :final — uber/transpose and alg/pre-traverse, both already on
-      hand and both checked before being used — and a trap is a reachable state not in it.
-    - BOTH OTHER STRUCTURAL CHECKS WALK STRAIGHT PAST IT, and that is the whole argument for it.
-      `unreachable` cannot see it, because a forward traversal gets there. `dead-ends` cannot,
-      because a trap HAS out-edges: going nowhere and going nowhere USEFUL are different faults. A
-      dead end is a trap of SIZE ONE; two states bouncing off each other are the smallest
-      interesting one. The `trapped` fixture is exactly that, and check/problems answered [] on it
-      before this existed — the suite records that fact rather than describing it.
-    - THE EXCEPTION IS WHY IT WAITED, and the fix was to put it in `finishable` and not in `traps`:
-      where a shape declares no :final at all, EVERY state is finishable, vacuously, so the check
-      is silent of its own accord rather than by a special case. A machine never meant to terminate
-      is not a broken one, and the `endless` fixture asserts that silence.
-    - `traps` IS TOTAL AND `problems` IS WHAT FILTERS, the pattern `subsumption` already set. A
-      dead end is in `traps` and is reported as :dead-end, the sharper of the two diagnoses, so
-      every state is named once and named by the more specific fault.
-    - AND IT IS VISIBLE IN THE PICTURE, which is what :what-the-graph-buys claims for the drawing:
-      `oops` leads into a two-node pocket with no arrow reaching the double circle. Not as stark as
-      an island, and still obvious."
+   "`traps` answers the REACHABLE states from which no ending can be reached. It is `reachable` RUN
+    BACKWARDS, which is why it was cheap. BOTH OTHER CHECKS WALK STRAIGHT PAST IT: a forward traversal
+    gets there, and a trap HAS out-edges — going nowhere and going nowhere USEFUL are different faults.
+    THE EXCEPTION LIVES IN `finishable`, not in `traps`: with no :final declared, every state is
+    finishable vacuously, so a machine never meant to terminate is silent of its own accord."
 
    :two-events-in-flight-at-once
-   "DECIDED 2026-08-31, and it is the async story. A handler may answer a deferred, so a second event
-    can arrive while the first is still in flight, and a machine is in ONE state at a time. What may
-    be done about the second is the whole question.
-    - THE TWO CASES, the author's: where the state admits ONLY the first event, the second must WAIT
-      and be applied to the updated state. Where the state admits BOTH, they may in principle be
-      applied in order of COMPLETION.
-    - BUT `BOTH ADMITTED` IS NOT THE CONDITION, and this is where the first analysis was wrong. Both
-      admitted means each is INDIVIDUALLY legal there, not that they COMMUTE. idle -start-> running
-      beside idle -cancel-> cancelled: both legal, and if start completes first the machine is in
-      running, which has no cancel edge, so the cancel is SILENTLY DISCARDED and the caller believes
-      they cancelled. Reverse the completion order and it lands. That is a flake, not a race anybody
-      chose.
-    - THE CONDITION IS CONFLUENCE — the diamond [S,A]->Ta, [S,B]->Tb, [Ta,B]->X, [Tb,A]->X with the
-      same X — plus patches that commute, plus both intermediate states being enterable.
-    - AND CONFLUENCE COLLAPSES TO SELF-LOOPS, which is what makes this cheap. If both events are
-      self-loops then Ta = Tb = X = S and the diamond closes TRIVIALLY, with no graph query. If
-      either event leaves the state, the other route has to exist AND rejoin, which MEASURED over
-      this project's own fixtures never happens — see :confluence-was-measured-not-guessed. Divergence
-      is the POINT of a state machine, so confluence is the exception and not the rule.
-    - THE WRITE-WRITE CONDITION IS NO LONGER ABSOLUTE, 2026-09-03. It was never really about
-      Bernstein and always about `merge`: last-write-wins is the only non-commutative thing in the
-      apply phase, so two patches touching one key were refused because of the OPERATION and not
-      because of the data. A key that declares a COMMUTATIVE COMBINE is licensed. The READ half
-      is untouched and cannot be helped by one — a handler that read the key computed from a value
-      the other event changes, so its patch is stale whatever lands it. See
-      :a-combine-is-how-a-patch-lands.
-    - SO THE RULE IS SMALL. SERIALISE BY DEFAULT, always correct and needing no annotation. Take
-      concurrency only where both pending events are SELF-LOOPS on the current state and their :out
-      key sets are DISJOINT — mu/keys on each, and that declaration was paid for by the subsumption
-      check already. That is the niche where it pays anyway: a form being filled in, a document
-      edited, independent fields updated while the machine stays put.
-    - NO DEPENDENCY AND NO INDEPENDENCE IS DECLARED. Dependency is the default and needs no saying.
-      An author-asserted independence was considered and turned down twice over: the shape ALREADY
-      says which events are self-loops, so nothing needs asserting; and independence is
-      STATE-RELATIVE, so a global claim would be refuted somewhere in most real shapes and would
-      rarely be usable.
-    - THE PATCH IS NEVER STALE, ONLY THE ADMISSION IS, which is a payoff from
-      :a-handler-belongs-to-the-event. A handler answers from the event alone, so what it computed
-      while the machine was in S is still exactly right in T; it is only whether T admits the event
-      that can have changed, and that is re-looked-up at application time as any other step is.
-    - THAT CLAIM NOW HAS AN EXCEPTION, 2026-09-01, and it is the one thing views cost: A HANDLER
-      THAT READS CAN HAVE A STALE PATCH. If it computed from a key the other event changes, what it
-      answers was right in S and is wrong in T. So the patch condition stopped being `disjoint :out
-      key sets` and became BERNSTEIN'S — neither writes what the other writes, and neither READS
-      what the other writes. MEASURED, and the old condition really did license a bad pair: writes
-      of {:total} and {:n} are disjoint while :sum reads :n, and the two orders answer :total 2 and
-      :total 18. check/commutes was fixed the same hour and the pair is now :unknown. An event with
-      no view reads nothing, so no shape written before views is affected.
-    - THE COST, ACCEPTED by the author: where concurrency is taken, HISTORY ORDER STOPS MATCHING
-      ARRIVAL ORDER. Persistence is an audit trail, so the log has to represent that honestly rather
-      than pretend to a sequence that did not happen.
-    - THE CHECK IS BUILT, 2026-08-31: check/confluence publishes a verdict per pending pair per
-      state, and check/commuting reduces it to {state #{#{a b}}} — the proven pairs, as PLAIN DATA
-      the async layer is handed the way it is handed a compiled step, which is how that layer still
-      knows nothing of shapes. THE GENERAL DIAMOND IS WHAT GOT IMPLEMENTED and not the self-loop
-      shortcut, because it costs the same four lookups and answering :no for `not both self-loops`
-      would have been a LIE — a general diamond can close. Self-loops remain where it pays; nothing
-      is special-cased for them.
-    - AND THE INTERMEDIATE STATES NEEDED NO CHECK, which fell out rather than being solved: if
-      [ta b] is an edge at all then `subsumption` has already asked whether ta admits what b
-      produces. One of the three conditions was already paid for.
-    - THE RUNTIME TAKES THE LICENCE, 2026-09-03, and the gap this entry recorded is CLOSED. What
-      it said was needed is what was built: `compile/phases` answers {:patch :apply :step}, the
-      step being BUILT from the other two so the one-call door and the two-call door cannot
-      drift. async/drive and async/fan take a `Licence` — the two phases plus `check/commuting`
-      verbatim — and `sg/run` computes and hands it down, that being the only layer that knows
-      the shape. MEASURED: two 400ms handlers on the licensed pair of a join went 843ms to 418ms.
-      See :what-the-phase-split-taught, and :a-join-is-the-product-and-the-licence for what the
-      whole thing is FOR.
-    - AND THE LICENCE WAS UNSOUND UNDER NESTING, found by asking whether `commuting` could be
-      trusted before resting a runtime on it, and it is the most important thing this work turned
-      up. INNER FIRST means a child sees an event before the parent's own edges do, so a nesting
-      node's self-loops describe a diamond that NEVER RUNS. Measured: a node whose child admitted
-      both events had its two own self-loops licensed :yes while the CHILD's own `confluence`
-      proved that same pair :no, and the two orders landed in visibly different states. `commutes`
-      now answers :unknown wherever a nested machine could take either event — the state the pair
-      is pending in, or the state either event would leave it in. The state a pair ENDS in may
-      nest freely, entering a nesting node seeding the child's first state either way round.
-      THE LESSON IS ONE THIS PROJECT KEEPS RELEARNING, and :what-visibility-taught said it first:
-      a check written for one purpose is not sound for a second one by default. It was decorative
-      for two days and nothing noticed, because `drive` serialised whatever it said.
-    - AND A THIRD REFUSAL WAS ADDED 2026-09-03, by asking that same question of a new feature
-      before resting anything on it: a COMPLETION TRANSITION leaving ta means the second patch
-      is applied where ta CONTINUED TO and not at ta, so (tgt [ta b]) is not the lookup that
-      runs. `commutes` refuses s, ta and tb. THE JOIN NODE x IS EXEMPT — both orders were
-      proved to arrive at the same x and a continuation is a pure function of the state — and
-      that exemption is load-bearing, a join's own :complete being exactly where a :done
-      belongs. See :a-state-may-say-where-it-goes-when-it-completes.
-    - AND THE PAIR MAY BE TWO OF ONE EVENT, 2026-09-03. `confluence` had enumerated pairs with
-      (neg? (compare a b)), so THE DIAGONAL WAS NEVER ASKED ABOUT — a quiet gap in what that
-      function publishes, of exactly the kind it avoids for a guarded event by reading the edges
-      rather than `targets`. Two of one event ARE a concurrent candidate: an async handler makes
-      two of them pending exactly as it does two ids. Licensed only where every key the :out
-      writes declares a commutative combine, which is the fan-out — see
-      :a-combine-is-how-a-patch-lands.
-    - WHAT IS STILL NOT TAKEN, and it is narrower than what was: only ever TWO events in flight.
-      `commuting` is a PAIRWISE relation on ONE state, which is exactly what this entry designed;
-      a third would need the licence re-established at each intermediate state, and inventing that
-      in the async layer would be taking more than was proven. The speculative take is ONE event
-      deep for the same reason."
+   "SERIALISE BY DEFAULT; take concurrency only where the shape PROVES the order of completion cannot
+    be observed. `BOTH ADMITTED` IS NOT THE CONDITION — idle -start-> running beside idle -cancel->
+    cancelled is a flake, not a race anybody chose. THE CONDITION IS CONFLUENCE plus BERNSTEIN'S on the
+    patches: neither writes what the other writes, and neither READS what the other writes. The read
+    half is what VIEWS cost. THE WRITE-WRITE HALF IS NO LONGER ABSOLUTE — a key declaring a COMMUTATIVE
+    COMBINE is licensed. THE PATCH IS NEVER STALE, ONLY THE ADMISSION IS, except for a handler that
+    READS. THE RUNTIME TAKES THE LICENCE: `compile/phases` splits the step, async takes a `Licence`,
+    and `sg/run` computes it. THREE REFUSALS keep it sound — a NESTED machine that could take either
+    event, a COMPLETION leaving ta, and neither applies to the join node x. THE PAIR MAY BE TWO OF ONE
+    EVENT, which is the fan-out. STILL NOT TAKEN: more than two in flight."
 
    :a-join-is-the-product-and-the-licence
-   "ASKED BY THE AUTHOR 2026-09-03 as two features — park on a state waiting for an external
-    signal, and transit only after two independent events — and NEITHER NEEDED NEW GRAMMAR. What
-    it needed was for the runtime to take a licence it had been computing for two days.
-    - PARKING NEEDS NOTHING AND ALREADY WORKED, measured before anything was proposed. A state
-      waiting for :approve is a state with an :approve edge: no event, no transition, and
-      `problems` and `traps` both silent, a park having out-edges that reach a final. An event
-      arriving while parked that the state does not admit comes back :fired false, which is
-      already the `I am not accepting that` signal. THE ONLY THING THE SHAPE CANNOT SAY is
-      whether an event comes from the DRIVER or from the WORLD — the external/hidden distinction
-      :a-guard-is-a-schema-over-the-event draws in prose and nowhere in data. That is a label and
-      not a feature, and nobody has asked for it.
-    - A JOIN IS THE PRODUCT CONSTRUCTION, and it was expressible on the day it was asked about.
-      :complete declares [:map [:eval R] [:test R]], both REQUIRED, and the two events reach it
-      by two routes through intermediate states that declare what has arrived so far. Which is
-      family C of the guard survey — determinize on the input value — and the cost is the DFA's
-      own: 2^n states, being 4 at n=2 and 8 at n=3.
-    - PROJECTION IS WHY IT WORKS RATHER THAN A THING IT FIGHTS. Each intermediate state declares
-      exactly what it carries, so THE STATE NAME IS THE JOIN'S PROGRESS AND THE SCHEMA SAYS SO.
-      :a-handler-answers-a-map-and-declares-it called `carrying a key across several states is
-      EXPLICIT` a cost; for a join it is the whole mechanism.
-    - AND `confluence` PROVES IT, which is the part worth having and was already built. Measured
-      2026-09-03: the n=2 join answers {:in :verifying :pair [:eval :test] :verdict :yes} and
-      both orders land in one IDENTICAL map. At n=3 the generated lattice is 8 states, 12 edges,
-      `problems` [], and confluence {:yes 6} — every candidate pair at every level of the
-      lattice — with all SIX permutations landing in one identical state by six distinct paths.
-      THAT IS THE FIRST :yes ANY SHAPE HERE HAS PRODUCED: :confluence-was-measured-not-guessed
-      recorded that 100% of the candidate pairs in this project's fixtures FAIL confluence, and
-      the reason is that those fixtures had no join in them. A join is what a commuting pair IS.
-    - SO THE FEATURE WAS THE RUNTIME AND NOT THE SHAPE. Correctness was complete and only
-      wall-clock was lost: two 400ms handlers on a proven pair cost 843ms, serialised. Taking the
-      licence made it 418ms. See :two-events-in-flight-at-once, whose recorded gap this closed.
-    - A JOIN IS A PARTS ASSEMBLY AND NOT A CONSTRUCT, which is why nothing was added to build
-      one. The n=3 lattice above was GENERATED by a twenty-line function over the powerset, which
-      is :what-the-parts-library-showed's own advice — a library of parts selected from, and an
-      assembly that is (apply shape ...). If a `join` helper is ever wanted it belongs in whoever
-      writes the workflows, not here.
-    - WHAT WAS TURNED DOWN, and both were considered before the product construction was
-      recommended. A `{:join <schema>} + {:done <target>}` continuation on a node — accumulate on
-      self-loops and move on when the state satisfies a schema — which is a GUARD OVER THE STATE
-      wearing a different hat, and needs one event to move a machine through several states, so
-      the result stream would have to say something new. And ORTHOGONAL REGIONS,
-      {:machines {...} :done :x}, which is the textbook answer and is blocked on a question
-      nesting has never had to answer: MEASURED 2026-09-03, a child that finishes with
-      {:id :c2 :result 42} in :sub is left behind entirely when the parent escapes — :p2 comes
-      back {:id :p2}. Escape means ABORT today and discarding is correct; a join must COLLECT, so
-      regions need a :yield before they are buildable at all. Regions are for when each branch is
-      itself a workflow; the lattice covers a join on plain events, so a real shape asks first.
-      THAT :yield NOW EXISTS FOR ONE CHILD, later the same day —
-      :a-state-may-say-where-it-goes-when-it-completes — and it did NOT bring regions with it,
-      which is worth being clear about: {:done :yield} waits for THE machine a node nests, and
-      a node nests one. What is left is genuinely the REGIONS question — several children,
-      several yields, and which of them the parent waits for — rather than the yielding
-      question this entry was blocked on."
+   "PARKING NEEDS NOTHING and already worked — a state waiting for :approve is a state with an :approve
+    edge, and an event it does not admit comes back :fired false. A JOIN IS THE PRODUCT CONSTRUCTION:
+    :complete declares both keys REQUIRED and two routes reach it, at the DFA's own cost of 2^n states.
+    PROJECTION IS WHY IT WORKS — the state name is the join's progress and the schema says so. AND
+    `confluence` PROVES IT: the n=3 lattice is 8 states, 12 edges, problems [], confluence {:yes 6},
+    all six permutations landing in one identical state. A JOIN IS WHAT A COMMUTING PAIR IS. It is a
+    PARTS ASSEMBLY and not a construct, so no helper was added here. TURNED DOWN: a {:join} guard over
+    the state, and ORTHOGONAL REGIONS, which remain blocked."
 
    :a-combine-is-how-a-patch-lands
-   "THE AUTHOR'S, 2026-09-03, in one line that reopened a door they had shut two days earlier:
-    `in real life, merging is a domain/task related job.` It is the answer to why the concurrency
-    licence was so narrow, and the diagnosis is exact.
-    - A NAIVE MERGE WAS THE WHOLE LIMIT, and BOTH HALVES OF BERNSTEIN TRACED BACK TO IT. Measured
-      2026-09-03: every road to touching one key was closed. A relative change needs {:sees} and
-      is refused read-write; an absolute set is refused write-write. So a concurrently incremented
-      counter was INEXPRESSIBLE, and the reason is one operation — `merge` is last-write-wins, and
-      it is the only non-commutative thing in the apply phase, everything after it (the projection,
-      the identity keys, the enter validation) being a pure function of the value it produces. Two
-      increments applied concurrently under a merge give :n 1 where the serial answer is 2; under
-      `+` both orders give 2.
-    - SO A KEY MAY SAY HOW A PATCH LANDS ON IT, as properties on its own map entry:
-      {:combine f :combine/commutes true}. A key with no combine REPLACES, which is what a merge
-      always did, so nothing written before this behaves differently.
-    - IT IS A CLOSURE, AND THE FIXED VOCABULARY WAS REFUSED BY THE AUTHOR ON EXACTLY THE RIGHT
-      GROUND. The first proposal was a small proven set — :+ :max :min :union — whose algebra the
-      library would know. It does not survive contact: `:max` does not express `keep the
-      highest-scoring implementation with its provenance`, and a review-comment merge deduplicating
-      by line is nobody's `:union`. A vocabulary that covers no real merge buys a checker nothing.
-    - WHY A COMBINE MAY BE A CLOSURE WHERE A GUARD MAY NOT, since it reads as a reversal of
-      :a-guard-is-a-schema-over-the-event and is not one. A GUARD DECIDES WHERE THE MACHINE GOES
-      and a COMBINE DECIDES WHAT A VALUE IS. The first is structural — it changes the graph, which
-      is the thing this library exists to make visible and checkable — so it must be DECIDED, and
-      deciding needs the guard's own shape. The second lives inside a state's value, exactly as a
-      handler's body always has, and :a-shape-is-code already licenses that. The test is
-      :a-node-is-labelled-by-its-id's: is it structural.
-    - WHAT MAY NOT BE A CLOSURE IS THE PROMISE. No function yields its own algebra, so the law is
-      declared beside it as DATA, and that declaration is the only part `commutes` reads. Which
-      makes it exactly the class of claim this repository's own cross-component rule is about —
-      a rule that lives only in words is a rule nothing checks — so it is CHECKED AT TWO
-      STRENGTHS, and it needs both:
-        check/laws   REFUTES it by generation from the key's own schema. It never answers :yes,
-                     because generation can refute a law and cannot prove one, so the verdicts are
-                     :no with a witness or :unknown. Seeded, because a check that answers
-                     differently each call is not a check.
-        compile      VERIFIES it on the CONCRETE VALUES whenever the licence is actually taken,
-                     both patches being in hand, and BEFORE either lands. A false promise is then
-                     a defect that stops the machine rather than an order-dependent flake.
-    - AND THE LAW IS NOT THE ONE FIRST NAMED. What the licence needs is LEFT-COMMUTATIVITY over
-      (state, patch, patch) triples — f(f(s,a),b) = f(f(s,b),a) — which is the shape the FOLD has,
-      and not commutativity of the binary operation. The binary law was implemented first and is
-      the wrong test.
-    - THE SECOND LAW IS :closed AND IS NOT OPTIONAL: f of two values of the key's schema must
-      answer a value of that schema. It has to hold or the STATIC check is wrong — `produced`
-      composes the declared :out over the source's schema and knows nothing of a combine, so a
-      combine that changed the type would make every edge into that state a lie. It is also the
-      law generation settles WELL, being about types rather than about values.
-    - THREE NODES AND NOT ONE decide whether a shared key may be written by both events: ta, tb
-      and the join x, being every node a patch of the pair ever lands on. Each must declare the
-      SAME combine and each must declare it commutative, because the fold applies the first patch
-      at ta or tb and the second at x, so three different functions would compose two different
-      answers. For a SELF-LOOP, which is where combines pay, all three are one node.
-    - IT IS DECLARED ON THE NODE and never on an event: the same key must combine the same way
-      however it arrives, or the algebra is per-edge and proves nothing. Which is also the answer
-      the data owner should have, the same instinct as
-      :internal-visibility-is-declared-and-not-automatic.
-    - AND IT LICENSES TWO OF ONE EVENT, 2026-09-03, which is the FAN-OUT case and was refused
-      outright until then. n workers each reporting a result send n events of a SINGLE id into
-      one accumulating state, and the old refusal reasoned that `two events of one id run one
-      handler and write one set of keys, so they conflict with each other by construction` —
-      TRUE UNDER A MERGE and untrue of a key whose combine is commutative. `commutes` needed NO
-      CHANGE to say so, which is what says the condition was right all along: with a = b the two
-      events share a handler, an :out and a target, so ta = tb and the diamond closes wherever
-      the target admits the event AGAIN, and the write-write test then covers EVERY key the :out
-      writes. The licence publishes as a SINGLETON — #{:found} beside #{:eval :test} — so one
-      lookup serves both kinds. MEASURED: two 300ms reports went 613ms to 305ms. See
-      :what-the-fan-out-licence-taught for the two traps it turned up.
-    - WHAT IT DOES NOT FIX, said out loud. The READ half of Bernstein: a handler that declared a
-      {:sees} view computed from a value the other event changes, and no combine repairs a stale
-      patch. The way to a CONCURRENT accumulation is therefore a combine INSTEAD of a view —
-      answer from the event alone and let the node say how it lands. And it does not lift the
-      `only ever two in flight` limit, which is the diamond's and not the merge's.
-    - THE HONEST CAUTION, and it is measured rather than modest: MOST DOMAIN MERGES ARE NOT
-      COMMUTATIVE, and the author will not notice. `best-of` written with >= on the score was
-      refuted in forty samples because A TIE HAS NO CANONICAL WINNER, so :by leaks argument order;
-      it took a TOTAL order to make the law hold. Ties, timestamps, last-writer and provenance all
-      break it invisibly. So the licence widens less than it sounds, which is worth knowing before
-      building a shape around it."
+   "{:combine f :combine/commutes true} on a map entry. A KEY WITH NO COMBINE REPLACES, so nothing
+    written earlier behaves differently. A NAIVE MERGE WAS THE WHOLE LIMIT — last-write-wins is the
+    only non-commutative thing in the apply phase, which is why a concurrently incremented counter was
+    inexpressible. IT IS A CLOSURE, the fixed vocabulary having been refused on the right ground: :max
+    does not express `keep the highest-scoring implementation with its provenance`. A GUARD DECIDES
+    WHERE THE MACHINE GOES AND A COMBINE DECIDES WHAT A VALUE IS, which is why one may be a closure and
+    the other may not. WHAT MAY NOT BE A CLOSURE IS THE PROMISE: the law is DATA, refuted by
+    `check/laws` through generation and VERIFIED by compile on the concrete values whenever the licence
+    is taken. THE LAW IS LEFT-COMMUTATIVITY over (state, patch, patch), not binary commutativity, and
+    the second law is :closed and is not optional. THREE NODES must declare the same combine. DECLARED
+    ON THE NODE and never on an event. THE HONEST CAUTION: most domain merges are NOT commutative and
+    the author will not notice."
 
    :the-caller-owns-the-lifecycle
-   "DECIDED 2026-09-01, and the question DISSOLVED rather than being answered. The author asked who
-    owns an instance: the CALLER, handed a seq of events and reducing over it, or a REACTIVE machine
-    taking an event stream and answering a stream of states.
-    - THEY ARE THE SAME OWNERSHIP, and reading `pump` is what settles it: the state lives in a
-      d/loop ACCUMULATOR exactly as it lives in reduce's. There is no cell holding it and no object;
-      the atom `fan` keeps holds per-instance STREAMS and never a state. So the reactive machine is
-      not a second design, it is the same reduction with the loop shipped — and `run` is A CALLER
-      THIS LIBRARY SHIPS.
-    - SO THE FACADE NAMES BOTH AND CHOOSES NEITHER, which is not a fence-sit. The reduction is the
-      README's own headline sentence, the step is what a caller with core.async or a transducer or a
-      plain fold needs, and :the-defaults-are-batteries requires that such a caller lose nothing.
-    - WHAT REACTIVE-ONLY WOULD HAVE COST, said out loud because it was the tempting answer: manifold
-      would then be on the ONLY path there is, and the one rule the batteries have is that it must
-      not be.
-    - IT IS ALSO A PROPERTY AND NOT A SPEECH. `the-two-doors-agree` generates a shape and a seq of
-      events and asserts that (map :state) off the stream equals the states the reduction passes
-      through. That is the only thing that can refute any of the above."
+   "THE QUESTION DISSOLVED: the state lives in a d/loop ACCUMULATOR exactly as it lives in reduce's, so
+    the reactive machine is the same reduction with the loop shipped, and `run` is A CALLER THIS
+    LIBRARY SHIPS. The facade names both doors and chooses neither. REACTIVE-ONLY would have put
+    manifold on the only path there is. IT IS A PROPERTY AND NOT A SPEECH — `the-two-doors-agree`."
 
    :the-facade-is-a-vocabulary-and-two-doors
-   "BUILT 2026-09-01. TEN FUNCTIONS: state, event, transition, shape to build a machine; problems,
-    draw! and dot to look at it; compile and initial for the reduction; run for the stream. The
-    author asked for the fewest, so each collapse below was argued for rather than assumed.
-    - THE TENTH ARRIVED THE SAME DAY AND FROM A CONSUMER, which is the only good reason to widen an
-      API: `dot` answers the drawing as DATA where `draw!` is the drawing as an effect, and the
-      notebook could not be written without it — see :what-the-tutorial-taught. `draw!` alone cannot
-      serve a renderer that is not graphviz, and every diagram in a page, a docs build or a web app
-      is exactly that.
-    - ONE STREAM DOOR AND NOT TWO. `fan` already subsumes `drive` — one partition IS one machine —
-      so `run` builds the initial-of function out of the shape and a caller never spells :instance.
-      `drive` stays public in .async for somebody who has already partitioned, one consumer per
-      instance being the obvious case.
-    - THE WART, ACCEPTED: fan's :done became a MAP keyed by instance, so a caller who named nothing
-      finds their machine under nil. A vector would have said the same thing while making the caller
-      guess whose entry was whose, and the instance is the one name `fan` has in hand.
-    - `problems` IS OPT-IN AND `shape` DOES NOT RUN IT. Fewest-functions argued for a strict
-      constructor and no `problems` at all, and it is wrong for one decisive reason: A SHAPE YOU
-      CANNOT BUILD IS A SHAPE YOU CANNOT DRAW, and the whole argument for this library is that a
-      half-finished machine is worth looking at. The `broken` and `trapped` fixtures would become
-      unconstructible, which is the check on the idea.
-    - RE-EXPORTS ARE DELEGATING defns AND NOT def ALIASES, measured rather than assumed — see
-      :what-the-facade-taught, where an alias skipped its guard entirely. And they carry NO
-      :malli/schema of their own: the contract belongs to the namespace that owns the function, one
-      declaration and not two, and a copy at the facade could only drift. `run` is the one function
-      the facade really adds, so it is the one that has a schema — which is also why the instrument
-      count went to 31 and not to 39.
-    - THE FACADE REQUIRES `check`, and that breaks the property :layering claimed for it: that an
-      application shipping a working shape never loads a graph algorithm. Taken knowingly. It is a
-      load-time cost paid by a require and never by a step, the checks and the drawing are the reason
-      the library exists, and a caller who minds requires robertluo.state-graph.compile directly —
-      the same symmetry the batteries have, where the facade is the convenience and the namespaces
-      are the truth.
-    - NESTING ADDED NOTHING HERE, 2026-09-01, and that is worth recording as a check on the
-      surface: a machine inside a node is an OPTION ON `state`, so the facade is still ten
-      functions. A feature that needs no new door is a feature that fitted.
-    - WHAT WAS TURNED DOWN: a `fold` doing the whole reduction in one call. It gives strictly LESS
-      than `compile` — a step goes in a transducer and a fold does not — while hiding the thing the
-      README names as a feature."
+   "TEN FUNCTIONS: state, event, transition, shape; problems, draw!, dot; compile, initial; run. ONE
+    STREAM DOOR AND NOT TWO, `fan` already subsuming `drive`. `problems` IS OPT-IN AND `shape` DOES NOT
+    RUN IT, because A SHAPE YOU CANNOT BUILD IS A SHAPE YOU CANNOT DRAW. RE-EXPORTS ARE DELEGATING
+    defns AND NEVER def ALIASES, or malli stops guarding them, and they carry no schema of their own.
+    THE FACADE REQUIRES `check`, taken knowingly. NESTING, THE COMPLETION TRANSITION AND THE LICENCE
+    ALL ADDED NO DOOR, which is the check on the surface."
 
    :the-output-is-a-transition-and-not-a-state
-   "DECIDED 2026-09-01, by the author, and forced by :nothing-is-persisted-here. `run` puts a RESULT
-    on :states and not a bare state: the :event, the :state it produced, whether it :fired, and
-    :instance where there is one.
-    - THE ARGUMENT IS THAT THE CALLER STORES NOW. A state does not say what caused it, and an event
-      nobody handled produces a state EQUAL to the one before it — so from a stream of states alone
-      no consumer can build the history this library has just declined to keep. A result reads back
-      down with (map :state) whenever states are all somebody wants, and the other direction does
-      not exist.
-    - THE OBJECTION THAT KILLED A RICH RETURN FOR THE STEP DOES NOT APPLY TO A STREAM, which is why
-      this is consistent with :how-the-step-says-a-thing-was-ignored rather than a reversal of it.
-      That entry refused an outcome value because (reduce step init events) must answer STATES or the
-      README's headline sentence dies. A STREAM IS NOT AN ACCUMULATOR: `pump` holds the state itself
-      and what it PUTS is free to be richer. The reduction still answers states; only the stream
-      carries results.
-    - :fired IS THE HALF NOTHING ELSE CAN ANSWER, and it needs a lookup and not a comparison — an
-      ignored event answers the state unchanged, and a fired self-loop whose handler answers {}
-      answers a state `identical?` to the old one, already verified in
-      :what-the-design-conversation-verified. Hence compile/admits?, the step's own lookup published,
-      over ONE private `entry` that both it and the step call, so the two cannot drift.
-    - HOW IT REACHES THE STREAM WITHOUT PUTTING A SHAPE UNDER async: a third injected function,
-      `result`, of the state applied to, the event, and the state that came back, defaulting to
-      (fn [_ _ state] state). That default is exactly what the layer put before, so every existing
-      drive test is untouched — and this is the Context pattern and the global rule again, do not
-      thread options through a layer we do not own, hand it a function that closes over them.
-    - :instance IS DERIVED FROM THE STATE and not read off the event, so there is one source for it,
-      and it is absent where a caller named nothing.
-    - THE COST, said out loud: :states is no longer a stream of states, so a consumer who wants only
-      states writes (map :state). That is the cheaper half of the trade, and it is paid by the
-      consumer who needs less."
+   "`run` puts a RESULT on :states — the :event, the :state, whether it :fired, and :instance. THE
+    ARGUMENT IS THAT THE CALLER STORES NOW: a state does not say what caused it, and an ignored event
+    produces a state EQUAL to the one before. A result reads back down with (map :state); the other
+    direction does not exist. This does not contradict :how-the-step-says-a-thing-was-ignored — A
+    STREAM IS NOT AN ACCUMULATOR. :fired NEEDS A LOOKUP AND NOT A COMPARISON, hence compile/admits?."
 
    :a-machine-can-nest-in-a-node
-   "DECIDED AND BUILT 2026-09-01, at the author's asking, and it is the answer to `a state
-    machine is for complex problems`: a node may carry {:machine <a shape>}, and while the
-    parent sits there that child runs inside it. Nine states in one graph is about where one
-    graph stops being readable; nesting keeps every machine the size a person can hold.
-    - IT DOES NOT BREAK :a-handler-never-sees-the-state, and this is the whole reason it was
-      cheap. That rule constrains HANDLERS. The step is state-dependent all over already —
-      it looks the edge up by (:id state), it merges into the state, it writes :id and
-      :instance afterwards — so A CHILD'S STEP BELONGS TO THE COMPILER, exactly as :id does.
-      A handler still only ever sees the event.
-    - INNER FIRST. The child gets every event before the node's own edges do, so the parent's
-      edges are the ESCAPE. The consequence is the mechanism: THE CHILD'S OWN VOCABULARY
-      DECIDES WHO HANDLES AN EVENT — :authorize is the payment's word and the order never
-      sees it; :cancel is not, so it escapes at once. Nothing had to be declared for that.
-    - A FINISHED CHILD STOPS COMPETING, and this is what makes nesting cost the design
-      nothing. A final state admits nothing, so once the child is done every later event falls
-      straight through to the parent. NO GUARDS, no done-event, no internal queue and no
-      run-to-completion — v1's own constraints turned out to give correct hierarchical
-      semantics rather than standing in their way.
-    - :sub IS MACHINERY'S, like :id and :instance. Seeded when the node is entered, DROPPED
-      when it is left — a merge keeps every key, so a child left behind would ride into a
-      state that never declared it — and RESTARTED when the node is re-entered, entering being
-      entering. A handler answering {:sub ...} is overwritten, and a state DECLARING :sub is a
-      :reserved-declared fault.
-    - A CHILD MUST BE ABLE TO START, checked at construction. Entering a node with a machine
-      enters the child at its own initial with NO data, so a child whose first state insists on
-      some could never begin: :machine-cannot-start, and it is REFERENTIAL, answerable from the
-      parts, so a nesting that cannot begin is refused before it exists.
-    - THE CHECKS RECURSE FOR FREE because a child is an ordinary shape and every structural
-      check is about ONE graph. Faults are reported :within [<host node> ...], a PATH because
-      nesting nests. And there is no cross-boundary subsumption question at all: the child's
-      slice is written only by the child's step, so nothing a parent handler declares can
-      touch it.
-    - NESTING CANNOT BE CIRCULAR and needs no check to say so: a shape is an immutable value
-      built out of already-built children, so none can contain itself.
-    - THE COST AS STATED 2026-09-01, AND IT IS NOW ONLY HALF TRUE — kept because the
-      reasoning is still exactly right about EVENTS. AN ESCAPE IS UNCONDITIONAL: nothing stops
-      the parent leaving while the child is half done, because `only when the child has
-      finished` is a GUARD and there are none. AND :a-guard-is-a-schema-over-the-event WOULD
-      NOT CHANGE IT, which is worth knowing before anyone expects it to: a guard there is over
-      the EVENT, and `the child has finished` is a fact about the STATE. Turned down
-      deliberately: making the parent's EDGES wait for a final child, which would have made
-      ABORT inexpressible, and abort is the commoner need.
-    - AND THE DOOR NAMED HERE IS NOW OPEN, 2026-09-03, without disturbing a word of the above.
-      {:machine sh :done :shipped} is BUILT — see
-      :a-state-may-say-where-it-goes-when-it-completes. The reason it changes nothing here is
-      that it is NOT a guard on the escape: the parent's own edges still abort
-      unconditionally, and :done is a SECOND way out that fires when the child finishes. So
-      `deciding when is the producer's job` stopped being the ONLY answer while remaining a
-      correct one, and ABORT stayed expressible, which was the whole objection to the
-      alternative. {:yield ...} came with it, because a parent that waits for its child wants
-      what the child finished WITH — and dropping :sub was the other half of this cost."
+   "A node may carry {:machine <a shape>}. It does not break :a-handler-never-sees-the-state, which
+    constrains HANDLERS — a child's step belongs to the COMPILER. INNER FIRST, so the parent's edges
+    are the ESCAPE and THE CHILD'S OWN VOCABULARY DECIDES who handles an event. A FINISHED CHILD STOPS
+    COMPETING, which is what made nesting cost the design nothing — v1's constraints turned out to give
+    correct hierarchical semantics. :sub IS MACHINERY'S: seeded, DROPPED on leaving, RESTARTED on
+    re-entry. A CHILD MUST BE ABLE TO START, checked referentially. The checks RECURSE FOR FREE, faults
+    carrying :within as a PATH. AN ESCAPE IS UNCONDITIONAL and abort stayed expressible; {:done} is a
+    SECOND way out that WAITS."
 
    :a-node-is-labelled-by-its-id
-   "DECIDED 2026-09-02, at the author's asking — `should not each state just be represented by the
-    :id?` — and the answer is yes, on this library's OWN argument for drawing at all.
-    - THE ARGUMENT THAT SETTLES IT is in :what-the-graph-buys: `an unreachable state is obvious in
-      a picture and INVISIBLE IN A MAP LITERAL`. That is entirely about STRUCTURE — and a schema is
-      precisely the part of a shape a map literal DOES show. So the schema was the least useful
-      thing in the label, and it was the only thing that did not scale.
-    - MEASURED, on the first real consumer: ../coder's workflow builds its states by conj-ing a
-      vocabulary forward, so agent/Brief is inlined into eight of them. Twelve labels, the longest
-      1,183 CHARACTERS, and a dot source of 10,408. `dot -Tpng` printed `graph is too large for
-      cairo-renderer bitmaps`, scaled, and then wrote a ZERO-BYTE FILE — a warning that looks
-      survivable and is not. CHECK THE FILE AND NOT THE EXIT CODE. SVG rendered the same graph
-      fine, which is what made the failure look like a graphviz quirk rather than a label problem.
-    - AFTER: the same shape is 1,007 characters of dot and renders to a 120KB PNG. Labels are
-      `fresh ▸`, `kept ◼` — the name and the markers, and nothing else.
-    - WHAT WAS KEPT AND WHY: ▸ for initial, ◼ for final, ⊞ n states for a nesting node. All three
-      are STRUCTURAL, which is the test this decision now applies to anything wanting into a label.
-    - WHAT WAS NOT BUILT: an option to put the schema back. Nobody has asked for it, the shape is
-      right there to read, and `problems` answers what the schemas IMPLY better than a picture of
-      them ever did. An option is cheap to add the day somebody wants one."
-
+   "Labels are the name and the structural markers — ▸ initial, ◼ final, ⊞ n states for nesting, a
+    guard on an arrow — and nothing else. THE ARGUMENT THAT SETTLES IT: an unreachable state is obvious
+    in a picture and INVISIBLE IN A MAP LITERAL, so the label is about STRUCTURE, and a schema is
+    precisely the part a map literal DOES show. MEASURED on the first real consumer: a 1,183-character
+    label and a dot source of 10,408 made `dot -Tpng` warn, scale, and write a ZERO-BYTE FILE. CHECK
+    THE FILE AND NOT THE EXIT CODE."
 
    :nothing-is-persisted-here
-   "DECIDED 2026-09-01, by the author. THIS LIBRARY STORES NOTHING: it outputs what happened, and
-    what becomes of that is the caller's. It AMENDS THE README rather than merely contradicting it,
-    because :source-of-truth would otherwise make this file the wrong one.
-    - WHAT WENT: datahike left deps.edn, where it had been a dependency nothing used;
-      robertluo.state-graph.store left :layering, never having been built; and the README's
-      persistence feature now says what the library does instead. Its `audition` and `trace`
-      sub-bullets STAYED, because those are still what the output is FOR.
-    - WHAT IT COST, and it is the one thing this decision broke: an audit trail must know which event
-      produced which state, and a stream of bare states cannot say. That is what forced
-      :the-output-is-a-transition-and-not-a-state, which is this same decision seen from the output
-      end.
-    - AND WHAT IT DID NOT COST. :what-is-persisted argued that HISTORY and not the shape is what a
-      store holds, and that argument is untouched — it is now advice for whoever writes the store,
-      outside this library. Shape versioning stays out, along with the question it drags behind it.
-    - THE `finally` RULE KEEPS ITS FORCE with no database in the tree; what it governs here is files
-      and streams. A stream adds an obligation a store never had, though: a deref that never resolves
-      hangs the suite rather than leaking a resource, so every deref in a stream test is BOUNDED."}
+   "THIS LIBRARY STORES NOTHING: it outputs what happened and what becomes of that is the caller's. It
+    AMENDS the README rather than contradicting it. datahike left deps.edn and the store namespace left
+    :layering, never having been built. WHAT IT COST is the one thing it broke: an audit trail must know
+    which event produced which state, which is what forced
+    :the-output-is-a-transition-and-not-a-state."}
 
   :open-questions
-  ["MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? What is LEFT of the fan-out
-    question below after it was mostly answered on 2026-09-03, and it is the one door three
-    separate wants now knock on: `all n reports are in`, `k branches have arrived`, `still
-    under budget`. Each is a COUNT or a COMPARISON over what the state holds, and each is
-    therefore a guard over the state, which :a-guard-is-a-schema-over-the-event refuses.
-    WHY IT IS NOT MERELY THAT REFUSAL AGAIN: :done already reads a fact about the state — is
-    the child final — and was allowed because completion is STRUCTURAL and has ONE
-    unconditional target. So the line already drawn is `the shape may read a structural fact
-    to decide COMPLETION, never to decide WHICH WAY`. The question is whether a fact about
-    DATA can join it.
-    ONE OF THE THREE IS ANSWERED AND NEEDED NO DOOR, measured 2026-09-03 in ../coder: `still
-    under budget` is a guard on a NUMERIC BOUND over a count the DRIVER reports on the event,
-    and two such bounds that do not meet are provably disjoint. So a retry budget lives in the
-    shape today. That is evidence the door is needed less than three wants made it look — what
-    is left wants a count the machine must take ITSELF, which is `all n are in` and `k arrived`.
-    THE OBSTRUCTION IS DECIDABILITY AND IT IS REAL. `(= expected (count reviews))` is a
-    relation between two keys and no malli schema expresses it, so such a condition can only
-    be a CLOSURE — and :a-combine-is-how-a-patch-lands drew that line explicitly: a combine
-    may be a closure because it decides what a VALUE is, a guard may not because it decides
-    WHERE THE MACHINE GOES. A completion condition decides where the machine goes. So the
-    honest answer today is no, and the driver counts.
-    WHAT WOULD CHANGE IT is a decidable spelling. The one worth thinking about: a node holding
-    a map keyed by item, where the KEY SET is fixed on entry and completion is `every value is
-    present` — which is structural rather than arithmetic, and is `every sub is final` wearing
-    different clothes. That is close enough to :a-machine-can-nest-in-a-node's shape to be
-    worth designing properly rather than bolting on. The bar is an agent workflow that needs
-    it, and `review these seven files` plausibly is one."
+  ;; The full case for each is DESIGN.md under `# Open questions`. Settle one WITH THE HUMAN before
+  ;; building anything that touches it, and delete it from this list once answered — an answered
+  ;; question left in the list is a question that gets asked again.
+  ["MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? Three wants knock on this door — `all n
+    reports are in`, `k branches have arrived`, `still under budget` — and each is a COUNT or a
+    COMPARISON over what the state holds, so each is a guard over the state. THE LINE ALREADY DRAWN is
+    that the shape may read a STRUCTURAL fact to decide COMPLETION, never to decide WHICH WAY. ONE OF
+    THE THREE NEEDED NO DOOR: a retry budget is a NUMERIC BOUND on a count the driver reports, and
+    lives in the shape today. THE OBSTRUCTION IS DECIDABILITY — `(= expected (count reviews))` is a
+    relation between two keys that no malli schema expresses, so it could only be a CLOSURE, and a
+    guard may not be one. The honest answer today is no, and the driver counts. WHAT WOULD CHANGE IT
+    is a decidable spelling — a fixed key set on entry with completion as `every value is present`."
 
-   "IS DYNAMIC FAN-OUT WANTED, AND WHAT WOULD IT EVEN BE? Raised 2026-09-03 by
-    :what-the-review-scored, which is the only thing that review named as MISSING once the
-    completion transition was built: `foreach` — one child per element of a list discovered at
-    runtime, joined when all of them are done. It cannot be spelled today and the reason is
-    structural rather than an omission: a shape is CODE, built at load time, so every state and
-    every edge exists before the machine runs, and the product lattice a join needs is 2^n
-    states for an n THAT IS NOT KNOWN. Fan-out ACROSS INSTANCES is what `run` already does, and
-    nothing joins those back — `fan`'s :done is a map keyed by instance and no event consumes
-    it. Three things to settle before any of it: whether the width comes from the SHAPE (a
-    lattice generated per run, which makes a shape per run and breaks `a shape is code`) or
-    from the RUNTIME (a marking, which is the token model, and
-    :what-the-review-scored records what that would cost the static checks); whether a
-    collected result arrives as a :yield from n children, which needs orthogonal regions
-    first — see :a-join-is-the-product-and-the-licence; and what the RESULT stream says while
-    n branches are in flight, since :instance is the only partition key there is. The bar is
-    an agent workflow actually needing it, which `review these seven files at once` plausibly
-    is.
-    MOSTLY ANSWERED THE SAME DAY, and by trying it rather than by arguing: the ACCUMULATION
-    was already expressible — a commutative combine on a set-valued key, one self-loop — and
-    the CONCURRENCY needed one character in `confluence`'s pair enumeration, since two events
-    of one id had never been asked about. See :a-combine-is-how-a-patch-lands and
-    :what-the-fan-out-licence-taught. What is left is ONLY the completion test, which is the
-    question above, and the two structural answers this entry listed — a lattice generated per
-    run, or a marking — are BOTH still refused for the reasons given. The width being the
-    driver's is not a gap: a graph shows structure and a count is data."
+   "IS DYNAMIC FAN-OUT WANTED? MOSTLY ANSWERED by trying it: the accumulation was already expressible
+    and the concurrency needed one character, so what is LEFT is only the completion test above. THE
+    TWO STRUCTURAL ANSWERS STAY REFUSED — a lattice generated per run breaks `a shape is code`, and a
+    marking relocates the state explosion out of the shape, where it is checkable, into the runtime,
+    where it is not. The width being the driver's is not a gap: a graph shows structure, a count is
+    data."
 
-   "ARE INTERNAL EVENTS WANTED AT ALL? Deliberately left open on 2026-08-31 rather than answered, and
-    the handler's signature is unchanged in the meantime, so nothing is blocked by it. The motivation
-    is HANDLER REUSE and not cascades for their own sake; the lean is that a state raises and a
-    handler never does, for which the reasons are in :a-handler-causes-nothing. The bar for building
-    it is a real shape asking twice.
-    NARROWED 2026-09-03 AND NOT ANSWERED. The LEAN was taken — a state may now say where it goes
-    when it completes, which is `the state raises` — but taken as a DETERMINISTIC CONTINUATION
-    inside one step rather than as an event, so none of the three things below was settled and
-    the queue still does not exist. What DID change is the motivating case: the commonest reason
-    to want an internal event was `move on now that this is finished`, and that is what a
-    completion transition is. See :a-state-may-say-where-it-goes-when-it-completes. Three things to settle before any of it: whether the machine may
-    drive itself at all or a caller triggers the next event by hand — the latter costs nothing and
-    hides the flow from check, which is the whole trade; if it may, whether the queue drains
-    breadth-first or depth-first, which is OBSERVABLE in the history and cannot be left to whatever
-    `into` happens to do; and how an audit trail tells what the world did from what the machine did,
-    because a log that conflates them is worse than one that does not have the internal events at
-    all."
+   "ARE INTERNAL EVENTS WANTED AT ALL? Nothing is blocked in the meantime; the motivation is HANDLER
+    REUSE and the lean is that a STATE raises and a handler never does. NARROWED AND NOT ANSWERED: the
+    lean was taken as a deterministic CONTINUATION inside one step, so the queue still does not exist.
+    THREE THINGS TO SETTLE FIRST: whether the machine may drive itself at all, since a caller
+    triggering by hand costs nothing and hides the flow from `check`; breadth-first or depth-first,
+    which is OBSERVABLE in the history; and how an audit trail tells what the world did from what the
+    machine did."
 
-   "IS THE NODE-SIDE EXPOSURE NEEDED, OR IS THE EVENT-SIDE VIEW ENOUGH? What is left of
-    :internal-visibility-is-declared-and-not-automatic after both halves were built on 2026-09-01.
-    A view declared by the EVENT is least privilege by the handler's own word: a careless or shared
-    handler declares {:sees [:map [:token :string]]} and is handed the token. The remedy is for the
-    data owner to have the say — the node declares what it EXPOSES, the event what it NEEDS, and the
-    check verifies the one is within the other — and it is ADDITIVE, default deny on both sides being
-    exactly today's behaviour.
-    WHY IT WAS NOT BUILT WITH THE REST: projection already bounds visibility by ABSENCE, which is the
-    stronger guarantee and covers the case that matters most, a state that never held the secret
-    being unable to leak it. Exposure only helps where a state MUST hold something a handler in the
-    same machine must not read. Whether an agent workflow really has that shape is the question, and
-    a real one asking for it is the bar.
-    RETIRED, and kept here for one line only because the file's own rule is that an answered question
-    left in the list gets asked again: `is projection taken before release` was answered by taking
-    it, and `how is a bare [:map] handled` by measuring — it holds nothing but its :id, and that cost
-    one under-declared fixture."
+   "IS THE NODE-SIDE EXPOSURE NEEDED, OR IS THE EVENT-SIDE VIEW ENOUGH? A view is least privilege BY
+    THE HANDLER'S OWN WORD, so a careless one declares {:sees [:map [:token :string]]} and gets it. The
+    remedy is a handshake — the node declares what it EXPOSES, the event what it NEEDS — and it is
+    ADDITIVE. NOT BUILT because projection already bounds visibility by ABSENCE, which is stronger and
+    covers the case that matters most. The bar is a real shape that must HOLD something a handler in
+    the same machine must not READ."
 
-   "IS THE Context's :ignored STILL EARNING ITS PLACE? Raised 2026-09-01 by building the facade and
-    deliberately not answered. Its stated job was that the store layer would replace it with one that
-    records, and there is no store layer: the stream door reports a miss as :fired false, taken from
-    compile/admits? and not from any callback. What is left for it is a caller who folds BY HAND and
-    wants to hear about a miss — real, and possibly not worth a key in the Context. If it goes, that
-    caller closes over admits? themselves, `index` and `admits?` both being public for exactly this.
-    Nothing is blocked either way; it is three lines of surface, and the bar for removing it is a
-    second reader asking what it is for."]
+   "IS THE Context's :ignored STILL EARNING ITS PLACE? Its stated job was that a store layer would
+    replace it, and there is no store layer — the stream door reports a miss as :fired false, from
+    compile/admits? and not from any callback. What is left is a caller who folds BY HAND. Three lines
+    of surface; the bar for removing it is a second reader asking what it is for."
+
+   "SHOULD A TRANSITION DECLARE ITS :effects AND :idempotence? The licence proves REORDERING is safe
+    and says nothing about RE-EXECUTION. Harmless today, a speculative take never re-running a handler;
+    RETRY AND REPLAY WOULD BOTH NEED IT, and it is the same class of declared-law-plus-checker as
+    :combine/commutes."]
 
   :project-knowledge
+  ;; THE PUNCHLINES ONLY — what to do, and what not to re-learn. The account of how each was found is
+  ;; DESIGN.md under the same key, and it is worth reading before designing in the same area.
   {:status
-   "TARGETS 1 AND 2 ARE BUILT. Target 1, 2026-08-30 (commit a588c93): robertluo.state-graph.shape
-    and .compile — the lifecycle runs, (reduce (compile shape) (initial shape data) events).
-    Target 2, 2026-08-31: robertluo.state-graph.check — reachability, dead ends, a partial
-    subsumption checker and the drawing.
-    THE DESIGN DECISIONS OF 2026-08-31 ARE IN THE CODE as of the same day: the handler is the
-    EVENT's, an event nobody handled is heard through :ignored, compile is parameterised by a
-    Context of :then/:pure/:ignored, a deferred under the synchronous default is dereferenced, and
-    :instance names a run. Verified live afterwards: the counter drew correctly, `broken` still
-    reports its two islands, three dead ends and one :target-refuses, and a reduction carrying an
-    :instance ends {:id :done :instance order-1 :n 9}, that name having been given once to
-    `initial` and never spelled again after.
-    THE TRAP CHECK LANDED the same day too — see :a-trap-is-what-a-cycle-hides — so the structural
-    checks are now reachability, dead ends, TRAPS and subsumption.
-    THE CONFLUENCE CHECK LANDED 2026-08-31 as well — see :two-events-in-flight-at-once — so the
-    static checks are reachability, dead ends, traps, subsumption AND confluence.
-    AND SO DID THE ASYNC LAYER, the same day: robertluo.state-graph.async, manifold 0.4.3, `drive`
-    and `fan`. It serialises always; the licensed concurrency is a GAP with a reason, recorded in
-    :two-events-in-flight-at-once.
-    AND THE FACADE LANDED 2026-09-01, which is the last layer: robertluo.state-graph, nine
-    functions, one require. Two doors on one machine — (reduce (compile sh) (initial sh {}) events)
-    and (run sh {} events) — and :states now carries a TRANSITION RESULT rather than a bare state,
-    because the same day decided that this library stores nothing and the caller does. See
-    :the-facade-is-a-vocabulary-and-two-doors, :the-caller-owns-the-lifecycle,
-    :the-output-is-a-transition-and-not-a-state and :nothing-is-persisted-here.
-    THE STORE IS NOT COMING. datahike is out of deps.edn and robertluo.state-graph.store is out of
-    :layering; neither was ever built.
-    AND A MACHINE MAY NEST IN A NODE, 2026-09-01, the last thing the author asked for and the
-    answer to `a state machine is for complex problems`: {:machine <a shape>} on a state, the
-    child taking every event first and the parent's edges being the escape. It needed no new
-    rules — see :a-machine-can-nest-in-a-node — and no new facade function, being an option on
-    `state`.
-    AND INTERNAL VISIBILITY IS DECLARED, 2026-09-01, both halves in one go: A NODE HOLDS WHAT IT
-    DECLARES — the merge is projected onto its keys on entry, which killed the `a merge cannot
-    remove a key` limit — and AN EVENT MAY DECLARE {:sees <a map schema>}, whose handler is handed
-    that projection and nothing else. check/views proves whether a state can provide what a handler
-    asks to read, and it is `admits` again with no new machinery. See
-    :internal-visibility-is-declared-and-not-automatic.
-    73 tests, 202 assertions, green — 71 unit and 2 ^:integration, so THE COMMIT GATE IS A REAL
-    GATE; clj-kondo clean; 35 public fns carry a :malli/schema and the instrument! count of exactly
-    35 confirms it better than a grep can. The integration suite is DOWN to two, and that is the
-    right direction: `check/dot` made the graphviz-source test need no file, so it moved into the
-    fast loop, leaving only what needs a real clock and a real `dot`. The integration suite NEEDS GRAPHVIZ — see
-    :graphviz-and-the-devenv.
-    NOTHING IS UNBUILT AND NOTHING IS UNTAKEN, 2026-09-03. The licence that was the last gap is
-    TAKEN: `compile/phases` splits the step into a PATCH half and an APPLY half, async/drive and
-    async/fan accept a `Licence`, and `sg/run` computes `check/commuting` and hands it down — so
-    two handlers of a join run at once where their order of completion is PROVEN unobservable.
-    Measured 843ms to 418ms on two 400ms handlers. The same work found a live unsoundness in
-    `commuting` under nesting and fixed it. See :two-events-in-flight-at-once,
-    :a-join-is-the-product-and-the-licence and :what-the-phase-split-taught.
-    AND A KEY MAY SAY HOW A PATCH LANDS ON IT, 2026-09-03, which is what the licence was really
-    waiting for: {:combine f :combine/commutes true} on a map entry, so two events writing ONE key
-    can be licensed where a naive merge made that impossible. The combine is a CLOSURE, merging
-    being domain work, and the law it declares is DATA — refuted by `check/laws` through
-    generation, and verified on the concrete values by `compile` whenever the licence is taken.
-    A key with no combine REPLACES, so nothing written earlier behaves differently. See
-    :a-combine-is-how-a-patch-lands and :what-the-combine-taught.
-    AND A TRANSITION MAY BE GUARDED, 2026-09-03, which is the one thing the deleted
-    :v1-is-deterministic said this library would never do: {:when <a map schema>} on a transition,
-    so one event leads two ways and THE SHAPE SAYS WHICH. `shape/disjoint` proves two guards on
-    one [state, event] can never both fire and the constructor refuses them where it cannot;
-    `check/coverage` publishes whether they leave a gap, and never faults one, a gap being
-    `ignored` and legal. The guard is drawn on the arrow in Harel's own notation. See
-    :a-guard-is-a-schema-over-the-event and :what-guards-taught. The counts above are older than
-    this: it is 88 tests and 257 assertions now, and 41 instrumented functions.
-    AND A STATE MAY SAY WHERE IT GOES WHEN IT COMPLETES, 2026-09-03, which is the door
-    :a-machine-can-nest-in-a-node and :a-handler-causes-nothing had both named and neither
-    opened: {:done <id>} on a state, plus {:yield <a map schema>} where it nests a machine. A
-    state with no machine completes ON ENTRY and is passed straight through; one with a
-    machine completes when that child reaches a FINAL state, so a parent can WAIT for its
-    child and HARVEST what it finished with, where before this the only way out was an event
-    and taking one discarded the child's work. It is not a guard — one unconditional target —
-    so determinism is untouched, and a cycle among entry-completing states is a PROVEN
-    infinite loop rather than a suspicion. It is a REAL EDGE, which is why `reachable`,
-    `dead-ends`, `finishable` and `traps` needed not one line. Built out of an outside
-    architecture review; see :a-state-may-say-where-it-goes-when-it-completes,
-    :what-the-review-scored and :what-completion-taught.
-    AND THE LICENCE NOW COVERS TWO OF ONE EVENT, the same day and from the same review: that
-    is the FAN-OUT — n workers reporting into one accumulating state, licensed where the key's
-    combine is commutative — and it needed NO grammar and no public function, only the
-    diagonal that `confluence` had never enumerated. Measured 613ms to 305ms on two 300ms
-    reports. See :a-combine-is-how-a-patch-lands and :what-the-fan-out-licence-taught, which
-    is also where the two traps live: a set LITERAL of two equal expressions THROWS, and a
-    VECTOR accumulator is not commutative. It is 129 tests and 381 assertions now, and still
-    48 instrumented functions.
-    WHAT IS LEFT OF WHAT THE REVIEW NAMED is one question and it is a narrow one: MAY A STATE
-    COMPLETE ON A CONDITION OVER ITS OWN DATA — counting to n, k arrivals, still under budget.
-    Three wants, one door, and it is in :open-questions. The driver counts until then.
-    AND THERE IS A TUTORIAL, 2026-09-01, this component being a release candidate:
-    notebook/tutorial.clj, a Clay notebook rendered by `clojure -X:notebook` to docs/tutorial.html,
-    which is gitignored because it is derived. It works the facade through in order and ends with a
-    NINE-STATE PUBLISHING PIPELINE — a review cycle, a retry self-loop, one event leaving three
-    states — drawn and then run over a two-instance event log. Every diagram in it is the library's
-    own drawing, rendered client-side, so reading the page needs no graphviz. See
-    :what-the-tutorial-taught, which is where the first real CONSUMER of this API found things the
-    suites could not."
+   "EVERY LAYER IS BUILT AND NOTHING IS UNTAKEN. shape, compile, check, async and the facade; the
+    static checks are reachability, dead ends, traps, subsumption, views, coverage, confluence and
+    laws; the runtime TAKES the licence those prove. The store was never built and is not coming.
+    AND AN EVENT MAY SAY HOW IT IS REPORTED, 2026-09-04 — {:report :reads} — which is the
+    driver/world distinction this file had called `a label and not a feature`. It came from the
+    first CONSUMER of the facade rather than from here; see :an-event-may-say-how-it-is-reported.
+    VERIFIED 2026-09-04 by running it: 135 TESTS, 400 ASSERTIONS, both suites green. Two are
+    ^:integration, so THE COMMIT GATE IS A REAL GATE, and that suite NEEDS GRAPHVIZ.
+    HOW THE COUNTS ARE CHECKED, and it is A REPL HABIT AND NOT AN ASSERTION — worth knowing before
+    trusting a number here. `ts/instrumented` collects and instruments and returns nothing, and NO TEST
+    counts anything: what has caught things twice is asking the REPL for (count (mi/instrument!)) and
+    comparing it BY HAND with an ns-publics count of fns carrying a :malli/schema. Two ways of counting
+    that agree is what says no public function was added without a schema, and a disagreement has twice
+    meant a STALE REPL rather than a missing schema. MAKING IT AN ASSERTION IS THREE LINES and nobody
+    has; until somebody does, a count written down here is a measurement and not a guarantee.
+    THE FACADE IS TEN FUNCTIONS and has been since 2026-09-01. clj-kondo clean over src, test, notebook.
+    AND THERE IS A TUTORIAL: notebook/tutorial.clj, rendered by `clojure -X:notebook` to
+    docs/tutorial.html, gitignored because it is derived. RENDERING IT IS A TEST THE SUITE CANNOT BE —
+    it runs every cell, and it has caught two bugs no test would have."
 
    :gaps-in-the-repository
-   "Found by reading deps.edn against README.md, and every one of them will bite on first use:
-    - MANIFOLD IS NOT A DEPENDENCY: CLOSED 2026-08-31. manifold 0.4.3 is in deps.edn and
-      robertluo.state-graph.async is built. The REPL did have to be restarted, exactly as this entry
-      warned — a running classpath cannot be repaired from inside.
-    - tests.edn: CLOSED 2026-08-30. Two suites over one tree, separated by
-      :kaocha.filter/skip-meta [:integration] and :kaocha.filter/focus-meta [:integration],
-      copied from the sibling project. VERIFIED with
-      `clojure -M:dev:test unit --print-test-plan`: both testables build and `unit` marks
-      integration :kaocha.testable/skip true. The default :kaocha/ns-patterns is [\"-test$\"],
-      which IS the <ns>_test.clj convention, so it is not configured. An empty tree warns
-      `No tests were found` and exits 0.
-    - `clojure -M:dev` DOES NOT START A REPL. The :dev alias is :extra-paths and :extra-deps with
-      no :main-opts; the alias with the main-opts is :nrepl. It is `clojure -M:dev:nrepl` (and :dev
-      is wanted, or the test path and kaocha are not on the classpath). THE README SAYS THIS
-      CORRECTLY — checked 2026-09-01; this entry claimed otherwise and was itself the stale one.
-    - DATAHIKE WAS A DEPENDENCY NOTHING USED, and it is now not a dependency: removed 2026-09-01
-      with the store, see :nothing-is-persisted-here. Nothing in the tree requires it.
-    - kaocha is in :dev and not in :test, so the runner is `clojure -M:dev:test`, never
-      `clojure -M:test`."
+   "Each will bite on first use:
+    - `clojure -M:dev` DOES NOT START A REPL — :dev has no :main-opts. It is `clojure -M:dev:nrepl`,
+      and :dev is wanted or the test path and kaocha are not on the classpath. The README is right.
+    - kaocha is in :dev, so the runner is `clojure -M:dev:test`, never `clojure -M:test`. clj-kondo is
+      an ALIAS and not a binary: `clojure -M:lint --lint src test notebook`.
+    - tests.edn is two suites over one tree, split by skip-meta and focus-meta on :integration. The
+      default ns-patterns IS the <ns>_test.clj convention, so it is not configured.
+    - CLOSED, kept so nobody re-reports them: manifold IS a dependency now; datahike is NOT."
 
    :ubergraph-0-9-0
-   "READ FROM THE SOURCE of ubergraph 0.9.0 on 2026-08-30 (not yet run — anything below that gets
-    exercised should be re-recorded with what was SEEN).
-    - AN UBERGRAPH IS A MAP TYPE — (def-map-type Ubergraph [node-map allow-parallel? undirected?
-      attrs cached-hash]) — but a CLOSED one, and it fails SILENTLY. (assoc g :anything v) hits a
-      `case` with no default and returns `this` UNCHANGED; (dissoc g k) returns `this`; and
-      (with-meta g m) returns `this` while (meta g) is hardcoded nil. So metadata is DISCARDED
-      without a word, and there is no slot on a graph for anything that is not a node or an edge.
-      That is what decided :the-event-catalogue-is-denormalised.
-    - IT IS = AND IT IS EDN, contrary to what this file assumed before reading it: `equiv` is
-      (and (instance? Ubergraph other) (equal-graphs? this other)), `hasheq` is hash-graph, and
-      ubergraph->edn / edn->ubergraph both exist. The EDN round trip obviously cannot carry a
-      handler fn or a compiled malli schema, which is a fact about OUR attributes and not about
-      ubergraph.
-    - Attributes are the la/AttrGraph and up/Attrs protocols — attr, attrs, add-attr, add-attrs,
-      set-attrs, remove-attr(s) — over a node OR an edge, and add-attrs MERGES while set-attrs
-      REPLACES. Weight is not special: it is the :weight attribute with a default of 1.
-    - multidigraph is the constructor this project wants (allow-parallel? true, undirected? false):
-      two events joining one pair of states are two edges, and a plain digraph would keep one.
-    - node-with-attrs and edge-with-attrs answer values that build-graph accepts back, which is the
-      supported way to copy or rebuild a graph.
-    - viz-graph ANSWERS NOTHING USEFUL, added 2026-09-01 from its source and then from running it.
-      It threads the dot string through a cond-> whose branches are (#(spit filename %)),
-      dj/save! and dj/show! — so the value is spit's nil for :format :dot and a viewer's for the
-      rest, and the SOURCE is only ever written out. The way to it as a value is to hand :filename
-      a java.io.StringWriter, `spit` accepting any java.io.Writer; that is what check/dot does."
+   "- AN UBERGRAPH IS A CLOSED MAP TYPE AND IT FAILS SILENTLY: (assoc g :junk 1) returns g UNCHANGED,
+      dissoc likewise, and with-meta is discarded while meta is hardcoded nil. Verified. That is why
+      the event catalogue is denormalised — there is no slot for anything but nodes and edges.
+    - IT IS = AND IT IS EDN, contrary to what was assumed before reading it. The round trip cannot
+      carry a handler fn or a compiled schema, which is a fact about OUR attributes.
+    - add-attrs MERGES, set-attrs REPLACES. Weight is just the :weight attribute defaulting to 1.
+    - multidigraph is the constructor this project wants, or two events between one pair of states
+      collapse to one.
+    - OUT-EDGES ARE STORED IN A SET, so THERE IS NO EDGE ORDER TO RECOVER — which is why
+      document-order first-match guards are unrepresentable here.
+    - viz-graph ANSWERS NOTHING USEFUL: the :dot branch is a `spit` whose value is nil. The way to the
+      source as a VALUE is to hand :filename a java.io.StringWriter; that is what check/dot does. Its
+      :auto-label pprints the whole attribute map, which for us holds a compiled schema and a closure.
+    - GRAPHVIZ CLUSTERS ARE NOT REACHABLE THROUGH IT, so a nested child is not drawn inside its parent.
+      The parent MARKS the node and the child is asked for its own picture."
 
    :what-target-1-taught
-   "VERIFIED BY RUNNING on 2026-08-30, all of it in this project's own REPL:
-    - THE UBERGRAPH TRAPS ARE REAL, not merely read: (= g (assoc g :junk 1)) is TRUE and
-      (meta (with-meta g {:a 1})) is NIL. :ubergraph-0-9-0 was written from the source; this is
-      the same facts seen happening.
-    - MALLI NAMES THE WRONG SCHEMA FOR A MISSING KEY, and it cost a test. (:schema error) is the
-      WHOLE ENCLOSING MAP when a key is absent, and the offending child only when a present value
-      is wrong. (mu/get-in root (:path error)) is right in BOTH — verified over a missing key, a
-      wrong-typed key and a nested one. The error also carries :type :malli.core/missing-key,
-      which is the only thing telling a missing key from a key whose value is legitimately nil.
-      That is what robertluo.state-graph.shape/explain does, and why it keeps the ROOT schema.
-    - gen/let IN test.check 1.1.1 DOES NOT SUPPORT :let BINDINGS. The symbol simply does not
-      resolve, and the failure arrives as `Unable to resolve symbol` from inside the generator
-      rather than as anything about gen/let. Use gen/bind and gen/fmap explicitly.
-    - KAOCHA IGNORES A FOCUS-META NOBODY CARRIES. With no ^:integration test in the tree,
-      `-M:dev:test integration` prints `Ignoring --focus-meta :integration` and RUNS THE UNIT
-      TESTS, and `-M:dev:test` runs all of them TWICE (28 tests, 76 assertions, being 14 twice).
-      So the commit gate is not yet a gate — it becomes one the moment there is one ^:integration
-      test. Target 1 has nothing honest to put there: it opens no database and no socket, and
-      drawing a graph needs graphviz and belongs to target 2.
-    - THE INSTRUMENTATION FIXTURE IS WORTH PROVING. (mi/instrument!) RETURNS the vars it
-      instrumented, so a count is an assertion that the fixture is not a silent no-op — 14 here,
-      which is also exactly the number of public fns, so it doubles as the check that none was
-      forgotten. mi/clj-collect! takes {:ns [...]} as a VALUE, where mi/collect! is a macro that
-      would collect the test namespace.
-    - malli normalises [:map] to the FORM :map. Both have (m/type ...) = :map, so a bare :map is
-      a legitimate `any map` state schema and MapSchema admits it.
-    - MALLI HAS NO `IS THIS A SCHEMA` PREDICATE for the thing people actually write. m/schema? is
-      true ONLY of a compiled schema and false for the form [:map [:n :int]]; nothing public
-      answers `could malli make a schema of this` (the public surface has schema?, into-schema?,
-      -function-schema?, -ref-schema?, -entry-schema? and no more). So `Schema` and `MapSchema`
-      are written here as :fn predicates that simply CALL m/schema — which works because MALLI
-      RUNS A :fn PREDICATE THROUGH ITS OWN -safe-pred: (m/validate [:fn odd?] \"not-a-number\")
-      answers false rather than throwing. The throw m/schema makes on nonsense therefore comes
-      back as `false`, and the try/catch belongs to malli rather than to us, which is what lets
-      this honour :no-bare-try-catch. Verified false for a string, nil, a number and an unknown
-      schema type; true for a form, a compiled schema and a bare keyword one. (m/schema x) on an
-      already-compiled x is identical? to x, so the predicate costs nothing on the common path.
-    - AN ARGUMENT THAT MUST ACCEPT RUBBISH KEEPS :any, and that is a decision rather than a gap.
-      `problems` and `shape` take [:* :any] because they must ACCEPT a malformed part in order to
-      REPORT it — a tighter schema would refuse it with ::m/invalid-input instead of the list of
-      what is wrong, and would do so only under instrumentation, so the diagnosis would be both
-      worse and different between dev and production."
+   "MALLI, and these keep paying:
+    - MALLI NAMES THE WRONG SCHEMA FOR A MISSING KEY: (:schema error) is the WHOLE ENCLOSING MAP when a
+      key is absent, and the offending child only when a present value is wrong. (mu/get-in root
+      (:path error)) is right in BOTH. :type :malli.core/missing-key is the only thing telling a
+      missing key from one whose value is legitimately nil.
+    - MALLI HAS NO `IS THIS A SCHEMA` PREDICATE for the thing people write — m/schema? is false for
+      [:map [:n :int]]. So Schema and MapSchema are :fn predicates that CALL m/schema, which works
+      because MALLI RUNS A :fn THROUGH ITS OWN -safe-pred, so the throw comes back as false and the
+      try/catch is malli's rather than ours.
+    - MALLI NORMALISES [:map] TO :map, and MALLI MAPS ARE OPEN BY DEFAULT.
+    - gen/let IN test.check 1.1.1 DOES NOT SUPPORT :let BINDINGS — use gen/bind and gen/fmap. And
+      mg/sample TAKES {:size n} AS THE COUNT, not as generator size.
+    - KAOCHA IGNORES A FOCUS-META NOBODY CARRIES, silently running the unit tests instead.
+    - AN ARGUMENT THAT MUST ACCEPT RUBBISH KEEPS :any — `problems` and `shape` must ACCEPT a malformed
+      part in order to REPORT it, or the diagnosis is worse AND differs between dev and production."
 
    :what-target-2-taught
-   "VERIFIED BY RUNNING on 2026-08-31:
-    - viz-graph WITH :format :dot NEEDS NO GRAPHVIZ. Reading its source: :save with :format :dot is
-      a `spit` of the dorothy string, every OTHER format calls dorothy.jvm/save! which shells out,
-      and no :save at all calls show!. So the drawing is testable on a machine with no `dot`
-      installed — which this one is — and that is what made ^:integration honest at last: the test
-      writes a file, which is a real thing and nothing to mock.
-    - ITS :auto-label IS USELESS HERE. It pprints the whole attribute map into the label, and ours
-      holds a COMPILED MALLI SCHEMA and a CLOSURE. Hence `labelled`, which sets our own: the state
-      id with a marker and its schema FORM, and the event name on the edge. Assert that no `$eval`
-      reached the output — a closure in a picture is the failure mode.
+   "- viz-graph WITH :format :dot NEEDS NO GRAPHVIZ, so the drawing is testable without `dot`.
+    - THE SEVEN PRIMITIVE TYPES ARE PAIRWISE DISJOINT, checked and not assumed, :int against :double
+      included. That is what licenses `admits` to answer :no from a type difference, and `disjoint`
+      inherited it.
     - alg/pre-traverse walks DIRECTED edges from a start node, which is what reachability wants.
-    - THE SEVEN PRIMITIVE TYPES ARE PAIRWISE DISJOINT, checked and not assumed — every value of
-      each was validated against the other six and nothing overlapped, :int against :double
-      included. That check is what licenses `admits` to answer :no from a type difference alone.
-    - mg/sample TAKES {:size n} AS THE COUNT, not as test.check's generator size: (mg/sample s)
-      gives 10 and (mg/sample s {:size 30}) gives 30. Surprising, and it matters in a property that
-      is looking for a counterexample.
-    - THE INSTRUMENT COUNT CAUGHT A STALE REPL, exactly as the sibling project warns. It still said
-      14 after `check` was written, because test-support's `namespaces` had been edited on disk and
-      not reloaded in the REPL — so nine new fns were never collected. The number is a smoke alarm
-      for the fixture AND for the REPL, which is most of why it is worth asserting.
-    - KAOCHA'S FOCUS-META, from :what-target-1-taught, IS RESOLVED: with one ^:integration test in
-      the tree the two suites finally differ — 24 tests unit, 1 integration — and `-M:dev:test` no
-      longer runs everything twice."
+    - THE INSTRUMENT COUNT CAUGHT A STALE REPL, which is why it is asserted at all.
+    - ASSERT THAT NO `$eval` REACHED A LABEL. A closure in a picture is the failure mode."
 
    :what-the-design-conversation-verified
-   "VERIFIED BY RUNNING on 2026-08-31, while settling the open questions and before anything was
-    written down. Neither is about a target; both decided a design.
-    - MALLI MAPS ARE OPEN BY DEFAULT. (m/validate [:map [:n :int]] {:n 1 :total 5}) is TRUE, and only
-      {:closed true} refuses it. This is what makes `able to apply, but wrong` SILENT rather than
-      loud: a handler's answer merged into a state that has no edge for that event would validate
-      against that state's own schema while carrying keys it never declared. It is the reason the
-      data is discarded on a miss rather than merged. See
-      :an-ignored-event-is-not-an-error-but-is-not-silent.
-    - A FIRED TRANSITION CAN RETURN AN IDENTICAL STATE, so identical? cannot signal `ignored`. For
-      s = {:id :a :n 1}, all three of (merge s {}), (assoc s :id :a) and (assoc (merge s {}) :id :a)
-      are identical? to s — Clojure's map assoc answers `this` when the value is already there. A
-      self-loop whose handler answers {} is therefore indistinguishable from an event nobody handled.
-      Checked because it was about to be recommended as a free signal."
+   "- MALLI MAPS ARE OPEN BY DEFAULT, which is what makes `able to apply, but wrong` SILENT: a handler's
+      answer merged into a state with no edge for that event would validate against that state's own
+      schema while carrying keys it never declared. Hence the data is discarded on a miss.
+    - A FIRED TRANSITION CAN RETURN AN IDENTICAL STATE, so identical? cannot signal `ignored` —
+      Clojure's assoc answers `this` when the value is already there. Checked because it was about to
+      be recommended as a free signal."
 
    :what-the-handler-move-taught
-   "VERIFIED BY RUNNING on 2026-08-31, building the decisions of that day.
-    - DENORMALISATION PAID FOR ITSELF, and this is the finding worth keeping. Moving the handler and
-      its :out from the transition to the event changed shape.clj AND NOTHING ELSE — compile.clj and
-      check.clj needed not one edit, because `transitions` already flattens the catalogue onto every
-      edge and both of them read a shape only through it. The suites went green on the first run.
-      That vocabulary function is doing more work than its size suggests, and the lesson is that a
-      reading layer between the graph and its consumers is what let a structural change stay local.
+   "- A READING LAYER BETWEEN THE GRAPH AND ITS CONSUMERS IS WHAT LETS A STRUCTURAL CHANGE STAY LOCAL.
+      Moving the handler onto the event changed shape.clj AND NOTHING ELSE, because `transitions`
+      already flattens the catalogue onto every edge. It has now done so twice.
     - A 2-ARITY DELEGATING TO A 3-ARITY BREAKS UNDER ITS OWN INSTRUMENTATION when the extra argument
-      refuses nil. (initial sh data) calling (initial sh nil data) goes through the INSTRUMENTED var,
-      so nil is checked against Instance and throws. Loosening to [:maybe Instance] is NOT the fix:
-      Instance is `some?`, and `some?` behind a :maybe admits every value there is, so the schema
-      would assert nothing at all. The fix is a private helper both arities call, which is not
-      instrumented and keeps the public schema strict.
-    - CLOJURE'S OWN DEREFABLES TEST THE DEREF DECISION WITH NO MANIFOLD. A delay, a promise and a
-      future are all clojure.lang.IDeref, so `a deferred under the synchronous default is
-      dereferenced` is asserted today, on the classpath as it stands. What that does NOT prove, and
-      what stays UNVERIFIED, is that manifold's Deferred implements IDeref.
-    - A HANDLER CANNOT REACH :instance EITHER, by the same construction that stops it reaching :id:
-      both are written AFTER the merge. Worth an assertion of its own, because a handler answering
-      {:instance ...} is a plausible mistake and a silent one — it would move a row in the audit log
-      to another machine."
+      refuses nil. [:maybe Instance] is NOT the fix — `some?` behind a :maybe asserts nothing. Use a
+      private helper both arities call.
+    - CLOJURE'S OWN DEREFABLES TEST THE DEREF DECISION WITH NO MANIFOLD: delay, promise and future are
+      all IDeref."
 
    :what-the-async-layer-taught
-   "VERIFIED BY RUNNING on 2026-08-31, building robertluo.state-graph.async.
-    - s/connect IS ASYNCHRONOUS, AND IT COST A LOST STATE. The first `fan` gave each machine its own
-      stream and s/connect-ed them into one output; closing that output once every machine reported
-      done DROPPED whatever was still in a connect pipeline. Seen, not theorised: instance `a` ran
-      three events and only two states came out, while its :done carried the third. The fix removes
-      connect — every machine writes STRAIGHT to the shared sink, so a machine's :done cannot resolve
-      until its last state has been ACCEPTED there. A private `pump` that does not close the sink is
-      what makes one output shareable at all.
-    - A BOUNDED DEREF IS THE ONLY HONEST ONE IN A STREAM TEST. Every deref in async-test carries a
-      timeout, so a machine that hangs FAILS instead of hanging the suite. Streams are the one thing
-      in this project that can wait for ever.
-    - ONLY ONE TEST NEEDED A CLOCK. Serialisation is asserted with a handler that really is slower
-      (d/future plus a sleep), and that one is ^:integration; everything else uses immediate
-      deferreds and is deterministic. The assertion is about ORDER, not timing, so it does not care
-      how slow the slow one is.
-    - MANIFOLD DRAGS IN slf4j-api WITH NO BINDING, so the state-graph suite now prints three SLF4J
-      NOP lines on stderr, as the sibling project already did. Noise, not a fault, and worth knowing
-      before someone hunts it."
+   "- s/connect IS ASYNCHRONOUS, AND IT COST A LOST STATE — closing the output dropped what was still in
+      a connect pipeline. Every machine now writes STRAIGHT to the shared sink, so a machine's :done
+      cannot resolve until its last state has been ACCEPTED there.
+    - EVERY DEREF IN A STREAM TEST IS BOUNDED, or a hang becomes a hung suite. AND A TEST THAT DEREFS
+      :done BEFORE DRAINING :states HANGS — backpressure is real.
+    - ONLY ONE TEST NEEDS A CLOCK; everything else uses immediate deferreds and is deterministic.
+    - MANIFOLD DRAGS IN slf4j-api WITH NO BINDING, hence three NOP lines on stderr. Noise, not a fault."
 
    :what-the-facade-taught
-   "VERIFIED BY RUNNING on 2026-09-01, building robertluo.state-graph.
-    - A def ALIAS BYPASSES malli INSTRUMENTATION, which is why every re-export is a delegating defn.
-      mi/instrument! replaces the VAR's root binding, so a value captured by (def state shape/state)
-      is the raw function for ever: handed a bad argument it answers happily where the var throws.
-      Measured both ways, on the same call in the same session.
-    - AND THE NEAR MISS THAT WOULD HAVE HIDDEN IT, which is the half worth keeping: the alias
-      APPEARED guarded when called at its 2-arity, and only the 3-arity gave the game away. The
-      reason is that a defn whose body calls ITSELF goes through the var, so the 2-arity's delegation
-      landed in the instrumented wrapper. That is the same fact :what-the-handler-move-taught records
-      from the other side, and testing only the 2-arity would have licensed aliases everywhere.
-    - THE INSTRUMENT COUNT IS 31 — yesterday's 29 plus compile/admits? and the facade's `run`. It is
-      also exactly the number of public fns carrying a :malli/schema, counted the independent way
-      through ns-publics, so it still doubles as the check that none was forgotten. The facade's
-      eight delegations carry none by design and are absent from both counts.
-    - THE TWO DOORS AGREE, as a property rather than an example: for a generated shape and a
-      generated event sequence, (map :state) off the stream results equals the states the reduction
-      passes through. Worth more than any number of examples about the record's shape, and the only
-      thing that can refute :the-caller-owns-the-lifecycle.
-    - fan's :done RESOLVES {} WHERE NO EVENT EVER ARRIVED, which fell out of keying it by instance
-      rather than being designed, and is right: there is no machine until an event names one, so
-      there is nothing to report on. The initial state is not a transition and never appears on
-      :states either.
-    - THE FORMATTER AND THIS REPOSITORY DISAGREE about a prop/for-all body — a PostToolUse hook
-      aligns it under the binding vector, where every existing suite indents it four spaces. The hook
-      fires on the file-writing tools and not on a shell heredoc, which is how the existing style was
-      restored."
+   "- A def ALIAS BYPASSES malli INSTRUMENTATION, because instrument! replaces the VAR's root binding.
+      Every re-export is therefore a delegating defn. AND THE NEAR MISS: the alias APPEARED guarded at
+      its 2-arity, a defn calling ITSELF going through the var — testing only that arity would have
+      licensed aliases everywhere.
+    - THE TWO DOORS AGREE, as a PROPERTY: (map :state) off the stream equals the states the reduction
+      passes through. The only thing that can refute :the-caller-owns-the-lifecycle.
+    - fan's :done RESOLVES {} WHERE NO EVENT EVER ARRIVED, and that is right: there is no machine until
+      an event names one.
+    - THE FORMATTER HOOK FIRES ON THE FILE-WRITING TOOLS AND NOT ON A SHELL HEREDOC, and it will reflow
+      a whole file on first touch. Reach for the heredoc BEFORE the first edit, not after."
 
    :confluence-was-measured-not-guessed
-   "MEASURED BY RUNNING on 2026-08-31, over this project's own fixtures, when the question was whether
-    two events pending in one state may be applied in completion order. `Commute by default` was
-    proposed and the numbers refused it.
-    - For every state, every pair of distinct events admitted there was checked for a closing diamond:
-      counter has ONE such pair, :set and :stop in :running, and it does NOT commute — set-then-stop
-      lands :running then :done, while stop-then-set lands :done and then finds NO [done, set] edge,
-      so the :set is silently discarded. trapped has one pair, :oops and :stop in :running, and it
-      does not commute either.
-    - So ONE HUNDRED PER CENT of the concurrent-candidate pairs that exist in this codebase fail
-      confluence. Commute-by-default would have been wrong in every case there is, and wrong SILENTLY
-      and ORDER-DEPENDENTLY, which is the worst way to be wrong.
-    - The finding is structural rather than a fixture accident: different events take you to different
-      places, and that is what a state machine is FOR. It is why :two-events-in-flight-at-once
-      serialises by default and licenses only self-loops."
+   "ONE HUNDRED PER CENT of the concurrent-candidate pairs in this project's early fixtures FAIL
+    confluence — so `commute by default` would have been wrong in every case there is, and wrong
+    SILENTLY and ORDER-DEPENDENTLY. The finding is structural: different events take you to different
+    places, and that is what a state machine is FOR. WHAT IT DID NOT COVER IS A JOIN, which is exactly
+    what a commuting pair is and what those fixtures had none of."
 
    :what-the-tutorial-taught
-   "VERIFIED BY RUNNING on 2026-09-01, writing notebook/tutorial.clj — the first real CONSUMER of
-    this API rather than another test of it, which is why it found things the suites could not.
-    - kind/graphviz TAKES A VECTOR AND RENDERS IN THE BROWSER. Read from clay 2.0.22's own source
-      before being used: (kind/graphviz [dot-string]) — the value's FIRST element is the source —
-      and clay's item/graphviz interpolates it into a JS template literal that viz.js renders
-      client-side. So a page full of this library's drawings needs NO graphviz installed to read,
-      which is a better answer than a PNG and was not obvious. The one hazard is the template
-      literal: a backtick in a node label would break it, and ours are schema forms, so none.
-    - THE DOT SOURCE WAS ONLY REACHABLE THROUGH A FILE, which is the GAP the tutorial found and
-      the author closed the same day. ubergraph's viz-graph THREADS the dot string through a cond->,
-      and the :dot branch is (#(spit filename %)) — whose value is nil. So check/draw! with
-      :format :dot writes the source and ANSWERS NOTHING, and the notebook's first version wrote a
-      temp file and slurped it back, with a finally to release it.
-      CLOSED by check/dot, and the mechanism is worth knowing because it needs NO file at all:
-      `spit` calls clojure.java.io/writer on what it is handed, and that ACCEPTS a java.io.Writer, so
-      a StringWriter catches the source in memory. Verified before it was used. No finally either —
-      spit closes the writer it made, and closing a StringWriter is a no-op that keeps the buffer.
-      IT PAID TWICE: the notebook's helper went from eleven lines to four, and the graphviz-source
-      test stopped needing a file, so it left the integration suite for the fast loop.
-    - `run` GIVES EVERY MACHINE THE SAME STARTING DATA, which async/fan does not — fan takes a
-      function of the instance. Found by trying to write a pipeline whose initial state carried a
-      per-manuscript title, and worked around by moving the title onto the event that STARTS the
-      machine, which is better modelling anyway: a draft is empty and the submission names it. Worth
-      knowing before somebody meets it as a surprise; whether `run` should accept a function is the
-      author's call.
-    - A MERGE CANNOT REMOVE A KEY, AND THE TUTORIAL SHOWS IT RATHER THAN SAYING IT. The published
-      manuscript still carries the :notes from a review round three transitions earlier, visibly, in
-      the :done map. A limit is more convincing as an output than as a bullet.
-    - THE CROSS-INSTANCE INTERLEAVING IS VISIBLE AND IS NOT DETERMINISTIC. In the two-instance log
-      m-2's :withdraw overtook m-1's :confirm, which is the parallelism working — so the notebook
-      says the ROW ORDER is not promised and shows the per-instance paths beside it, which are. A
-      tutorial that asserted the interleaved order would flake.
-    - CLAY'S DEFAULTS, read from clay-default.edn: :base-target-path docs, :format [:html],
-      :show/:browse true. `:render true` implies show, serve, browse and live-reload all false,
-      which is what makes `clojure -X:notebook` headless. :exec-fn scicloj.clay.v2.api/make! with
-      :exec-args is why the alias needs no build namespace and no extra file."
+   "- kind/graphviz TAKES A VECTOR and renders CLIENT-SIDE via viz.js, so a page of this library's
+      drawings needs NO graphviz to read. The one hazard is the JS template literal: a backtick in a
+      node label would break it.
+    - THE DOT SOURCE WAS ONLY REACHABLE THROUGH A FILE, which is the gap the tutorial found and check/dot
+      closed. IT PAID TWICE — the notebook helper went from eleven lines to four, and a test left the
+      integration suite.
+    - `run` GIVES EVERY MACHINE THE SAME STARTING DATA, which async/fan does not. Work around it by
+      moving per-instance data onto the event that STARTS the machine, which is better modelling anyway.
+    - THE CROSS-INSTANCE INTERLEAVING IS NOT DETERMINISTIC, so a tutorial asserting row order would flake.
+    - CLAY: `:render true` implies show, serve, browse and live-reload all false, which is what makes
+      `clojure -X:notebook` headless."
 
    :what-the-parts-library-showed
-   "MEASURED BY RUNNING on 2026-09-01, checking the author's `most parts are shared, only the
-    assembly differs` against the code instead of agreeing with it.
-    - SHARING IS FREE AND COMPLETE. A vector of states and a vector of events, handlers and all,
-      assemble into two different machines by concat plus different transitions, and both check
-      clean. ONE CHILD SHAPE NESTS INTO TWO UNRELATED PARENTS with nothing to alias — a shape is
-      an immutable value — and a reduction through either lands the child correctly.
-    - BUT A SHARED CATALOGUE MUST BE SELECTED FROM AND NOT SPLATTED IN, and this bites on the
-      first assembly that uses fewer events than the catalogue holds: :unused-event REFUSES the
-      shape, seen as [{:problem :unused-event :id :retry}]. The check is right — an event no
-      transition fires IS dead code in that machine — so a parts library wants to be a MAP KEYED
-      BY ID that each assembly selects from, and never a vector to concat wholesale. Whoever
-      builds the agent workflows should know that on day one rather than day three."
+   "SHARING IS FREE AND COMPLETE — one child shape nests into two unrelated parents with nothing to
+    alias, a shape being an immutable value. BUT A SHARED CATALOGUE MUST BE SELECTED FROM AND NOT
+    SPLATTED IN: the first assembly using fewer events than the catalogue holds is REFUSED with
+    :unused-event, and the check is right. A parts library wants to be A MAP KEYED BY ID, never a
+    vector to concat wholesale. Know that on day one rather than day three."
 
    :what-visibility-taught
-   "VERIFIED BY RUNNING on 2026-09-01, building both halves of
-    :internal-visibility-is-declared-and-not-automatic.
-    - THE BREAKING CHANGE COST ONE TEST, and measuring it before recommending it is what settled a
-      three-way design question that argument had not. Projecting the merge onto a node's declared
-      keys broke exactly one of 68 tests: an async fixture whose state was a bare [:map] while its
-      handler set :mark. Two others wanted the same correction on inspection — the `form` fixture
-      wrote :name and :email into a state that declared neither, so the runtime had been quietly
-      undoing what the fixture existed to demonstrate. THE GENERATIVE FIXTURES NEEDED NOTHING, which
-      was the surprise: gen-shape's handlers all answer {}, so there was never anything to drop.
-    - `views` IS `admits` AGAIN, with the view as TARGET and the source node's schema as PRODUCED,
-      and the four verdicts were checked before the check was written: a state with the key and more
-      is :yes, without it :no, with it at the wrong type :no, and WITH IT ONLY OPTIONALLY also :no —
-      which is the one that matters, a view a handler is handed being unable to rest on a maybe.
-      Two structural checks now come free off one subsumption function, which is the argument for
-      having written it at all.
-    - AND THE SOUNDNESS DEPENDENCY RAN THE OTHER WAY FROM THE DESIGN, found by asking what the check
-      would answer before building it: the READ half's check is only sound because the HOLD half
-      exists. A node's schema used to be a lower bound on what it held, so a key could arrive from
-      three transitions back and :no proved nothing. Reading was the interesting half and holding was
-      the one that had to land first.
-    - A VIEW COSTS NOTHING WHERE IT IS NOT DECLARED, which is what let this land in a release
-      candidate: a handler with no :sees keeps its single argument, so the arity is decided by the
-      event definition and nothing written before this learns that views exist.
-    - AND IT BROKE A SOUNDNESS CLAIM TWO ENTRIES AWAY, which is the finding worth most here: adding
-      a read made check/commutes UNSOUND, because it compared WRITE sets only. A pair whose writes
-      are {:total} and {:n} is disjoint while one of them READS :n, and the two orders answer
-      :total 2 and :total 18 — an order-dependent flake the check would have licensed. The
-      condition is now Bernstein's, and the lesson is the one this project keeps relearning: a new
-      capability is not local, and the place to look is whatever OTHER check reasoned about what
-      handlers could touch. Found by asking `does this actually solve the problem it was built
-      for`, not by a test that already existed."
+   "- THE BREAKING CHANGE COST ONE TEST, and measuring it before recommending it is what settled a
+      three-way design question that argument had not. Two other fixtures wanted the same correction.
+    - THE SOUNDNESS DEPENDENCY RAN THE OTHER WAY FROM THE DESIGN: the READ half's check is only sound
+      because the HOLD half exists.
+    - AND IT BROKE A SOUNDNESS CLAIM TWO ENTRIES AWAY — adding a read made check/commutes unsound,
+      because it compared WRITE sets only. THE LESSON THIS PROJECT KEEPS RELEARNING: a new capability
+      is NOT LOCAL, and the place to look is whatever OTHER check reasoned about what handlers could
+      touch. Found by asking `does this actually solve the problem it was built for`."
 
    :what-nesting-taught
-   "VERIFIED BY RUNNING on 2026-09-01, building {:machine <a shape>}.
-    - THE SUBSUMPTION CHECK HAD TO LEARN ABOUT :sub, and until it did, nesting was broken in a
-      way only the check could see: `produced` composes the source's schema, the declared :out
-      and then the target's :id, and a nesting target's enter-schema REQUIRES :sub — which no
-      handler may write and the step assocs on entry. So every edge into a nested node was
-      condemned :target-refuses. Found by running the checks on the first nested shape ever
-      built, one minute after it worked. THE LESSON IS THE ONE THE ENTRY ALREADY STATED: what
-      the check composes must be what compile composes, and every key the MACHINERY writes has
-      to appear in both places or the check condemns correct shapes.
-    - GRAPHVIZ CLUSTERS ARE NOT REACHABLE THROUGH UBERGRAPH, so a child is not drawn inside its
-      parent. viz-graph builds its own dorothy element list out of nodes and edges, with no hook
-      for a subgraph; the alternatives were generating the dot ourselves — which means copying
-      ubergraph's private dotid and sanitize-attrs — or rewriting the child's dot to prefix
-      every node id, which is a small compiler and a fragile one. What was done instead: the
-      parent MARKS the node (⊞ n states) and the child is asked for its own picture. Two
-      pictures, and the parent says where to look.
-    - THE ORDERING OF A NAMESPACE MATTERS MORE THAN IT LOOKS. `Shape` had to move ABOVE StateDef
-      once a node could hold one — a [:ref #'Shape] would have worked and a plain reference is
-      better — and the referential nesting check needs `enter-schema` and `initial-id`, which
-      live in the reading section BELOW it. Declared rather than moved, and deliberately not
-      reimplemented: what the check asks has to be what runs.
-    - THE GENERATIVE PROPERTY EXTENDED WITHOUT AN ARGUMENT, which is a good sign for the design:
-      nest one generated shape into a node of another and assert that the parent lands in one of
-      ITS nodes and the child in one of the CHILD'S. The two share an event vocabulary — gen-shape
-      names events :e0..:e3 — so the child shadows the parent constantly, which is the
-      interesting half rather than an accident.
-    - AND CLOJURE'S OWN DEREFABLES PROVED THE Context COMPOSES ACROSS THE BOUNDARY, with no
-      manifold on the classpath of the test: a child handler answering a `delay` is dereferenced
-      by the synchronous `then` through two levels of nesting. Same trick as
-      :what-the-handler-move-taught, one layer deeper."
+   "- THE SUBSUMPTION CHECK HAD TO LEARN ABOUT :sub, or every edge into a nested node was condemned
+      :target-refuses. WHAT THE CHECK COMPOSES MUST BE WHAT compile COMPOSES, and every key the
+      MACHINERY writes has to appear in both places.
+    - THE ORDERING OF A NAMESPACE MATTERS: the referential nesting check needs `enter-schema` and
+      `initial-id` from the section below it — declared rather than moved, and deliberately not
+      reimplemented, because what the check asks has to be what runs.
+    - THE GENERATIVE PROPERTY EXTENDED WITHOUT AN ARGUMENT, the two shapes sharing an event vocabulary
+      so the child shadows the parent constantly — the interesting half rather than an accident."
 
    :what-guards-taught
-   "VERIFIED BY RUNNING on 2026-09-03, building :a-guard-is-a-schema-over-the-event.
-    - `disjoint` COULD NOT LIVE BESIDE `admits`, which the design had assumed it would. The
-      ambiguity check is REFERENTIAL — a shape whose determinism cannot be proven must not be
-      CONSTRUCTIBLE, so it has to answer before the graph exists — and `check` sits above
-      `shape`. So `primitive-types` and `entries-of` MOVED DOWN into shape, and check now reads
-      them from there. Subsumption and disjointness are siblings A LAYER APART, one asked about
-      the built graph and one answerable from the parts, over one vocabulary. THE LESSON: where
-      a check lives is decided by WHEN IT MUST ANSWER and not by what it resembles.
-    - `dis-map` NEVER ANSWERS :no, so the witness the design promised for :ambiguous is not
-      there. Proving two MAP schemas OVERLAP needs a VALUE, and one shared key agreeing is not
-      one — another key may still refuse. The fault carries :verdict instead, which at map
-      level is always :unknown. THE WITNESS DID LAND IN `coverage`, where the probe pins one key
-      to one value so the value is in hand: a gap publishes {:witness {:verdict :red}}. Same
-      idea, and it works only where something CONSTRUCTS the value.
-    - AND A HOLE THE DESIGN DID NOT SEE, found by running it: A MALFORMED EVENT THAT FAILED
-      EVERY GUARD LOOKED LIKE AN ORDINARY MISS. Selection happens before `conform!`, so :amber
-      where the enum says :green or :red matched no candidate and came back as `ignored` —
-      conflating a DEFECT with a legitimate miss, which is the one thing this library is careful
-      about everywhere else. Fixed by conforming against the group's event schema when nothing
-      matched: A GUARD IS A REFINEMENT OF A SCHEMA THE EVENT MUST ALREADY SATISFY, so a bad
-      event throws and a well-formed one no guard wanted is still ignored. `candidates` is a
-      separate reading for exactly this, so `entry` and the fall-through cannot come to disagree
-      about whether there was an edge to refuse.
-    - THE PURE LIFT AND A TAG DO NOT COMPOSE, which is the first friction a user meets. A
-      discriminating key is ROUTING INFORMATION and the target state does not hold it, so a
-      pure-lift handler answers it and the CLOSED patch schema refuses it — correctly, by
-      :an-event-is-the-only-way-a-transition-happens. A guarded event therefore usually spells
-      its handler out, (fn [e] (select-keys e [...])), or its targets declare the tag. Neither
-      rule is wrong; they simply meet here, and it is better met on this page than in anger.
-    - NUMERIC BOUNDS COST SIX LINES, as predicted, and cover both spellings malli has: the
-      :min/:max PROPERTIES of :int and :double, and the COMPARATOR schemas :> :>= :< :<=, which
-      carry their bound as their only child. [:int {:max 2}] against [:int {:min 3}] is :yes;
-      two ranges that OVERLAP are :unknown and not :no, proving overlap needing a value again.
-    - THE NUMBERS: the suite went 77 tests to 88, and 257 assertions, both suites green. The
-      instrument count went 36 to 41 and agrees with the independent ns-publics count, so no
-      public function was added without a schema. clj-kondo is CLEAN over src, test and
-      notebook.
-    - AND clj-kondo IS AN ALIAS AND NOT A BINARY, which cost a wrong claim before the author
-      corrected it: `clojure -M:lint --lint src test notebook`, the alias being in every
-      component's deps.edn with :replace-deps. There is no `clj-kondo` on the path and none is
-      wanted. The root CLAUDE.md's ONE NAME PER JOB list names the test, repl and notebook
-      commands and NOT this one, which is why it was looked for in the wrong place.
-    - THE TUTORIAL GAINED A SECTION, and writing it found two bugs the suite could not: both
-      `problems` examples asked the FACADE, whose `problems` takes a BUILT shape — and
-      :ambiguous is REFERENTIAL, so the constructor throws and there is no shape to ask about.
-      The page now asks `shape/problems` of the PARTS, which is what that layer is for, and the
-      README shows the throw instead, that file's own idiom for a referential fault. RENDERING
-      THE NOTEBOOK IS WHAT CAUGHT IT: `clojure -X:notebook` runs every cell, and a tutorial
-      example that cannot run is a lie a test suite will never see."
+   "- `disjoint` COULD NOT LIVE BESIDE `admits`: the ambiguity check is REFERENTIAL, so it must answer
+      before the graph exists, and `check` sits above `shape`. WHERE A CHECK LIVES IS DECIDED BY WHEN
+      IT MUST ANSWER.
+    - `dis-map` NEVER ANSWERS :no, so :ambiguous carries no witness — proving two MAP schemas OVERLAP
+      needs a VALUE. THE WITNESS DID LAND IN `coverage`, where the probe constructs one.
+    - A MALFORMED EVENT THAT FAILED EVERY GUARD LOOKED LIKE AN ORDINARY MISS, conflating a DEFECT with
+      a legitimate miss. Fixed by conforming against the group's schema when nothing matched.
+    - A NOTEBOOK EXAMPLE FOR A REFERENTIAL FAULT MUST ASK `shape/problems` OF THE PARTS — the facade's
+      takes a BUILT shape, and the constructor throws, so there is none. RENDERING THE NOTEBOOK IS
+      WHAT CATCHES THIS."
 
    :what-the-phase-split-taught
-   "VERIFIED BY RUNNING on 2026-09-03, splitting the step and taking the licence.
-    - THE LICENCE WAS UNSOUND AND NOTHING HAD NOTICED, which is the finding that matters most
-      and it was found by ASKING rather than by a test. `check/commuting` reasons over
-      shape/transitions of ONE graph and knew nothing of nesting, so a node whose child admitted
-      both events had its own two self-loops licensed :yes while the child's own `confluence`
-      proved that pair :no — and the two orders landed in visibly different states, the parent's
-      self-loop RESTARTING the child and destroying its work. It was harmless for exactly as long
-      as `drive` ignored it. THE HABIT WORTH KEEPING: before resting anything on a check, ask what
-      it was reasoning about, because a check that is decorative is a check nobody has tested
-      against reality.
-    - THE SPLIT IS DECIDED BY WHAT EACH CROSSING DEPENDS ON, and the division came out exact:
-      :event, :sees and :out belong to the PATCH half (an event either is what it says it is or
-      is not, whatever state it meets; a view reads the state the handler SAW; :out is the
-      event's own promise), while :answer and :enter belong to the APPLY half. :answer is the
-      one that forced the split to exist — a patch-schema is the TARGET'S schema, and a licensed
-      patch is applied where the target may be a DIFFERENT NODE from the one it was computed
-      against. In the join, :test's patch is computed in :verifying where its target is :tested,
-      and applied in :evaled where its target is :complete.
-    - THE STEP IS DEFINED AS THE COMPOSITION and is asserted as a PROPERTY — patch-then-apply
-      equals step, for any generated shape and any event, admitted or not. That is the only thing
-      that stops the one-call door and the two-call door drifting, and it cost three lines.
-    - AND IT TURNED :then FROM AN fmap INTO A BIND, which an existing test caught within a minute.
-      The Context's words always said bind — `answers whatever the continuation answers` — but the
-      old step used `then` exactly ONCE per call, so an fmap satisfied it, and compile_test's box
-      fixture was (fn [v f] (box (f v))). Two composed binds turn that into a container of a
-      container, and `applying` found no :depth on what it was handed. VERIFIED FIRST, before
-      relying on it: d/chain flattens, flattens twice over, and chaining a deferred does not
-      consume it. The fixture is now a lawful bind and its assertions did not change.
-    - A PATCH HAS TO SAY WHOSE IT IS. :depth, and the two halves compare it against their own
-      lookup — a child's patch may only be applied to that child and this machine's only to this
-      machine, or an answer would be merged into a state that never asked for it. One comparison
-      per level checks the whole descent, nesting asserting the same thing of itself.
-    - THE BUG THE SEAM CAUGHT WAS MY OWN, one layer up: async handed `apply` the patch DEFERRED
-      rather than the patch, and the seam failed loudly at :depth instead of merging nonsense.
-      Nine errors, all one cause.
-    - A SPECULATIVE TAKE IS FREE AND IS TAKEN ONLY WHERE IT PAYS. Start the handler, then reach
-      for another event without waiting, and race the two: whatever the take brings is either the
-      other half of a licensed pair or the next iteration's event, carried in `held`, so nothing
-      is taken twice and nothing dropped. The reach is skipped entirely where THIS state has no
-      licensed pair, which is most states in most shapes — otherwise a shape with one licensed
+   "- THE LICENCE WAS UNSOUND AND NOTHING HAD NOTICED, found by ASKING rather than by a test. THE HABIT
+      WORTH KEEPING: before resting anything on a check, ask what it was reasoning about — a check that
+      is decorative is a check nobody has tested against reality.
+    - THE SPLIT IS DECIDED BY WHAT EACH CROSSING DEPENDS ON: :event, :sees and :out are the PATCH half;
+      :answer and :enter are the APPLY half. :answer FORCED the split, a licensed patch being applied
+      where the target may be a DIFFERENT NODE from the one it was computed against.
+    - THE STEP IS DEFINED AS THE COMPOSITION and asserted as a PROPERTY, which is the only thing
+      stopping the two doors drifting. Three lines.
+    - IT TURNED :then FROM AN fmap INTO A BIND, which an existing test caught within a minute. VERIFIED
+      FIRST: d/chain flattens, twice over, and chaining a deferred does not consume it.
+    - A PATCH HAS TO SAY WHOSE IT IS — :depth, one comparison per level. The bug the seam caught was my
+      own, async handing `apply` the patch DEFERRED rather than the patch: nine errors, all one cause.
+    - A SPECULATIVE TAKE IS SKIPPED WHERE THIS STATE HAS NO LICENSED PAIR, or a shape with one licensed
       pair would hold an event early everywhere.
-    - COMPLETION ORDER IS TESTABLE WITHOUT A CLOCK, which is better than the ^:integration test
-      it replaces the need for: the first event's handler PARKS on a deferred the test resolves
-      by hand, so the second can only land first. Feed :eval then :test and the first result is
-      :test, deterministically. One timing test remains and is ^:integration, asserting the thing
-      only a clock can — 600ms serialised against under 500 licensed.
-    - AND A TEST DEREF-ING :done BEFORE DRAINING :states HUNG, exactly as `Machine` warns.
-      Backpressure is real; the second result had nobody to take it.
-    - THE NUMBERS: 100 tests and 298 assertions, both suites green, up from 88 and 257. The
-      instrument count went 41 to 42 — `phases` is the one public function added — and agrees
-      with the independent ns-publics count. clj-kondo clean over src, test and notebook. THE
-      FACADE IS STILL TEN FUNCTIONS: `commuting` stays in `check` beside `subsumption`, `views`,
-      `coverage` and `confluence`, none of which is on the facade either, and `problems` is not
-      the precedent for it — that one publishes FAULTS and this publishes a licence."
+    - COMPLETION ORDER IS TESTABLE WITHOUT A CLOCK: park the first handler on a deferred the test
+      resolves by hand."
 
    :what-the-combine-taught
-   "VERIFIED BY RUNNING on 2026-09-03, building :a-combine-is-how-a-patch-lands.
-    - THE PROTOTYPE REFUTED MY OWN `SOUND` EXAMPLE, which is the finding that shaped the design.
-      `best-of` written as (if (>= score-a score-b) a b) was offered as the correct version and
-      generation broke it in forty samples: a TIE has no canonical winner, so :by depends on which
-      argument came first. It took (compare [score by]) — a TOTAL order — to make the law hold. If
-      the person proposing the mechanism gets it wrong in the first example, the mechanism needs a
-      checker and not a docstring.
-    - AND THE LAW I TESTED FIRST WAS THE WRONG LAW. Binary commutativity is not what the licence
-      needs; LEFT-COMMUTATIVITY over (state, patch, patch) triples is, because that is the shape
-      the fold has. A function can be left-commutative in the fold and not commutative as a binary
-      operation — the fold always puts the STATE first, so a rule that only ever discards the
-      SECOND argument is consistent in both orders. Two of my three attempted counterexamples were
-      not counterexamples for exactly that reason.
-    - GENERATION CANNOT REACH EVERY VIOLATION, and this is the number that decided the runtime
-      check: a plausible domain rule — `a pinned choice wins outright` — is not left-commutative,
-      and 27,000 generated triples found nothing, malli having no reason to invent the string
-      `pinned`. The special case must also be BEATABLE to violate anything: an unbeatable pin just
-      makes the max sticky and stays order-independent, which cost two wrong examples before the
-      right one.
-    - SO THE RUNTIME CHECK IS THE ENFORCEMENT AND THE GENERATIVE ONE IS THE DEVELOPMENT AID, and
-      each catches what the other cannot. `laws` finds mistakes about VALUES (a tie-break); :agree
-      finds mistakes about RARE values. The liar fixture is licensed by `commuting`, is NOT refuted
-      by `laws`, and IS refused by :agree — all three asserted, because that combination is the
-      whole argument for having the third.
-    - :agree HAD TO BECOME A PRE-CONDITION, which changed the async layer's shape. Applying one
-      patch and only then discovering the licence was invalid would emit a result derived from an
-      unsound proof. So `pump` now waits for BOTH patches before landing either — which costs
-      nothing in the machine's wall-clock, the concurrency being in the HANDLERS and both already
-      running, and only delays the FIRST result's row. Verified: :states is closed and EMPTY when a
-      false promise is caught.
-    - AND IT BROKE THE TESTS THAT PROVED THE ORDERING, which is how the change announced itself:
-      two gated tests read the first result and only then opened the gate, which under
-      wait-for-both is a deadlock. Rewritten to open the gate first — the RACE is already decided
-      by then, every stream in those tests being buffered so the chain runs synchronously to the
-      point where the machine chooses. Six consecutive suite runs to confirm that is a fact about
-      the machine and not about a clock.
-    - MALLI KEEPS ARBITRARY ENTRY PROPERTIES and `mu/merge` carries them through, so
-      {:combine f} on a map entry survives into `enter-schema` — checked before designing anything
-      on it. m/children hands back [k props child], which `entries-of` already destructured and
-      merely threw the props away.
-    - A `for` WHOSE BODY IS A `cond` PUTS nil IN `problems`. The first version of the referential
-      check emitted nil for the healthy case, `concat` kept it, and every shape with a combine was
-      refused with a vector of nils. Two `for`s with :when instead. Worth knowing because
-      `shape/problems` is a concat of a dozen comprehensions and the idiom there is :when, never a
-      cond body.
-    - mg/sample TAKES A :seed AND HONOURS IT, so `laws` answers the same thing twice; unseeded it
-      genuinely varies. An :fn schema with no :gen/gen throws :malli.generator/no-generator, which
-      is malli's answer and not one to work around — `laws` documents it rather than swallowing it,
-      :no-bare-try-catch holding.
-    - `check` NOW REQUIRES malli.generator, so it loads test.check — and the facade requires
-      `check`, so requiring robertluo.state-graph loads it too. test.check was already a :deps
-      dependency and not a dev one, so nothing NEW is on the classpath; what changed is what is
-      loaded. Taken knowingly, for the same reason the facade already pays for `check`: a fifth
-      namespace for one function is worse, and `laws` belongs beside `subsumption`, `views`,
-      `coverage` and `confluence`, none of which is on the facade either.
-    - `laws` IS DELIBERATELY NOT PART OF `problems`. `problems` is static, cheap and runs nothing;
-      `laws` runs the author's own function a couple of thousand times. Mixing them would make
-      `problems` a test runner.
-    - THE NUMBERS: 109 tests and 326 assertions, both suites green, up from 100 and 298. The
-      instrument count went 42 to 45 — combines-of, combines and laws — and agrees with the
-      independent ns-publics count. clj-kondo clean. The tutorial gained a section and RENDERS,
-      which is what proves its cells run."
+   "- THE PROTOTYPE REFUTED MY OWN `SOUND` EXAMPLE in forty samples, A TIE having no canonical winner;
+      it took a TOTAL order to make the law hold. IF THE PERSON PROPOSING THE MECHANISM GETS IT WRONG
+      IN THE FIRST EXAMPLE, THE MECHANISM NEEDS A CHECKER AND NOT A DOCSTRING.
+    - AND THE LAW I TESTED FIRST WAS THE WRONG LAW — a function can be left-commutative in the fold and
+      not commutative as a binary operation.
+    - GENERATION CANNOT REACH EVERY VIOLATION: a plausible domain rule survived 27,000 generated
+      triples, malli having no reason to invent the magic string. SO THE RUNTIME CHECK IS THE
+      ENFORCEMENT AND THE GENERATIVE ONE IS THE DEVELOPMENT AID.
+    - :agree HAD TO BECOME A PRE-CONDITION, so `pump` waits for BOTH patches before landing either —
+      which costs no wall-clock, the concurrency being in the HANDLERS.
+    - MALLI KEEPS ARBITRARY ENTRY PROPERTIES and mu/merge carries them through, which is what lets
+      {:combine f} survive into enter-schema.
+    - A `for` WHOSE BODY IS A `cond` PUTS nil IN `problems`. The idiom there is :when, never a cond body.
+    - mg/sample TAKES A :seed AND HONOURS IT. An :fn schema with no :gen/gen throws no-generator, which
+      is malli's answer and not one to work around.
+    - `laws` IS DELIBERATELY NOT PART OF `problems` — that would make a static check a test runner."
 
    :what-the-review-scored
-   "SCORED 2026-09-03, against the code and not against memory, when the author brought a
-    DECLARATIVE TRANSITION GRAPH proposal as a review of this architecture: transition
-    fragments with declared inputs/outputs/effects, a separate declarative assembly, and a
-    TOKEN-FLOW runtime owning scheduling, persistence, replay and cancellation. Worth keeping
-    because it is the first outside frame this design has been held against, and because two
-    thirds of what it asked for turned out to be here already.
-    - THE ONE-LINE DIAGNOSIS: IT IS A DATAFLOW MODEL AND THIS IS A CONTROL-FLOW MODEL. There,
-      a transition fires when its INPUTS ARE AVAILABLE — a build system, a Petri net, `make`.
-      Here, one fires when AN EVENT ARRIVES AND THE STATE ADMITS IT. Nearly every difference
-      falls out of that substitution, and it is why the proposal's worked example is a
-      COMPILER PIPELINE: a closed system with no external cause, where every token originates
-      at a fork. `park until a human approves` has no dataflow spelling, there being no
-      upstream node whose output is `the person clicked`. It is the INNER half of a workflow,
-      and it is not wrong about that half.
-    - THE STATE-EXPLOSION ARGUMENT IS CORRECT AND WAS NOT NEWS.
-      :a-join-is-the-product-and-the-licence had measured it two days earlier: a join IS the
-      product construction, 2^n states, 8 at n=3. THE COUNTER WORTH MAKING BACK is that a
-      MARKING does not remove the explosion, it RELOCATES it — out of the shape, where it is
-      drawable and statically checkable, into the runtime state, where it is neither. And
-      there is a price the document never names: every static check here rests on ONE STATE
-      BEING ONE MAP WITH ONE SCHEMA. Under a marked graph the state is a set of markings plus
-      per-token payloads plus join buffers, and merge(from, out) ⊆ to loses its subject. It
-      trades a decidable checker for a nicer picture.
-    - WHERE THIS LIBRARY IS ALREADY AHEAD, and it is the proposal's weakest section: its
-      `essential constraint` is {:purity :effects :idempotence} — A DECLARATION THE ASSEMBLER
-      TRUSTS. It promises `correct concurrency` and `type-checked` and names no mechanism for
-      either. Here :sees declares reads, :out declares writes, :combine declares how a value
-      lands, and then `commuting` PROVES the reorder by Bernstein, `laws` refutes a false
-      combine by generation, and :agree re-verifies on the concrete values. A rule that lives
-      only in a declaration is the repository's own named anti-pattern.
-    - THE OPERATOR TABLE, SCORED. Expressible: `then` (an edge), `choose` (a guard),
-      `all`/`join-all` (the product lattice plus the licence), `recover` (an edge to a fault
-      state). Expressible with the PRODUCER's help: `retry` (a self-loop, the budget riding
-      on the event), `join-quorum`/`join-any` (a SLICE of the same lattice — an edge off every
-      k-subset — but firing on the k-th arrival needs a cause). Partly: `scope` — cancellation
-      is the unconditional escape and works, TIMEOUT IS THE CALLER'S CLOCK and is correct
-      since an event is the only cause, and CLEANUP was missing. Not at all: `foreach` and
-      `collect`.
-    - AND `foreach` SCORED WRONG, corrected 2026-09-03 by trying to build it. It is not `not
-      expressible`, it is `expressible with the producer's help` — the same row `join-quorum`
-      and `retry` sit in, and for the identical reason. The ACCUMULATION was already there (a
-      commutative combine on a set-valued key), the CONCURRENCY needed one character in
-      `confluence`'s pair enumeration, and what is genuinely absent is only the COMPLETION TEST
-      — counting to n, which is a guard over the state. So the driver counts, which is this
-      library's answer to branching and to retry budgets as well. Recorded because the wrong
-      score made the gap look STRUCTURAL when two thirds of it was a spelling.
-    - AND READING THE PARTIAL ROWS TOGETHER IS THE FINDING: they are ELEVEN WAYS OF WANTING
-      ONE THING — a transition caused by the machine's own accumulated state rather than by
-      the world. `only when the child has finished`, `only while under budget`, `once k
-      branches have arrived`. This library had refused that three times, each for a good and
-      DIFFERENT reason, and each refusal left a named door. The review was the accumulated
-      case for opening exactly one of them, which is what was built —
-      :a-state-may-say-where-it-goes-when-it-completes.
-    - WHAT WAS NOT ADOPTED AND WHY. `The runtime owns persistence, replay, observability` is
-      a FRAMEWORK, and :nothing-is-persisted-here and :the-caller-owns-the-lifecycle were
-      deliberate; a runtime owning persistence has to own shape identity and versioning,
-      which is the question v1 pushed out. And the ergonomic complaint — that a named
-      `join-all` reads better than 8 states and 12 edges — is LEGITIMATE and belongs in the
-      consumer: :a-join-is-the-product-and-the-licence already answered that a join is a
-      PARTS ASSEMBLY.
-    - ONE THING STILL WORTH STEALING, not built: the metadata block's :effects/:idempotence.
-      The licence proves REORDERING is safe and says nothing about RE-EXECUTION. Harmless
-      today, a speculative take never re-running a handler; retry and replay would both need
-      it, and it is the same class of declared-law-plus-checker as :combine/commutes."
+   "The first outside frame this design has been held against, and two thirds of what it asked for was
+    already here. THE ONE-LINE DIAGNOSIS: IT IS A DATAFLOW MODEL AND THIS IS A CONTROL-FLOW MODEL —
+    there a transition fires when its INPUTS ARE AVAILABLE, here when AN EVENT ARRIVES AND THE STATE
+    ADMITS IT, and nearly every difference falls out of that substitution. `Park until a human
+    approves` has no dataflow spelling.
+    - THE STATE-EXPLOSION ARGUMENT IS CORRECT AND WAS NOT NEWS. THE COUNTER WORTH MAKING BACK: a
+      MARKING does not remove the explosion, it RELOCATES it out of the shape, where it is checkable,
+      into the runtime state, where it is not — and every static check here rests on ONE STATE BEING
+      ONE MAP WITH ONE SCHEMA.
+    - WHERE THIS LIBRARY IS AHEAD: its `essential constraint` is A DECLARATION THE ASSEMBLER TRUSTS,
+      promising correct concurrency and naming no mechanism. Here the declarations are PROVEN — by
+      Bernstein, by generation, and on the concrete values.
+    - AND READING THE PARTIAL ROWS TOGETHER IS THE FINDING: they are ELEVEN WAYS OF WANTING ONE THING —
+      a transition caused by the machine's own accumulated state rather than by the world."
 
    :what-completion-taught
-   "VERIFIED BY RUNNING on 2026-09-03, building
-    :a-state-may-say-where-it-goes-when-it-completes.
-    - THE EDGE-OR-ATTRIBUTE QUESTION WAS THE WHOLE DESIGN, and it was settled by counting
-      what each way COSTS rather than by taste. As an edge, `reachable`, `dead-ends`,
-      `finishable` and `traps` needed NOT ONE LINE — they walk the graph. As an attribute,
-      each of the four would have had to learn about it or condemn correct shapes: a state
-      reached only by completing would be :unreachable, and one whose only way out is
-      completing would be a :dead-end. The cost of the edge was ONE `:when` in
-      `shape/transitions`.
-    - AND `transitions` TURNED OUT TO BE THE SEAM AGAIN. :what-the-handler-move-taught
-      recorded that a reading layer between the graph and its consumers is what let a
-      structural change stay local; this is the second time. Adding a whole new KIND of edge
-      touched `transitions` and nothing else above it — `index`, `coverage`, `commutes` and
-      `entry` never learned that a completion exists.
-    - THE MISTAKE I MADE IS THE ONE THIS FILE ALREADY RECORDED. :what-guards-taught says a
-      notebook example must ask `shape/problems` OF THE PARTS for a REFERENTIAL fault,
-      because the facade's `problems` takes a BUILT shape and the constructor throws. I wrote
-      exactly that bug again for :done-cycle, and RENDERING THE NOTEBOOK caught it again —
-      `clojure -X:notebook` runs every cell, so a tutorial example that cannot run is a lie a
-      test suite will never see. The habit worth keeping is the render, not the memory.
-    - THE LICENCE GUARD IS IMPLIED AND WAS KEPT ANYWAY, which is a deliberate exception to
-      `only assert what can fail`. No shape `shape` will build can reach `commutes`'s
-      completion refusal: s, ta and tb all need out-edges to be in a diamond, and a PLAIN
-      state that both continues and has out-edges is refused as :done-with-edges while a
-      NESTING one is caught a line above. But that argument SPANS TWO NAMESPACES, and the
-      licence is load-bearing — so the condition is stated where it is relied on, and the
-      test asserts the fault that implies it rather than reaching through a hand-built graph.
-    - THE PASS-THROUGH PROPERTY IS THE ONE WORTH HAVING, and it is genuinely independent
-      rather than the implementation restated: split one generated edge a -e-> b into
-      a -e-> mid {:done b} and the reduction must end EXACTLY where it ended before. It
-      compares two machines and recomputes nothing.
-    - THE FORMATTER HOOK REFLOWED A WHOLE SOURCE FILE on the first Edit, undoing the repo's
-      hand-alignment in three entries nobody had touched — :what-the-facade-taught recorded
-      this disagreement and its workaround, which is that the hook fires on the file-writing
-      TOOLS and not on a shell heredoc. Reverted and every edit after was done through the
-      shell. Worth reading that entry BEFORE the first edit rather than after.
-    - A FIXTURE THAT CANNOT BE A CHILD. `shipping`'s own first state insists on a :total, and
-      entering a child hands it NO DATA, so nesting it is :machine-cannot-start — which cost
-      two test failures before the fixture was right. The referential check was doing exactly
-      its job; the lesson is that a shape written to be a PARENT is usually not startable as a
-      CHILD.
-    - THE NUMBERS: 126 tests and 370 assertions, both suites green, up from 109 and 326. The
-      instrument count went 45 to 48 — `shape/continuations`, `check/continued` and
-      `check/yields` — and agrees with the independent ns-publics count. clj-kondo clean over
-      src, test and notebook. THE FACADE IS STILL TEN FUNCTIONS, a completion transition being
-      an option on `state`. The tutorial gained a section and RENDERS, and the drawing was
-      checked as a real 36KB PNG rather than as dot source — dashed unlabelled arrows for the
-      completions beside a solid labelled `cancel` for the abort, which is the distinction
-      visible at a glance and the argument for drawing at all."
+   "- THE EDGE-OR-ATTRIBUTE QUESTION WAS THE WHOLE DESIGN, settled by counting what each COSTS. As an
+      edge, four traversals needed NOT ONE LINE; as an attribute, each would have condemned correct
+      shapes. The cost of the edge was ONE `:when` in `shape/transitions` — the seam, again.
+    - THE MISTAKE I MADE IS ONE THIS FILE ALREADY RECORDED, and RENDERING THE NOTEBOOK caught it again.
+      THE HABIT WORTH KEEPING IS THE RENDER, NOT THE MEMORY.
+    - THE LICENCE GUARD IS IMPLIED AND WAS KEPT ANYWAY, a deliberate exception to `only assert what can
+      fail`: the argument SPANS TWO NAMESPACES and the licence is load-bearing.
+    - THE PASS-THROUGH PROPERTY IS THE ONE WORTH HAVING — split a generated edge in two with a {:done}
+      between, and the reduction must end EXACTLY where it did. It compares two machines and recomputes
+      nothing.
+    - A SHAPE WRITTEN TO BE A PARENT IS USUALLY NOT STARTABLE AS A CHILD, entering a child handing it
+      NO DATA.
+    - CHECK THE DRAWING AS A REAL PNG and not as dot source."
 
    :what-the-fan-out-licence-taught
-   "VERIFIED BY RUNNING on 2026-09-03, taking the last thing :what-the-review-scored named as
-    missing and finding that two thirds of it was already here.
-    - A SET LITERAL OF TWO EQUAL EXPRESSIONS THROWS, and this is the finding worth most.
-      `licensed?` asked (contains? pairs #{(:id a) (:id b)}), and with the two ids EQUAL that
-      is `#{x x}` — which Clojure REFUSES at runtime with `Duplicate key: :found`, the reader
-      form compiling to a construction that rejects duplicates. `hash-set` dedupes and `set`
-      dedupes; ONLY THE #{} LITERAL throws. Verified all three. The throw landed inside a
-      d/chain, so the machine did not crash — IT SIMPLY STOPPED, `done` never settled, `out`
-      never closed, and the symptom was two timeouts and a nil. My own docstring had asserted
-      `the encoding needed nothing` one edit earlier, which is what asserting-before-running
-      buys you.
-    - THE ACCUMULATOR MUST BE A SET, AND `laws` REFUTED MY FIRST ATTEMPT IN FORTY SAMPLES.
-      `into` on a VECTOR is order-dependent, so which worker reported first is visible in the
-      answer — the obvious spelling of a join accumulator is not commutative, and it is exactly
-      :what-the-combine-taught's `most domain merges are not commutative and the author will
-      not notice` landing on the person who wrote that sentence. SET UNION works, and so does a
-      map keyed by the item. Both are now fixtures, and the trap is in the README and the
-      tutorial because everyone meets it first.
-    - `commutes` NEEDED NO CHANGE, which is the check on whether the widening was principled.
-      With a = b the two events share a handler, an :out and a target, so ta = tb, the diamond
-      closes wherever the target admits the event again, and the write-write filter covers
-      every key the :out writes. The whole change was `(neg? (compare a b))` becoming
-      `(not (pos? ...))` plus dropping one `(not= ia ib)`.
-    - AN EVENT THAT WRITES NOTHING COMMUTES WITH ITSELF, and it fell out rather than being
-      arranged: the write-write filter is empty, so the pair is vacuously licensed. Sound —
-      two empty patches leave the same state in either order — and it turned up as a :yes in
-      an existing test's coverage, which is how it got looked at.
-    - THE DIAGONAL CHANGED EIGHT TESTS AND EVERY NEW ROW WAS CORRECT ON INSPECTION, which is
-      the good outcome for a coverage change: a join's arms are all :no (one :eval takes you
-      somewhere that does not admit a second, which is the OPPOSITE of a fan-out), a no-combine
-      self-pair is :unknown, and `fanning` — a fixture written for a two-event licence — turned
-      out to have been refusing its own same-id concurrency all along.
-    - AND THE UNLAWFUL VERSION IS STILL LICENSED STATICALLY, asserted rather than glossed:
-      `commutes` reads the DECLARATION, `laws` is the development aid, and compile's :agree is
-      the enforcement. That is :what-the-combine-taught's three-way argument getting a fourth
-      witness, and a vector accumulator is refused at runtime rather than at construction.
-    - THE NUMBERS: 129 tests and 381 assertions, both suites green, up from 126 and 370. NO
-      PUBLIC FUNCTION WAS ADDED — the instrument count is still 48 and agrees with the
-      independent ns-publics count — and no grammar was added either, which is the honest
-      summary of the whole change: a fan-out was already spellable and the licence was refusing
-      it. clj-kondo clean; the tutorial gained a section and renders."
+   "- A SET LITERAL OF TWO EQUAL EXPRESSIONS THROWS. `#{x x}` is refused at runtime with `Duplicate
+      key:` — `hash-set` dedupes and `set` dedupes, ONLY THE #{} LITERAL throws. The throw landed
+      inside a d/chain, so the machine did not crash, IT SIMPLY STOPPED: done never settled, out never
+      closed, and the symptom was two timeouts and a nil.
+    - THE ACCUMULATOR MUST BE A SET. `into` on a VECTOR is order-dependent, so THE OBVIOUS SPELLING OF
+      A JOIN ACCUMULATOR IS NOT COMMUTATIVE — refuted by `laws` in forty samples. Set union works, and
+      so does a map keyed by the item.
+    - `commutes` NEEDED NO CHANGE to license two of one event, which is what says the condition was
+      right all along. The whole change was `(neg? (compare a b))` becoming `(not (pos? ...))`.
+    - AN EVENT THAT WRITES NOTHING COMMUTES WITH ITSELF, the write-write filter being empty."
 
    :what-the-first-consumer-migration-taught
-   "MEASURED 2026-09-03 by migrating ../coder off its workaround at the author's instruction —
-    `remove the current trick; use state-graph vocabulary only`. THE FIRST TIME anything built
-    after the facade has had a consumer, so it is the first outside evidence about the
-    vocabulary rather than about the mechanisms.
-    - WHAT IT VALIDATED, and none of it needed a change here: guards on an enum tag, guards on
-      NUMERIC BOUNDS, `coverage`, the refusal of a shape whose guards are not provably disjoint,
-      and the Harel drawing with a :description. coder's shape went from 5 states / 5 events to
-      6 / 4, `problems` stayed empty, and src did not change by one line — which is the check
-      that its driver was about DRIVING and not about that task's five states.
-    - THE :out IS THE EVENT'S AND THAT IS THE REAL FRICTION. coder's :judged leads to two
-      targets needing DIFFERENT data — :fault requires a fault string, :implemented does not —
-      and one :out serves both edges, so it must be weak enough for the green one and then
-      cannot prove the red one. :target-refuses, on a correct shape.
-      :a-handler-belongs-to-the-event NAMED THIS COST and its advice is `where two edges
-      genuinely need different data, that is two events` — which is the workaround being
-      removed. So the honest statement is that a guard and a per-target payload pull against
-      each other, and the way out coder took is to declare NO :out on the guarded event and let
-      the runtime :answer and :enter crossings enforce it. `subsumption` then answers
-      :undeclared, which is coverage rather than a fault.
-      THE ALTERNATIVE WAS WORSE AND IS WORTH NAMING: weakening the target's own schema to
-      {:optional true} buys :yes back and is weakening a schema to please a checker.
-    - AND THE `attempts > 3` CASE WORKS, which :a-guard-is-a-schema-over-the-event predicted and
-      nothing had tried. coder's retry budget is now two guarded edges on :round with
-      [:int {:max 8}] and [:int {:min 9}] — provably disjoint — so the stopping rule is in the
-      shape and the driving loop needs no counter. IT NEEDED NO NEW DOOR: the driver reports the
-      round as a FACT on the event and the guard reads it, which is exactly `the driver reports
-      a fact and the shape decides what the fact means`. See the open question this narrows.
-    - THE LINT CACHE BIT AGAIN, exactly as :an-event-given-only-a-schema-is-a-pure-lift records:
-      clj-kondo reported 8 errors about `sg/transition` being called with 4 args. `rm -rf
-      .clj-kondo/.cache` in the consumer fixed it. Second occurrence, same cause, and the entry
-      that predicted it is the one to read first.
-    - AND A `--reset-session` KILLED AN nREPL. Worth knowing before reaching for it: the session
-      did not reset, the server went away and the next eval failed inside the client's socket
-      code, which reads like a bug in the tool rather than a dead server."
+   "The first outside evidence about the VOCABULARY rather than the mechanisms. VALIDATED, none of it
+    needing a change here: guards on an enum tag, guards on numeric bounds, `coverage`, the refusal of
+    unprovable guards, and the Harel drawing. coder's src did not change by one line.
+    - THE :out IS THE EVENT'S AND THAT IS THE REAL FRICTION: two targets needing DIFFERENT data share
+      one :out, so it must be weak enough for one and then cannot prove the other. THE WAY OUT is to
+      declare NO :out on a guarded event and let the runtime crossings enforce it; `subsumption` then
+      says :undeclared, which is coverage rather than a fault. THE ALTERNATIVE WAS WORSE: weakening the
+      target's schema is weakening a schema to please a checker.
+    - A RETRY BUDGET WORKS TODAY as two guarded edges on disjoint numeric bounds, so the stopping rule
+      is in the shape and the driving loop needs no counter.
+    - A `--reset-session` KILLED AN nREPL, and the next eval failed inside the client's socket code,
+      which reads like a bug in the tool rather than a dead server."
 
    :graphviz-and-the-devenv
-   "ADDED 2026-08-31: pkgs.graphviz is in ../devenv.nix, because a drawing nobody can look at is
-    not worth having. graphviz 15.1.0; `dot` was NOT on the path before, and the devenv is shared
-    with the sibling project, which does not need it and is not harmed by it.
-    - TWO TESTS, TWO REQUIREMENTS, and the split is deliberate. :format :dot is a spit and needs
-      NOTHING, so the source is asserted about anywhere. :format :png shells out, and that test is
-      the only thing proving the RENDERING path — asserted on the PNG MAGIC BYTES (0x89 P N G),
-      because a file existing proves only that something wrote one. Verified BOTH ways: outside the
-      devenv the render test errors and the source test passes; inside, both pass.
-    - A JVM INHERITS ITS PATH AT LAUNCH, so a REPL started before graphviz was added CANNOT draw,
-      however current the devenv is. That is the same class of mistake as a stale REPL and it looks
-      just as puzzling — the shell has `dot` and the REPL does not. Start the REPL from inside the
-      devenv: `devenv shell -- sh -c 'cd state-graph && clojure -M:dev:nrepl'`.
-    - TO LOOK AT A SHAPE: (check/draw! sh) with no :save opens a viewer window; with
-      {:save {:filename f :format :png}} it writes a file. The drawing marks the initial state ▸
-      and gives a :final one a double circle, and labels every node with its schema FORM.
-    - Verified live: the `broken` fixture rendered, and its island — two states reaching only each
-      other — sits VISIBLY DETACHED from everything else. That picture is the argument for the
-      library, and it is the thing a map literal cannot show."
+   "pkgs.graphviz is in ../devenv.nix; graphviz 15.1.0. TWO TESTS, TWO REQUIREMENTS: :format :dot is a
+    spit and needs NOTHING, while :format :png shells out and is the only thing proving the RENDERING
+    path — asserted on the PNG MAGIC BYTES, because a file existing proves only that something wrote
+    one. AND `dot` CAN WRITE A ZERO-BYTE FILE AND EXIT 0 on an oversized graph, so check the file and
+    not the exit code. TO LOOK AT A SHAPE: (check/draw! sh) opens a viewer; with :save it writes a file."
 
    :dependency-notes
-   "What each dependency is here FOR, so that nobody reaches for the wrong one:
-    - ubergraph 0.9.0 — the shape. Multigraph and digraph in one library, attributes on nodes and
-      edges, and viz-graph for drawing. Drawing needs graphviz (`dot`) INSTALLED, so any test that
-      renders is ^:integration at best and probably not a test at all.
-    - manifold 0.4.3 — the async default, and nothing below that layer requires it. Its Deferred
-      is a clojure.lang.IDeref, which is what lets the pure core deref one without depending on
-      manifold at all; d/chain takes a plain value as happily as a deferred; and s/connect is
-      ASYNCHRONOUS, which cost a lost state once — see :what-the-async-layer-taught. It drags in
-      slf4j-api with no binding, hence three NOP lines on stderr.
-    - NO DATABASE. datahike was here for history and is gone: this library stores nothing and the
-      caller stores what it outputs. See :nothing-is-persisted-here.
-    - malli 0.20.1 — the shapes of states, events and every function signature. See the
-      :reload-all rule; it is the one dependency that punishes a careless REPL.
-    - test.check 1.1.1 — it is in :deps and not :dev on purpose: generative tests are the unit
-      suite here, not an extra.
-    - clay 2.0.22 — the tutorial, and it is in the :notebook ALIAS and not in :deps: a library does
-      not depend on the thing that documents it. It drags kindly in, which is where kind/graphviz
-      comes from."
+   "- ubergraph 0.9.0 — the shape. See :ubergraph-0-9-0 for its traps, of which there are several.
+    - manifold 0.4.3 — the async default, and nothing below that layer requires it. Its Deferred is a
+      clojure.lang.IDeref, which is what lets the pure core deref one without depending on manifold;
+      d/chain takes a plain value as happily as a deferred and FLATTENS; s/connect is ASYNCHRONOUS.
+    - malli 0.20.1 — every shape and every signature. The one dependency that punishes a careless REPL.
+    - test.check 1.1.1 — in :deps and not :dev on purpose: generative tests are the unit suite here.
+    - clay 2.0.22 — the tutorial, in the :notebook ALIAS and not in :deps: a library does not depend on
+      the thing that documents it."
 
    :from-the-sibling-project
-   "smart-boundary/AGENTS.md, in GIT HISTORY, was the sibling component — the same author's larger
-    project, removed 2026-09-02 — and its :project-knowledge is still worth reading
-    before repeating an experiment. What transfers is method, not fact: schemas at every crossing,
-    seams checked in the code and not merely declared, a store that must be closed, `only assert
-    what can fail`, and a knowledge section written in the past tense about things actually
-    observed. What does NOT transfer is any of its content — it is about Anthropic's API,
-    Datalevin, nREPL-as-a-map and LLM agents, none of which this library has."}}
+   "smart-boundary/AGENTS.md, in GIT HISTORY, was the same author's larger project, removed 2026-09-02.
+    WHAT TRANSFERS IS METHOD, NOT FACT: schemas at every crossing, seams checked in the code rather than
+    declared, `only assert what can fail`, and a knowledge section written in the past tense about
+    things actually observed. Its content is about Anthropic's API, Datalevin and nREPL and transfers
+    to nothing here. Its living descendants are ../coder/AGENTS.md and ../llm-function/AGENTS.md."}}
 
  :states
  {:initialize
@@ -2445,7 +893,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   :implement
   {:entry {:action "Write it in src/, lowest layer first (shape, then compile, then a default,
     then the facade). One <ns>_test.clj per source namespace as you go, ^:integration on anything
-    that opens a database or a socket. Dependencies point down only"}
+    that opens a file, a socket or a real clock. Dependencies point down only"}
    :on {:function-complete {:target :unit-test}
         :debugging-needed  {:target :repl-eval}
         :schema-question   {:target :shape-design}}}
@@ -2460,14 +908,14 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
 
   :repl-eval
   {:entry {:action "Discover nREPL via clj-nrepl-eval --discover-ports; if none, launch
-    clojure -M:dev:nrepl; eval with clj-nrepl-eval -p <port>, :reload per namespace in dependency
-    order — never :reload-all"}
+    clojure -M:dev:nrepl FROM INSIDE THE DEVENV; eval with clj-nrepl-eval -p <port>, :reload per
+    namespace in dependency order — never :reload-all"}
    :on {:insight-gained        {:target :implement}
         :schema-clarity-needed {:target :shape-design}}}
 
   :refactor
   {:entry {:action "After tests pass, refactor for clarity:
-    - keep the pure core pure — the compiler and the shape know nothing of streams or databases
+    - keep the pure core pure — the compiler and the shape know nothing of streams
     - a default takes what it needs as a VALUE; nothing is threaded through a layer we do not own
     - extract the well-named function that the duplication was asking for
     - verify behavior(new) = behavior(old): the properties are what says so"}
@@ -2477,29 +925,35 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   :static-check
   {:entry {:action "Only when the change touches the shape or the checks over it. Build a shape in
     the REPL, run the static checks, and LOOK AT THE DRAWING — an unreachable state is obvious in a
-    picture and invisible in a map literal. Needs graphviz; it is a human check, not a test"}
+    picture and invisible in a map literal. AND ASK WHAT EVERY OTHER CHECK WAS REASONING ABOUT: a
+    new capability is not local, and a check written for one purpose is not sound for a second one
+    by default. That question has caught two live unsoundnesses and no test has caught either.
+    Rendering a shape needs graphviz; it is a human check, not a test"}
    :on {:looks-right {:target :integration-suite}
         :wrong       {:target :implement}}}
-  ;; NOTE 2026-08-31: (check/draw! shape {:save {:filename f :format :dot}}) writes the graphviz
-  ;; SOURCE with no graphviz installed — only other formats shell out to `dot`. So the drawing can
-  ;; be asserted about even where it cannot be rendered, and `dot` is needed only to LOOK at it.
+  ;; NOTE: (check/draw! shape {:save {:filename f :format :dot}}) writes the graphviz SOURCE with no
+  ;; graphviz installed — only other formats shell out to `dot`. So the drawing can be asserted
+  ;; about even where it cannot be rendered, and `dot` is needed only to LOOK at it.
 
   :integration-suite
   {:entry {:action "clojure -M:dev:test integration — the gate before a commit: real files on
-    disk, real streams, real clocks, and graphviz actually shelled out to. Kaocha randomizes order, so a test depending on
-    another having run first is a bug in the test. Every store opened is released in a `finally`,
-    and a suite that passes and then hangs is a store left open"}
+    disk, real streams, real clocks, and graphviz actually shelled out to. Kaocha randomizes order,
+    so a test depending on another having run first is a bug in the test. Everything opened is
+    released in a `finally`, and every deref of a machine is BOUNDED or a hang becomes a hung suite.
+    IF THE CHANGE TOUCHED THE NOTEBOOK OR THE VOCABULARY IT USES, RENDER IT — `clojure -X:notebook`
+    runs every cell, and a tutorial example that cannot run is a lie a test suite will never see"}
    :on {:passes {:target :review}
         :fails  {:target :implement
                  :guard "Inspect the failure; fix the code or the test"}}}
 
   :review
   {:entry {:action "Verify the hard constraints: (1) nREPL was the only evaluator (2) no bare
-    try/catch — a `finally` for release is not one (3) malli shapes all data AND every function
-    (4) tests are clojure.test in test/, one file per namespace, split unit and ^:integration
-    (5) dependencies point down only (6) the pure core has no manifold in it, and no namespace
-    names one above it even in a comment (7) a facade re-export is a delegating defn and never a
-    def alias, or malli stops guarding it"}
+    try/catch — a `finally` for release is not one (3) malli shapes all data AND every function,
+    and the instrument count agrees with the independent ns-publics count (4) tests are
+    clojure.test in test/, one file per namespace, split unit and ^:integration (5) dependencies
+    point down only (6) the pure core has no manifold in it, and no namespace names one above it
+    even in a comment (7) a facade re-export is a delegating defn and never a def alias, or malli
+    stops guarding it (8) what a static check composes is what compile composes"}
    :on {:all-checkout {:target :retrospect}
         :issue-found  {:target :implement
                        :guard "Fix the identified issue"}}}
@@ -2507,10 +961,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   :retrospect
   {:entry {:action "Reflect on the session:
     - What went wrong? What assumption was incorrect?
-    - What was LEARNED about ubergraph, manifold or malli that a docstring would not
-      have told you? Record it in :project-knowledge in the past tense, with what was seen
+    - What was LEARNED about ubergraph, manifold or malli that a docstring would not have told
+      you? Record it in :project-knowledge in the past tense, with what was SEEN
     - Close any :open-questions the work answered; add the ones it raised
-    - Add a :global-rule only for a mistake made more than once"}
+    - Add a :global-rule only for a mistake made more than once
+    - AND KEEP THIS FILE SMALL. It is loaded in full every session. A decision belongs here once:
+      state it where it is decided, and point at it from everywhere else. Superseded reasoning is
+      in git history, which is where it belongs"}
    :on {:done {:target :complete}}}
 
   :complete
