@@ -1,7 +1,8 @@
 ;; # robertluo.state-graph — a tutorial
 ;;
 ;; A finite state machine whose **shape is a graph**. This notebook works through the whole
-;; facade — ten functions — and ends with a workflow big enough to be worth drawing.
+;; facade — twelve functions and three doors — and ends with a workflow big enough to be
+;; worth drawing.
 ;;
 ;; Every diagram below is the library's own drawing, rendered in your browser. Reading this
 ;; page needs nothing installed; `sg/draw!` with a real image format needs graphviz.
@@ -178,7 +179,7 @@
 ;; ## Running it: the stream
 ;;
 ;; The other door. `sg/run` takes a source of events and answers a source of results and a
-;; deferred. **The caller owns the lifecycle either way** — this is the same reduction with
+;; deferred. **The caller owns the lifecycle in all three** — this is the same reduction with
 ;; the loop shipped, not a different kind of machine.
 
 (defn fed
@@ -218,6 +219,145 @@
     (d/catch ex-data)
     (deref 1000 ::timeout)
     :crossing)
+
+;; ## Running it: the crank
+;;
+;; The third door, and the only one where **the events are found rather than fed**. Both doors
+;; above take their events from somewhere else — a vector you already have, a stream somebody
+;; else fills. An event can instead declare how it is *found*:
+
+(def build
+  (sg/shape
+   (sg/state :queued  [:map [:commit :string]]                                     {:initial true})
+   (sg/state :built   [:map [:commit :string] [:artefact :string]])
+   (sg/state :tested  [:map [:commit :string] [:artefact :string] [:passed :boolean]])
+   (sg/state :shipped [:map [:commit :string] [:artefact :string] [:passed :boolean]]
+             {:final true})
+
+   ;; `:report` goes and finds the fact; `:reads` is the view of the state it needs in order
+   ;; to do so, projected and validated exactly as `:sees` is. In a real machine these reach
+   ;; a compiler, a test runner, a model — anything that answers a question about the world.
+   (sg/event :compile [:map [:artefact :string]]
+             {:reads  [:map [:commit :string]]
+              :report (fn [seen] {:artefact (str (:commit seen) ".jar")})})
+   (sg/event :test [:map [:passed :boolean]]
+             {:reads  [:map [:artefact :string]]
+              :report (fn [seen] {:passed (boolean (seq (:artefact seen)))})})
+
+   ;; AND AN EVENT WITH NO `:report` COMES FROM THE WORLD. That is a park, in data: nobody
+   ;; but a person can say this one happened.
+   (sg/event :ship [:map] (constantly {}) [:map])
+
+   (sg/transition :queued :compile :built)
+   (sg/transition :built  :test    :tested)
+   (sg/transition :tested :ship    :shipped)))
+
+(picture build)
+
+;; `sg/drive` turns the crank until the machine stops moving. Everything beyond the shape is
+;; an option, and `:data` is what the first state carries:
+
+(def opts {:data {:commit "9f89a78"}})
+
+(def parked (sg/drive build [] opts))
+
+;; **A run is the vector of events**, so that vector is the whole result — nothing was stored
+;; and nothing mutated. Where it got to is a reduction over it:
+
+(require '[robertluo.state-graph.drive :as drive]
+         '[robertluo.state-graph.check :as check])
+
+(drive/where build parked opts)
+
+;; It stopped at `:tested` because `:ship` has no `:report`. `drive/awaiting` is the whole
+;; driving rule as one value, and it answers four ways. Here are three of them:
+
+[(drive/awaiting build [] opts)
+ (drive/awaiting build parked opts)
+ (drive/awaiting build (drive/advance build parked {:id :ship} opts) opts)]
+
+;; `:from :driver` — go and find it out. `:from :world` — a **park**, and a legitimate one:
+;; somebody outside says what happened, and `drive/advance` is the door they come in by.
+;; `:final` — over.
+;;
+;; The fourth is what the *caller* said not to do this turn:
+
+(drive/awaiting build [] (assoc opts :permitted #{}))
+
+[(sg/step build [] (assoc opts :permitted #{}))
+ (sg/step build [] (assoc opts :permitted #{:compile}))]
+
+;; `:permitted` is one turn's permission — a set of event ids, or any predicate over one — so
+;; supervising a run is an argument and not a state. That matters more than it looks: `:held`
+;; is nowhere in the graph, so a workflow watched and a workflow left alone are the **same
+;; machine**, with the same `shape/fingerprint`. Gate states would have made them different.
+;;
+;; `:on` is told each applied event. It is where a caller writes a history, and the only
+;; reason this door has to know that histories exist:
+
+(let [rows (atom [])]
+  (sg/drive build [] (assoc opts :on #(swap! rows conj ((juxt (comp :id :event) :from :to) %))))
+  @rows)
+
+;; ### Two reportable events out of one state
+;;
+;; A driver that picked one would be inventing an order the shape never promised, so it will
+;; not. This one is a genuine question for the world:
+
+(def offer
+  (sg/shape (sg/state :asked    [:map] {:initial true})
+            (sg/state :accepted [:map] {:final true})
+            (sg/state :refused  [:map] {:final true})
+            (sg/event :accept [:map] {:reads [:map] :report (constantly {})})
+            (sg/event :refuse [:map] {:reads [:map] :report (constantly {})})
+            (sg/transition :asked :accept :accepted)
+            (sg/transition :asked :refuse :refused)))
+
+[(drive/awaiting offer []) (sg/drive offer [])]
+
+;; **Unless the shape has proved the order cannot be observed** — which is exactly what the
+;; product construction of *A join* below gives you. Two independent branches from one state:
+
+(def gather
+  (sg/shape (sg/state :asked [:map]                                 {:initial true})
+            (sg/state :coded [:map [:code :string]])
+            (sg/state :lawed [:map [:law :string]])
+            (sg/state :ready [:map [:code :string] [:law :string]]  {:final true})
+            (sg/event :write [:map [:code :string]]
+                      {:reads [:map] :report (constantly {:code "(defn answer [] 1)"})})
+            (sg/event :draft [:map [:law :string]]
+                      {:reads [:map] :report (constantly {:law "(prop/for-all …)"})})
+            (sg/transition :asked :write :coded)
+            (sg/transition :asked :draft :lawed)
+            (sg/transition :coded :draft :ready)
+            (sg/transition :lawed :write :ready)))
+
+(drive/awaiting gather [])
+
+;; `:events` rather than `:event` — both are found in **one turn** and applied in an order the
+;; shape has already said makes no difference:
+
+[(mapv :id (sg/drive gather [])) (drive/where gather (sg/drive gather []))]
+
+;; The reports go through `:reports`, which defaults to running them in order. Hand it one
+;; that runs them at once — `d/zip` over `d/future`, say — and a proven join costs the slower
+;; of the two rather than the sum. This layer depends on no stream library either way.
+;;
+;; ### And the graph can be asked the same question
+;;
+;; `check/driving` is the static half of `awaiting`: one verdict per state, before anything
+;; runs. `:driver`, `:world`, `:join`, `:final` — and `:fork`, which is the one to look for:
+
+(kind/table
+ {:column-names [:state :awaits :reports :verdict]
+  :row-vectors (for [{:keys [id awaits reports verdict]} (concat (check/driving build)
+                                                                 (check/driving offer))]
+                 [id (sort awaits) (sort reports) verdict])})
+
+;; A `:fork` is a state that will park for ever if you meant it to be automatic, and
+;; `sg/problems` calls such a shape perfectly fine. It is **published and never faulted**,
+;; because a shape may well want the world to choose; what would be wrong is a driver choosing
+;; for it.
 
 ;; ## A workflow worth drawing
 ;;
@@ -455,6 +595,36 @@
 ;; A child that can never finish is a fault of the child, reported `:within [:p]` — a path,
 ;; because nesting nests.
 ;;
+;; **Every published check does this, and not only `problems`.** `subsumption`, `views`,
+;; `readings`, `yields`, `coverage`, `confluence`, `laws` and `driving` all recurse and carry
+;; `:within`. The checks that answer a *set of ids* — `reachable`, `traps`, `dead-ends`,
+;; `finishable` — are about one graph and stay there: two machines may name a state the same,
+;; and a set has nowhere to say which one it meant.
+;;
+;; **And the crank reports into the machine that is actually running.** A nesting node has no
+;; edge for its child's events, so a driver reading only the host's out-edges would see a node
+;; that awaits nothing and is not final, and park for ever on a machine that was ready to go.
+;; It follows `:sub` as deep as it goes and asks the innermost machine first — which is *inner
+;; first* again, on the half that produces events rather than the half that applies them:
+
+(def paying
+  (sg/shape
+   (sg/state :taking [:map] {:initial true
+                             :machine (sg/shape
+                                       (sg/state :unpaid [:map] {:initial true})
+                                       (sg/state :paid   [:map [:auth :string]] {:final true})
+                                       (sg/event :authorize [:map [:auth :string]]
+                                                 {:reads  [:map]
+                                                  :report (constantly {:auth "tok_9"})})
+                                       (sg/transition :unpaid :authorize :paid))
+                             :done :taken
+                             :yield [:map [:auth :string]]})
+   (sg/state :taken [:map [:auth :string]] {:final true})))
+
+[(drive/awaiting paying [])
+ (sg/drive paying [])
+ (drive/where paying (sg/drive paying []))]
+;;
 ;; ### An escape is an ABORT
 ;;
 ;; Nothing stops `:ship` firing while the payment is half done, and the child's work is
@@ -680,8 +850,6 @@
 
 ;; The two orders land in one **identical** state. That is not a coincidence to be hoped for,
 ;; it is a property of this shape that can be proven before anything runs:
-
-(require '[robertluo.state-graph.check :as check])
 
 (check/commuting verify)
 
@@ -938,8 +1106,9 @@
 ;; ## Beneath the facade
 ;;
 ;; `robertluo.state-graph` is the only namespace an application needs, but it is a
-;; convenience over four that are usable directly — `.shape`, `.compile`, `.check` and
-;; `.async`. Drop through when you want something the facade does not offer.
+;; convenience over five that are usable directly — `.shape`, `.compile`, `.check`, `.drive`
+;; and `.async`. Drop through when you want something the facade does not offer, which is what
+;; `drive/awaiting`, `drive/where`, `drive/advance` and `check/driving` were above.
 ;;
 ;; `check/confluence`, for instance, publishes every verdict and not merely the licences, so
 ;; the check's own coverage is readable. For this pipeline the answer is none — divergence is

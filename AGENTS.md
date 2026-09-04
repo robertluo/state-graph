@@ -728,7 +728,10 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     has; until somebody does, a count written down here is a measurement and not a guarantee.
     THE FACADE IS TWELVE FUNCTIONS: ten from 2026-09-01, and `step` and `drive` added 2026-09-04. clj-kondo clean over src, test, notebook.
     AND THERE IS A TUTORIAL: notebook/tutorial.clj, rendered by `clojure -X:notebook` to
-    docs/tutorial.html, gitignored because it is derived. RENDERING IT IS A TEST THE SUITE CANNOT BE —
+    docs/tutorial.html, gitignored because it is derived. IT COVERS ALL THREE DOORS since
+    2026-09-04 — the crank's four `awaiting` answers, `:permitted`, `:on`, a fork it refuses,
+    a join it takes whole, a nested child it reports into, and `check/driving`.
+    RENDERING IT IS A TEST THE SUITE CANNOT BE —
     it runs every cell, and it has caught two bugs no test would have."
 
    :gaps-in-the-repository
