@@ -441,6 +441,48 @@ Cap it, summarise it, drop the oldest entry, keep everything — the handler dec
 is a function. A counter that must see its own total is the same pattern with one key. What the
 *shape* decides is who may read what, and which nodes carry it at all.
 
+## Producing the event: a declared report
+
+An event says how it **lands** — its schema, its handler, its `:out`. It may also say how it
+is **found**:
+
+```clojure
+(sg/event :judged [:map [:verdict [:enum :green :red]]]
+          (fn [event] (select-keys event [:fault]))
+          nil
+          {:reads  [:map [:brief Brief] [:code Code]]
+           :report (fn [seen] (run-it (:brief seen) (:code seen)))})
+```
+
+`:report` is the function that goes and finds the fact; `:reads` is the view of the state it
+needs to do so, projected and validated exactly as `:sees` is. A **pure lift keeps its short
+form** — a handler is a `fn` and options are a `map`, so the third argument says which it is:
+
+```clojure
+(sg/event :again [:map [:round :int]]
+          {:reads [:map [:round :int]] :report (fn [seen] {:round (inc (:round seen))})})
+```
+
+**An event with no `:report` comes from the world.** That is the whole of what this
+declaration buys, and it is a distinction the shape could not previously make: a state
+waiting on a reported event is one a driver can advance by itself, and a state waiting on an
+unreported one is *parked* until somebody outside says what happened. `shape/reports` answers
+which are which, so a driver reads the machine instead of being handed the same knowledge a
+second time.
+
+**It is not an internal event.** The machine still does not move itself — there is no queue,
+no run-to-completion, and the reduction is untouched. This is the shape telling a caller
+*how* an event would be found, and a caller choosing to ask.
+
+And it is **provable**, the same way a view is. `problems` reports `:reads-unavailable` when
+the state a report would run in cannot guarantee what it reads, and refuses a `:reads` with
+no `:report` at construction:
+
+```clojure
+(sg/problems bad)
+;=> [{:from :a :event :go :problem :reads-unavailable}]
+```
+
 ## Two doors, one machine
 
 A shape compiles to an ordinary function of a state and an event. **The caller owns the

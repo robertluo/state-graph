@@ -98,7 +98,9 @@
    BOTH HALVES off this map and nothing at all off the graph."
   [:map [::kind [:= :event]] [:id Id] [:schema MapSchema] [:handler fn?]
         [:out {:optional true} MapSchema]
-        [:sees {:optional true} MapSchema]])
+        [:sees {:optional true} MapSchema]
+        [:report {:optional true} fn?]
+        [:reads {:optional true} MapSchema]])
 
 (def TransDef
   "An edge: which event moves the machine from where to where. What handles the event is
@@ -182,16 +184,25 @@
    The function schema stays complete either way:
    [:=> [:cat <this :schema> <this :sees>] <this :out>], both halves off this map."
   {:malli/schema [:function [:=> [:cat Id MapSchema] EventDef]
-                            [:=> [:cat Id MapSchema fn?] EventDef]
+                            [:=> [:cat Id MapSchema [:or fn? :map]] EventDef]
                             [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]
                             [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]}
   ([id schema] (event id schema (lifting (m/schema schema)) schema nil))
-  ([id schema handler] (event id schema handler nil nil))
+  ;; A PURE LIFT MAY STILL HAVE OPTIONS. A handler is a fn and options are a map, so the
+  ;; third argument says which it is with no ceremony — and without this, declaring a
+  ;; :report on a lifting event would have cost it the short form and written its schema
+  ;; out twice again, which is the whole thing the short form removed.
+  ([id schema handler-or-opts]
+   (if (map? handler-or-opts)
+     (event id schema (lifting (m/schema schema)) schema handler-or-opts)
+     (event id schema handler-or-opts nil nil)))
   ([id schema handler out] (event id schema handler out nil))
   ([id schema handler out opts]
    (cond-> {::kind :event :id id :schema (m/schema schema) :handler handler}
      (some? out) (assoc :out (m/schema out))
-     (:sees opts) (assoc :sees (m/schema (:sees opts))))))
+     (:sees opts) (assoc :sees (m/schema (:sees opts)))
+     (:report opts) (assoc :report (:report opts))
+     (:reads opts) (assoc :reads (m/schema (:reads opts))))))
 
 (defn transition
   "An edge: from a state, on an event, to a state. Three keywords and no functions —
@@ -470,6 +481,12 @@
               :when (not= :yes verdict)]
           {:problem :ambiguous :from from :event ev
            :to [(:to a) (:to b)] :verdict verdict}))
+      ;; 3b — a report is what makes an event the DRIVER'S rather than the WORLD'S, and
+      ;; :reads is the view it needs to write one. A :reads with no :report is a view
+      ;; nothing will ever be handed — the same shape of mistake as an :out on an event
+      ;; nothing fires, and answerable from the parts alone.
+      (for [e event :when (and (:reads e) (not (:report e)))]
+        {:problem :reads-without-report :id (:id e)})
       ;; 4 — the catalogue's only moment. This is what replaces the dead-event check,
       ;; which cannot be a graph query once the catalogue has been denormalised away.
       (for [id (sort (remove fired event-ids))]
@@ -573,7 +590,7 @@
   (when-let [ps (seq (apply problems parts))]
     (throw (ex-info "The shape has problems" {:problems (vec ps)})))
   (let [{:keys [state event transition]} (group-by ::kind parts)
-        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :sees]))) event)]
+        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :sees :report :reads]))) event)]
     (-> (uber/multidigraph)
         (uber/add-nodes-with-attrs*
          (for [s state] [(:id s) (select-keys s [:schema :initial :final :machine])]))
@@ -651,6 +668,25 @@
   (for [e (uber/edges shape)
         :when (uber/attr shape e :event)]
     (into {:from (uber/src e) :to (uber/dest e)} (uber/attrs shape e))))
+
+(defn reports
+  "{event-id -> {:report <fn>, :reads <schema>}} for every event a DRIVER produces —
+   empty for a shape whose events all come from the world.
+
+   WHAT IT IS FOR, and it is the one thing the shape could not say until now: whether an
+   event comes from the DRIVER or from the WORLD. A state waiting on an event with no
+   report is PARKED — somebody outside will say what happened — and a state waiting on one
+   WITH a report is a state a driver can advance by itself. That distinction was drawn in
+   prose and nowhere in data, so every driver written against this library had to write it
+   down a second time, keyed by state, where nothing could check it.
+
+   A REPORT IS NOT AN INTERNAL EVENT. The machine still does not move itself: this is the
+   shape telling a caller HOW an event would be found, and a caller choosing to ask. The
+   reduction is untouched and there is no queue."
+  {:malli/schema [:=> [:cat Shape] [:map-of Id :map]]}
+  [shape]
+  (into {} (for [t (transitions shape) :when (:report t)]
+             [(:event t) (select-keys t [:report :reads])])))
 
 (defn continuations
   "{from -> {:to <id>, :yield <schema>}} for every COMPLETION TRANSITION — where a state

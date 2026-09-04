@@ -399,3 +399,35 @@
                                        :yield [:map]})
                (shape/state :z [:map] {:final true})
                (shape/event :go [:map]) (shape/transition :a :go :z))))))
+
+(deftest an-event-may-say-how-it-is-reported
+  ;; THE ONE THING THE SHAPE COULD NOT SAY until now: whether an event comes from
+  ;; the DRIVER or from the WORLD. A :report is that declaration, and an event
+  ;; without one is the world's to supply.
+  (let [reported (shape/event :judge [:map [:verdict :keyword]]
+                              (fn [e] (select-keys e [:verdict])) nil
+                              {:reads [:map [:n :int]]
+                               :report (fn [seen] {:verdict (if (even? (:n seen)) :green :red)})})]
+    (testing "the constructor keeps both halves, where it used to drop unknown options"
+      (is (fn? (:report reported)))
+      (is (some? (:reads reported))))
+
+    (testing "and they are denormalised onto every edge that fires the event, so a driver
+              asks the SHAPE which events it drives rather than writing them down again"
+      (let [sh (shape/shape (shape/state :a [:map [:n :int]] {:initial true})
+                            (shape/state :z [:map [:verdict :keyword]] {:final true})
+                            reported
+                            (shape/transition :a :judge :z))]
+        (is (= #{:judge} (set (keys (shape/reports sh)))))
+        (is (= {:verdict :green} ((:report (get (shape/reports sh) :judge)) {:n 4})))
+        (is (= {:verdict :red} ((:report (get (shape/reports sh) :judge)) {:n 3})))))))
+
+(deftest a-view-with-nothing-to-read-it-is-refused
+  ;; :reads is the view a REPORT is handed, so one without a report is a view
+  ;; nothing will ever see — answerable from the parts, so the shape never exists.
+  (let [ok (fn [& parts] (map :problem (apply shape/problems parts)))]
+    (is (= [:reads-without-report]
+           (ok (shape/state :a [:map] {:initial true})
+               (shape/state :z [:map] {:final true})
+               (shape/event :go [:map] (fn [_] {}) nil {:reads [:map [:n :int]]})
+               (shape/transition :a :go :z))))))

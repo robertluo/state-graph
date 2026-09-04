@@ -678,3 +678,41 @@
               to it"
       (is (= {:s #{#{:add}}} (check/commuting (vec-shape [:set :int]))))
       (is (= {:s #{#{:add}}} (check/commuting (vec-shape [:vector :int])))))))
+
+(deftest a-report-asking-for-what-the-state-cannot-give-is-a-proven-fault
+  ;; `admits` FOR THE FOURTH TIME — `views` was the second and `yields` the third —
+  ;; with the read as the TARGET and the source node's schema as what is PRODUCED.
+  ;; A driver runs a report in the state that AWAITS the event, so that state is
+  ;; what must provide the keys.
+  (let [reported (fn [reads]
+                   (shape/event :go [:map [:verdict :keyword]]
+                                (fn [e] (select-keys e [:verdict])) nil
+                                {:reads reads :report (fn [_] {:verdict :green})}))
+        sh (fn [holds reads]
+             (shape/shape (shape/state :a holds {:initial true})
+                          (shape/state :z [:map [:verdict :keyword]] {:final true})
+                          (reported reads)
+                          (shape/transition :a :go :z)))]
+    (testing "the state holds what the report reads"
+      (is (= [{:from :a :event :go :verdict :yes}]
+             (vec (check/readings (sh [:map [:n :int]] [:map [:n :int]])))))
+      (is (= [] (check/problems (sh [:map [:n :int]] [:map [:n :int]])))))
+
+    (testing "it does not, and that is PROVEN rather than suspected"
+      (is (= [{:from :a :event :go :verdict :no}]
+             (vec (check/readings (sh [:map] [:map [:n :int]])))))
+      (is (= [{:from :a :event :go :problem :reads-unavailable}]
+             (check/problems (sh [:map] [:map [:n :int]])))))
+
+    (testing "it only MIGHT, which is also :no — a report cannot rest on a maybe any
+              more than a handler's view can"
+      (is (= [{:from :a :event :go :verdict :no}]
+             (vec (check/readings (sh [:map [:n {:optional true} :int]] [:map [:n :int]]))))))
+
+    (testing "an event with no report comes from the WORLD, so there is nothing to check"
+      (let [world (shape/shape (shape/state :a [:map] {:initial true})
+                               (shape/state :z [:map] {:final true})
+                               (shape/event :go [:map])
+                               (shape/transition :a :go :z))]
+        (is (= [{:from :a :event :go :verdict :undeclared}] (vec (check/readings world))))
+        (is (= {} (shape/reports world)))))))

@@ -229,6 +229,26 @@
                 (admits sees (shape/enter-schema sh from))
                 :undeclared)}))
 
+(defn readings
+  "Every declared :reads and whether the state a driver would report FROM can provide it —
+   one verdict per edge whose event declares one, as PLAIN DATA. :undeclared where an event
+   has no report, which means the WORLD supplies it and there is nothing to check.
+
+   IT IS `admits` FOR THE FOURTH TIME — `views` was the second and `yields` the third — with
+   the read as the TARGET and the source node's schema as what is PRODUCED. A driver runs a
+   report in the state that AWAITS the event, so that state is what must provide the keys.
+
+   SOUND FOR THE SAME REASON `views` IS: a node holds exactly what it declares, so :no is a
+   proof rather than a guess. And a source that only OPTIONALLY has the key is :no — a report
+   handed a view cannot rest on a maybe any more than a handler can."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (for [{:keys [from event reads report]} (shape/transitions sh)]
+    {:from from :event event
+     :verdict (if (and report reads)
+                (admits reads (shape/enter-schema sh from))
+                :undeclared)}))
+
 (defn yields
   "Every declared :yield and whether the child it harvests from can PROVIDE it — one
    verdict per final state of the nested machine, as plain data.
@@ -648,6 +668,12 @@
           ;; what it declares.
           (for [{:keys [verdict] :as v} (views sh) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :view-unavailable)))
+          ;; A DRIVER asked to report an event from a state that cannot give it what the
+          ;; report reads. Same proof as :view-unavailable and the same reason it holds —
+          ;; a node holds exactly what it declares — but about the half that PRODUCES an
+          ;; event rather than the half that applies one.
+          (for [{:keys [verdict] :as v} (readings sh) :when (= :no verdict)]
+            (-> v (dissoc :verdict) (assoc :problem :reads-unavailable)))
           ;; A parent asking to harvest what its child cannot finish with. PROVEN, like
           ;; every other fault here, and provable only because a yield is taken at
           ;; COMPLETION — the one moment the child is guaranteed to be in a final state.
