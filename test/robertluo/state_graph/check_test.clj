@@ -178,8 +178,11 @@
             {:pair [:b :b] :verdict :no}]
            (map #(select-keys % [:pair :verdict]) (check/confluence child)))
         "the child proves its own pair is order-dependent")
-    (is (every? #{:unknown} (map :verdict (check/confluence host)))
+    (is (every? #{:unknown} (map :verdict (remove :within (check/confluence host))))
         "so the host may claim nothing about any pair pending where that child lives")
+    (is (= #{:no} (set (map :verdict (filter :within (check/confluence host)))))
+        "and it PUBLISHES the child's own verdicts rather than hiding them — the answer is
+         about the machine, not about one layer of it")
     (is (= {} (check/commuting host))
         "and licenses nothing, which is the only safe answer")
     (testing "the two orders really do differ, which is what makes :unknown necessary"
@@ -716,3 +719,89 @@
                                (shape/transition :a :go :z))]
         (is (= [{:from :a :event :go :verdict :undeclared}] (vec (check/readings world))))
         (is (= {} (shape/reports world)))))))
+
+;;; ------------------------------------------------------- who can move a machine
+
+(def ^:private fork-child
+  (shape/shape (shape/state :s [:map] {:initial true})
+               (shape/state :x [:map] {:final true})
+               (shape/state :y [:map] {:final true})
+               (shape/event :one [:map] {:reads [:map] :report (constantly {})})
+               (shape/event :two [:map] {:reads [:map] :report (constantly {})})
+               (shape/transition :s :one :x)
+               (shape/transition :s :two :y)))
+
+(deftest a-published-check-answers-about-the-machine-and-not-one-layer-of-it
+  ;; THE INCONSISTENCY THE CRANK FOUND. `problems` has recursed since nesting landed and
+  ;; nothing else did, so the same question got two answers depending on which door you
+  ;; asked through: `readings` said a child was fine while `problems` reported a PROVEN
+  ;; :reads-unavailable in it.
+  (let [child (shape/shape (shape/state :s [:map] {:initial true})
+                           (shape/state :x [:map] {:final true})
+                           (shape/event :go [:map]
+                                        {:reads [:map [:nowhere :string]]
+                                         :report (constantly {})})
+                           (shape/transition :s :go :x))
+        host  (shape/shape (shape/state :in  [:map] {:initial true :machine child :done :out})
+                           (shape/state :out [:map] {:final true}))]
+    (is (= [{:from :s :event :go :verdict :no :within [:in]}] (check/readings host)))
+    (is (= [{:from :s :event :go :problem :reads-unavailable :within [:in]}]
+           (check/problems host))
+        "and reported ONCE — `problems` takes only its own from a check that now recurses")))
+
+(deftest the-licence-is-one-machine-s-and-not-its-children-s
+  ;; A wrong :yes here is an order-dependent flake, so `commuting` must not fold a child's
+  ;; pairs into a parent state that happens to share its name. `confluence` recurses; the
+  ;; licence takes the outermost only.
+  (let [host (shape/shape (shape/state :s   [:map] {:initial true :machine fork-child :done :out})
+                          (shape/state :out [:map] {:final true}))]
+    (is (seq (filter :within (check/confluence host))) "the child's pairs are published")
+    (is (= {} (check/commuting host)) "and none of them is licensed here")))
+
+(deftest who-can-move-each-state
+  ;; THE STATIC COUNTERPART OF `drive/awaiting`, which is the same question asked of a
+  ;; RUNNING machine. Asking it of the graph is what `could this ever have worked` means
+  ;; for the door that finds its own events.
+  (let [m (shape/shape (shape/state :asked [:map] {:initial true})
+                       (shape/state :coded [:map [:code :string]])
+                       (shape/state :lawed [:map [:law :string]])
+                       (shape/state :both  [:map [:code :string] [:law :string]] {:final true})
+                       (shape/event :write [:map [:code :string]]
+                                    {:reads [:map] :report (constantly {:code "c"})})
+                       (shape/event :draft [:map [:law :string]]
+                                    {:reads [:map] :report (constantly {:law "l"})})
+                       (shape/transition :asked :write :coded)
+                       (shape/transition :asked :draft :lawed)
+                       (shape/transition :coded :draft :both)
+                       (shape/transition :lawed :write :both))]
+    (is (= {:asked :join :coded :driver :lawed :driver :both :final}
+           (into {} (map (juxt :id :verdict)) (check/driving m)))))
+
+  (testing "a park is a legitimate verdict and not a fault — the world supplies it"
+    (let [p (shape/shape (shape/state :a [:map] {:initial true})
+                         (shape/state :z [:map] {:final true})
+                         (shape/event :approve [:map])
+                         (shape/transition :a :approve :z))]
+      (is (= :world (:verdict (first (check/driving p)))))
+      (is (= [] (check/problems p)))))
+
+  (testing "a state offering a driver's event beside a person's escape is :driver —
+            it awaits two and reports one"
+    (let [e (shape/shape (shape/state :running [:map] {:initial true})
+                         (shape/state :done    [:map] {:final true})
+                         (shape/state :aborted [:map] {:final true})
+                         (shape/event :tick    [:map] {:reads [:map] :report (constantly {})})
+                         (shape/event :abandon [:map])
+                         (shape/transition :running :tick    :done)
+                         (shape/transition :running :abandon :aborted))
+          v (first (filter #(= :running (:id %)) (check/driving e)))]
+      (is (= {:awaits #{:tick :abandon} :reports #{:tick} :verdict :driver}
+             (select-keys v [:awaits :reports :verdict])))))
+
+  (testing "AND THE ONE WORTH LOOKING FOR: a fork a driver cannot settle, three levels in.
+            Nothing else says so before you run it — `problems` calls this shape fine."
+    (let [host (shape/shape (shape/state :in  [:map] {:initial true :machine fork-child :done :out})
+                            (shape/state :out [:map] {:final true}))]
+      (is (= [] (check/problems host)))
+      (is (= {:id :s :awaits #{:one :two} :reports #{:one :two} :verdict :fork :within [:in]}
+             (first (filter #(= :fork (:verdict %)) (check/driving host))))))))

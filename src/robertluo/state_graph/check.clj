@@ -80,6 +80,35 @@
 
 ;;; ------------------------------------------------------------------ subsumption
 
+(defn- inside
+  "The same question asked of every machine nested in this one, each answer carrying the
+   PATH of nodes it was found under, outermost first.
+
+   A PUBLISHED CHECK ANSWERS ABOUT THE MACHINE AND NOT ABOUT ONE LAYER OF IT, and until
+   2026-09-04 only `problems` did. Every other check stopped at the outer graph and said
+   nothing, silently: `readings` answered () for a shape whose child had a PROVEN
+   :reads-unavailable that `problems` reported. Two doors onto one question with two
+   different answers, and the driver is what found it — see :a-published-check-answers-
+   about-the-machine.
+
+   THE LINE IS THE ANSWER'S TYPE. A check answering MAPS carries :within and recurses;
+   one answering a SET OF IDS — `reachable`, `traps`, `dead-ends`, `finishable` — is about
+   ONE graph and stays there, because two machines may name a state the same and a set has
+   nowhere to say which one it meant. `problems` bridges them by recursing itself."
+  [sh f]
+  (for [[id child] (shape/machines sh)
+        answer (f child)]
+    (assoc answer :within (into [id] (:within answer)))))
+
+(defn- own
+  "Only this machine's own answers, out of a check that now recurses — for the two callers
+   that must not see a child's: `problems`, which recurses itself and would otherwise
+   report a nested fault twice, and `commuting`, whose answer is the LICENCE for one
+   machine's step and would otherwise merge a child's pairs into a parent state that
+   happens to share its name."
+  [answers]
+  (filter #(empty? (:within %)) answers))
+
 ;; `primitive-types` and `entries-of` live in `shape` and not here. They are pure malli
 ;; reasoning with no graph in them, and the REFERENTIAL checks need them: `disjoint`, which
 ;; proves two guards on one [state, event] can never both fire, has to answer before the
@@ -204,7 +233,8 @@
                        :undeclared)))
    (for [[from c] (shape/continuations sh)]
      {:from from :to (:to c) :done true
-      :verdict (admits (shape/enter-schema sh (:to c)) (continued sh from c))})))
+      :verdict (admits (shape/enter-schema sh (:to c)) (continued sh from c))})
+   (inside sh subsumption)))
 
 (defn views
    "Every declared VIEW and whether the state it reads can provide it — one verdict per edge
@@ -223,11 +253,13 @@
    handed cannot rest on a maybe."
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
-  (for [{:keys [from event sees]} (shape/transitions sh)]
-    {:from from :event event
-     :verdict (if sees
-                (admits sees (shape/enter-schema sh from))
-                :undeclared)}))
+  (concat
+   (for [{:keys [from event sees]} (shape/transitions sh)]
+     {:from from :event event
+      :verdict (if sees
+                 (admits sees (shape/enter-schema sh from))
+                 :undeclared)})
+   (inside sh views)))
 
 (defn readings
   "Every declared :reads and whether the state a driver would report FROM can provide it —
@@ -243,11 +275,13 @@
    handed a view cannot rest on a maybe any more than a handler can."
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
-  (for [{:keys [from event reads report]} (shape/transitions sh)]
-    {:from from :event event
-     :verdict (if (and report reads)
-                (admits reads (shape/enter-schema sh from))
-                :undeclared)}))
+  (concat
+   (for [{:keys [from event reads report]} (shape/transitions sh)]
+     {:from from :event event
+      :verdict (if (and report reads)
+                 (admits reads (shape/enter-schema sh from))
+                 :undeclared)})
+   (inside sh readings)))
 
 (defn yields
   "Every declared :yield and whether the child it harvests from can PROVIDE it — one
@@ -266,12 +300,14 @@
    read check is only ever as sound as the moment it reads at."
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
-  (for [[from {:keys [yield]}] (shape/continuations sh)
-        :when yield
-        :let [child (shape/machine sh from)]
-        id (sort (filter #(shape/final? child %) (shape/states child)))]
-    {:from from :final id
-     :verdict (admits yield (shape/enter-schema child id))}))
+  (concat
+   (for [[from {:keys [yield]}] (shape/continuations sh)
+         :when yield
+         :let [child (shape/machine sh from)]
+         id (sort (filter #(shape/final? child %) (shape/states child)))]
+     {:from from :final id
+      :verdict (admits yield (shape/enter-schema child id))})
+   (inside sh yields)))
 
 (defn- domains
   "{k #{v}} for every key an event INSISTS on whose values are FINITE — the only keys a
@@ -331,8 +367,10 @@
    publish a suspicion, which it has never done."
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
-  (for [[[from ev] ts] (sort-by key (group-by (juxt :from :event) (shape/transitions sh)))]
-    (into {:from from :event ev} (covers ts))))
+  (concat
+   (for [[[from ev] ts] (sort-by key (group-by (juxt :from :event) (shape/transitions sh)))]
+     (into {:from from :event ev} (covers ts)))
+   (inside sh coverage)))
 
 ;;; ------------------------------------------------------------------ confluence
 
@@ -485,7 +523,7 @@
           (some (writes oa) (reads b)) :unknown
           :else :yes)))))
 
-(defn confluence
+(defn- confluent
   "One verdict per pair of events that can be PENDING AT ONCE in one state — :yes, :no
    or :unknown — and, like `subsumption`, it publishes every one of them so the check's
    own COVERAGE is readable rather than merely its complaints.
@@ -558,6 +596,16 @@
           :when (not (pos? (compare a b)))]
       {:in s :pair [a b] :verdict (commutes tgt guards nests conts comb out sees s a b)})))
 
+(defn confluence
+  "Every state's concurrent pairs, THIS MACHINE'S AND ITS CHILDREN'S — see `confluent`
+   for the verdicts and why each is what it is. A child's answers carry :within.
+
+   `commuting` TAKES ONLY THIS MACHINE'S, and that is not a detail: it is the licence a
+   runtime layer looks up by state id, and a child may name a state whatever it likes."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (concat (confluent sh) (inside sh confluence)))
+
 (def ^:private law-samples
   "How many values a law is tried on. 12 is 144 pairs and 1,728 triples, which costs
    milliseconds and is enough to catch the mistakes that are about VALUES rather than about
@@ -613,13 +661,70 @@
   ([sh] (laws sh nil))
   ([sh opts]
    (let [{:keys [samples seed]} (merge {:samples law-samples :seed 1} opts)]
+     (concat
+      (for [id (sort (shape/states sh))
+            [k {:keys [combine commutes? schema]}] (sort-by key (shape/combines sh id))
+            :when combine
+            :let [vs (mg/sample schema {:size samples :seed seed})]
+            law (cond-> [:closed] commutes? (conj :commutes))
+            :let [bad (refute law combine vs schema)]]
+        (merge {:in id :key k :law law :verdict (if bad :no :unknown)} bad))
+      (inside sh #(laws % opts))))))
+
+(defn driving
+  "WHO CAN MOVE EACH STATE — one verdict per state, as plain data, and never a fault.
+
+   THE STATIC COUNTERPART OF `drive/awaiting`, which asks the same question of a RUNNING
+   machine. This asks it of the graph, before anything has run, which is this library's
+   whole position applied to the door that finds its own events: `could this ever have
+   worked`, for a driver.
+
+   THE VERDICTS:
+   - :final   nobody is asked anything
+   - :driver  exactly one event here carries a `:report`, so a driver knows what to go and
+              find out. This is every state of a workflow that runs itself
+   - :world   none of the events here carries one — a PARK, and a legitimate one: somebody
+              outside says what happened. It is also what a machine driven by a stream
+              looks like everywhere
+   - :join    several carry one AND every pair among them is PROVEN confluent, so a driver
+              may take them all and the order cannot be observed
+   - :fork    several carry one and the shape does NOT prove the order irrelevant. A driver
+              must stop here: choosing would invent an order nobody promised. THIS IS THE
+              ONE WORTH LOOKING FOR — a shape that will park for ever at a state you meant
+              to be automatic, and nothing else says so before you run it
+
+   IT IS NOT A FAULT, and :fork is why the line is where it is. A shape may perfectly well
+   want the world to choose between two reportable events; what would be wrong is a driver
+   choosing for it. `:ambiguous` is a fault because two guards on one [from event] is
+   nondeterminism IN THE MACHINE; this is a question about who produces an event, and the
+   machine is deterministic either way.
+
+   A NESTING NODE IS MARKED {:machine true} and its verdict is about its own ESCAPES. Read
+   it together with the child's entries, which carry :within — the crank asks the innermost
+   machine first, and a nesting node whose child is running is not where the next event
+   comes from."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (let [reported (set (keys (shape/reports sh)))
+        pairs    (into {} (for [{:keys [in pair verdict]} (own (confluence sh))]
+                            [[in (set pair)] verdict]))
+        proven?  (fn [id ids]
+                   (every? (fn [[a b]] (= :yes (get pairs [id #{a b}])))
+                           (for [a ids b ids :when (neg? (compare a b))] [a b])))]
+    (concat
      (for [id (sort (shape/states sh))
-           [k {:keys [combine commutes? schema]}] (sort-by key (shape/combines sh id))
-           :when combine
-           :let [vs (mg/sample schema {:size samples :seed seed})]
-           law (cond-> [:closed] commutes? (conj :commutes))
-           :let [bad (refute law combine vs schema)]]
-       (merge {:in id :key k :law law :verdict (if bad :no :unknown)} bad)))))
+           :let [awaited (into #{} (comp (filter #(= id (:from %))) (map :event))
+                               (shape/transitions sh))
+                 can (into (sorted-set) (filter reported) awaited)]]
+       (cond-> {:id id :awaits awaited :reports can
+                :verdict (cond
+                           (shape/final? sh id)  :final
+                           (empty? can)          :world
+                           (= 1 (count can))     :driver
+                           (proven? id can)      :join
+                           :else                 :fork)}
+         (shape/machine sh id) (assoc :machine true)))
+     (inside sh driving))))
 
 (defn commuting
   "{state-id #{#{event-a event-b}}} — only the pairs PROVEN to commute, as plain data a
@@ -640,7 +745,12 @@
   (reduce (fn [m {:keys [in pair verdict]}]
             (cond-> m (= :yes verdict) (update in (fnil conj #{}) (set pair))))
           {}
-          (confluence sh)))
+          ;; THIS MACHINE'S OWN PAIRS AND NOT ITS CHILDREN'S. `confluence` recurses now,
+          ;; and a licence keyed by state id would merge a child's pair into a parent state
+          ;; that happens to share its name — a wrong :yes here is an order-dependent flake.
+          ;; A child's concurrency is the COMPILER's business inside one step, which is
+          ;; also why `nesting` makes every pair around such a node :unknown.
+          (own (confluence sh))))
 
 ;;; --------------------------------------------------------------------- problems
 
@@ -661,29 +771,35 @@
           ;; so each state is named once and named by the more specific fault. `traps`
           ;; itself stays total; this is where the filtering belongs.
           (for [id (traps sh) :when (not (ends id))] {:problem :trap :id id})
-          (for [{:keys [verdict] :as v} (subsumption sh) :when (= :no verdict)]
+          (for [{:keys [verdict] :as v} (own (subsumption sh)) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :target-refuses)))
           ;; A handler asking to see what the state it reads cannot provide. PROVEN, like
           ;; every other fault here — and provable only because a node now holds exactly
           ;; what it declares.
-          (for [{:keys [verdict] :as v} (views sh) :when (= :no verdict)]
+          (for [{:keys [verdict] :as v} (own (views sh)) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :view-unavailable)))
           ;; A DRIVER asked to report an event from a state that cannot give it what the
           ;; report reads. Same proof as :view-unavailable and the same reason it holds —
           ;; a node holds exactly what it declares — but about the half that PRODUCES an
           ;; event rather than the half that applies one.
-          (for [{:keys [verdict] :as v} (readings sh) :when (= :no verdict)]
+          (for [{:keys [verdict] :as v} (own (readings sh)) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :reads-unavailable)))
           ;; A parent asking to harvest what its child cannot finish with. PROVEN, like
           ;; every other fault here, and provable only because a yield is taken at
           ;; COMPLETION — the one moment the child is guaranteed to be in a final state.
-          (for [{:keys [verdict] :as v} (yields sh) :when (= :no verdict)]
+          (for [{:keys [verdict] :as v} (own (yields sh)) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :yield-unavailable)))
           ;; A NESTED MACHINE IS CHECKED AS AN ORDINARY SHAPE, which is most of why
           ;; nesting cost so little: every check above is about one graph, and a child is
           ;; one. :within names the path of nodes it was found under, so a fault three
           ;; machines deep still says where it lives — and it is a PATH rather than a node
           ;; because nesting nests.
+          ;;
+          ;; THE `own` ABOVE IS WHY THIS STILL READS RIGHT. Those checks recurse on their
+          ;; own account now, so taking their whole answer here would report every nested
+          ;; fault twice — once from the child's verdict and once from this recursion. The
+          ;; id-SET checks cannot recurse, having nowhere to say which machine they meant,
+          ;; so this line is what covers them and it stays.
           (for [[id child] (shape/machines sh)
                 p (problems child)]
             (assoc p :within (into [id] (:within p))))))))

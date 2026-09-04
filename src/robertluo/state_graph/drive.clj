@@ -128,7 +128,12 @@
    check is not something to recompute once a turn."
   (memoize
    (fn [sh]
-     (into {} (for [{:keys [in pair verdict]} (check/confluence sh)]
+     ;; THIS MACHINE'S OWN PAIRS. `check/confluence` recurses into nested children now, and
+     ;; a lookup keyed by state id would merge a child's pair into a parent state that
+     ;; happens to share its name. Each level is asked about its OWN shape, here and in
+     ;; `check/commuting`, for the same reason.
+     (into {} (for [{:keys [in pair verdict within]} (check/confluence sh)
+                    :when (empty? within)]
                 [[in (set pair)] verdict])))))
 
 (defn- confluent?

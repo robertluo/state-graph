@@ -233,7 +233,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       STRUCTURAL, reported by check/problems — :unreachable, :dead-end, :trap, :target-refuses,
       :view-unavailable, :yield-unavailable, :reads-unavailable
       PUBLISHED AND NEVER FAULTED, being coverage rather than fault — subsumption, views, coverage,
-      confluence, commuting, laws"
+      confluence, commuting, laws, readings, yields, DRIVING
+    AND A PUBLISHED CHECK ANSWERS ABOUT THE MACHINE. Every one that answers in MAPS recurses into
+    nested children and carries :within; the ones answering a SET OF IDS — reachable, traps,
+    dead-ends, finishable — are about ONE graph and stay there, a set having nowhere to say which
+    machine it meant. `problems` bridges them by recursing itself, and takes only its OWN from the
+    checks that now recurse. See :a-published-check-answers-about-the-machine"
 
    :a-partial-subsumption-checker
    "`admits` answers :yes, :no or :unknown, and IT NEVER LIES — malli has no subsumption, so it is
@@ -575,6 +580,32 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     which event produced which state, which is what forced
     :the-output-is-a-transition-and-not-a-state."
 
+   :a-published-check-answers-about-the-machine
+   "THE AUTHOR'S, 2026-09-04, on the crank's two findings: `the 2 findings look like state-graph
+    library's gaps`. They were, and the gap was wider than the two.
+    - MEASURED, and it is the whole entry: `problems` has RECURSED into nested machines since
+      nesting landed, and NOTHING ELSE DID. Asked of a shape whose child had a proven
+      :reads-unavailable, `readings` answered () while `problems` answered the fault with
+      :within [:inner]. The same question, two doors, two answers, silently. `confluence`,
+      `coverage`, `views`, `subsumption`, `yields` and `laws` were all flat the same way.
+    - THE LINE IS THE ANSWER'S TYPE. A check answering MAPS recurses and carries :within; one
+      answering a SET OF IDS is about ONE graph and stays there, because two machines may name a
+      state the same and a set has nowhere to say which one it meant. That is why `problems`
+      still recurses ITSELF.
+    - AND `problems` NOW TAKES `own` FROM THE FOUR IT DERIVES FAULTS FROM, or every nested fault
+      would be reported twice — once from the child's verdict and once from its own recursion.
+      Asserted.
+    - THE LICENCE IS ONE MACHINE'S, and that is sharper than tidiness: `commuting` is a lookup
+      keyed by STATE ID that `run` hands down as the LICENCE, so a child's pair would merge into
+      a parent state sharing its name and license a concurrency nothing proved. A wrong :yes
+      there is an order-dependent flake. The crank's own lookup filters for the same reason, and
+      asks each LEVEL about its own shape.
+    - THIS IS THE LESSON THIS PROJECT KEEPS RELEARNING, and it is now three for three: a new
+      capability is NOT LOCAL, and the place to look is whatever OTHER check reasoned about the
+      same thing. :what-visibility-taught found it once, :what-the-phase-split-taught once, and
+      the crank found it again — by needing an answer about a child and getting one about the
+      parent."
+
    :the-crank-is-the-door-report-was-missing
    "THE AUTHOR'S, 2026-09-04: `again, drive and step, if you have to live with them, add them to the
     state-graph api` — said after watching a SECOND driver be written in a consumer, and after
@@ -598,6 +629,14 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
       but DISCOVERY does not: a nesting node has no edge for its child's events, so a driver
       reading only the host's out-edges sees a state that awaits nothing and is not final, and
       parks for ever on a machine that was ready to go. `:within` on the answer is the path.
+    - AND `check/driving` IS THE STATIC HALF, added the same day for the same reason. `awaiting`
+      answers who can move a RUNNING machine; `driving` answers it of the GRAPH, one verdict per
+      state, recursing with :within — :final, :driver, :world (a park), :join (several, proven)
+      and :fork (several, NOT proven, which is where a driver must stop). THE FORK IS THE ONE
+      WORTH LOOKING FOR: a shape that will park for ever at a state you meant to be automatic,
+      and that `problems` calls fine. PUBLISHED AND NOT A FAULT, because a shape may want the
+      world to choose; what would be wrong is a driver choosing for it. A PROPERTY asserts the
+      two answers agree, which is the only thing that can catch either drifting from the other.
     - AND IT TAKES A JOIN WHERE `confluence` PROVES ONE. Two reportable events out of one state is
       a fork, and choosing would be inventing an order nobody promised — unless the shape has
       PROVED the order cannot be observed, which is what confluence answers and what the product
@@ -678,7 +717,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     facade — which is the door `:report` was declared without. It finds its own events, recurses
     into a live nested child, and takes a join `confluence` proves. THE AUTHOR ASKED FOR IT after
     watching a second consumer write the same loop; see :the-crank-is-the-door-report-was-missing.
-    VERIFIED 2026-09-04 by running it: 147 TESTS, 440 ASSERTIONS, both suites green. Three are
+    VERIFIED 2026-09-04 by running it: 151 TESTS, 452 ASSERTIONS, both suites green. Three are
     ^:integration, so THE COMMIT GATE IS A REAL GATE, and that suite NEEDS GRAPHVIZ.
     HOW THE COUNTS ARE CHECKED, and it is A REPL HABIT AND NOT AN ASSERTION — worth knowing before
     trusting a number here. `ts/instrumented` collects and instruments and returns nothing, and NO TEST

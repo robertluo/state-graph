@@ -10,6 +10,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [robertluo.state-graph :as sg]
+            [robertluo.state-graph.check :as check]
             [robertluo.state-graph.drive :as sut]
             [robertluo.state-graph.test-support :as ts]))
 
@@ -198,3 +199,23 @@
     (let [sh (apply sg/shape parts)]
       (= (cranked sh (+ n m))
          (nth (iterate #(sut/step sh %) (cranked sh n)) m)))))
+
+(defspec what-the-crank-does-is-what-the-shape-said-it-would 100
+  ;; THE TWO DOORS ONTO ONE QUESTION AGREE. `check/driving` answers who can move a state
+  ;; from the GRAPH, before anything runs; `awaiting` answers it of a RUNNING machine. They
+  ;; are written separately and neither is derived from the other, so this is the only thing
+  ;; that can catch one drifting from the other — and a static check nobody can rely on is a
+  ;; static check nobody runs.
+  (prop/for-all [parts ts/gen-driven-shape
+                 n (gen/choose 0 6)]
+    (let [sh   (apply sg/shape parts)
+          run  (cranked sh n)
+          t    (sut/awaiting sh run)
+          said (:verdict (first (filter #(= (:id %) (:at t)) (check/driving sh))))]
+      (= (case said
+           (:driver :join) :driver
+           (:world :fork)  :world
+           :final          :final)
+         (cond (:final t)                :final
+               (= :driver (:from t))     :driver
+               :else                     :world)))))

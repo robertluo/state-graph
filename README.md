@@ -158,6 +158,19 @@ answers nothing useful; `dot` is the same drawing as *data*, for anything that r
 diagrams itself. A notebook, a web page, a docs build: none of them wants a file, and `dot`
 needs no graphviz installed.
 
+### A published check answers about the machine
+
+Every check that answers in **maps** — `subsumption`, `views`, `readings`, `yields`,
+`coverage`, `confluence`, `laws`, `driving` — recurses into nested machines and carries
+`:within`, the path of nodes it was found under. A check that answers a **set of ids** —
+`reachable`, `traps`, `dead-ends`, `finishable` — is about one graph and stays there: two
+machines may name a state the same, and a set has nowhere to say which one it meant.
+`problems` bridges them by recursing itself.
+
+One consequence worth knowing: `commuting`, which is the licence `run` hands to the async
+layer, takes only the outermost machine's pairs. It is a lookup keyed by state id, and a
+child's concurrency is the compiler's business inside one step.
+
 ## Nesting a machine in a node
 
 A state can carry a machine of its own. While the parent sits there, the child runs inside
@@ -569,9 +582,26 @@ fingerprint. `advance` is the door a person hands an event in by:
 **It counts what can be reported, not what is awaited.** A state offering a driver's event
 beside a person's escape awaits two and is perfectly drivable.
 
+**And you can ask the graph the same question before anything runs.** `check/driving` is one
+verdict per state — the static half of `awaiting`:
+
+```clojure
+(check/driving machine)
+;=> ({:id :fetched :awaits #{:approve} :reports #{}       :verdict :world}
+;    {:id :idle    :awaits #{:fetch}   :reports #{:fetch} :verdict :driver}
+;    {:id :saved   :awaits #{}         :reports #{}       :verdict :final})
+```
+
+The verdict worth looking for is **`:fork`** — several reportable events out of one state that
+the shape does not prove confluent. A driver must stop there, and `problems` calls such a shape
+fine, so this is the only thing that says so before you run it. It is published and never
+faulted: a shape may want the world to choose between two events; what would be wrong is a
+driver choosing for it.
+
 **It reports into the machine that is running.** A nesting node has no edge for its child's
 events, so the crank follows `:sub` as deep as it goes and asks the innermost machine first —
-`:within` on the answer is the path of hosts.
+`:within` on the answer is the path of hosts, and `driving` answers with the same path, so a
+fork three machines deep is visible from the outside.
 
 **And it takes a join where `confluence` proves one.** Two reportable events out of one state
 is a fork, and choosing between them would invent an order the shape never promised — unless

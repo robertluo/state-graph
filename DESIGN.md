@@ -1211,6 +1211,88 @@ becomes of that is the caller's. It AMENDS THE README rather than merely contrad
 
 ---
 
+## :a-published-check-answers-about-the-machine
+
+The author's, 2026-09-04, on the two things the crank had to work around: *"the 2 findings
+look like state-graph library's gaps"*. They were, and looking properly found a third.
+
+### The measurement
+
+One shape, one child, one proven fault inside the child:
+
+| asked of the host | answer | the truth inside |
+| --- | --- | --- |
+| `problems` | `[{… :within [:inner]}]` | recurses |
+| `readings` | `()` | `{:verdict :no}` |
+| `confluence` | `()` | 1 pair |
+| `coverage` | `()` | 1 |
+| `views` | `()` | — |
+
+`problems` has recursed since nesting landed — it maps itself over `shape/machines` and
+prefixes `:within`. **Nothing else did.** So the same question got two answers depending on
+which door you asked through, silently, and the one that told the truth was the one that
+reports *complaints* rather than the one that reports *coverage*. A library whose position is
+"could this ever have worked" had its complete answers only on the complaint path.
+
+### Where the line goes
+
+Not every check can recurse, and the reason is the answer's type:
+
+- a check answering **maps** carries `:within` and recurses — `subsumption`, `views`,
+  `readings`, `yields`, `coverage`, `confluence`, `laws`, `driving`
+- a check answering a **set of ids** — `reachable`, `traps`, `dead-ends`, `finishable` — is
+  about ONE graph and stays there. Two machines may name a state `:done`, and a set has
+  nowhere to say which one it meant.
+
+`problems` bridges the two by recursing itself, which is what it already did. The one change it
+needed was to take only its **own** answers from the four checks it derives faults from —
+otherwise every nested fault is reported twice, once from the child's verdict and once from the
+recursion. That is asserted.
+
+### The licence is one machine's, and this is not tidiness
+
+`commuting` is `confluence` reduced to `{state-id #{#{a b}}}`, and `run` hands it to the async
+layer as the LICENCE. It is a lookup **keyed by state id**. If `confluence` recursing had been
+allowed to reach it, a child's pair would merge into a parent state that happens to share its
+name, and the runtime would take a concurrency nothing proved. A wrong `:yes` there is an
+order-dependent flake — the exact failure `:what-nesting-taught` records as having been live
+once before.
+
+So `commuting` filters to the outermost, and the crank's own confluence lookup filters the same
+way, asking each *level* about its own shape. This is the third time this project has learned
+that a new capability is not local, and the second time the place to look was a check that
+reasoned about concurrency.
+
+### `driving`: the static half of `awaiting`
+
+The crank discovers at runtime that a state offers two reportable events it cannot choose
+between, and parks. Nothing said so beforehand — `problems` calls such a shape fine. For a
+library whose whole argument is that a graph can be checked before it runs, that is a hole in
+the middle of the newest door.
+
+`check/driving` is one verdict per state, recursing with `:within`:
+
+| verdict | meaning |
+| --- | --- |
+| `:final` | nobody is asked anything |
+| `:driver` | exactly one event here carries a `:report` |
+| `:world` | none does — a park, and a legitimate one |
+| `:join` | several do, and every pair among them is proven confluent |
+| `:fork` | several do, and the shape does not prove it — **a driver must stop here** |
+
+`:fork` is the one worth looking for: a shape that will park for ever at a state you meant to be
+automatic. It is **published and never faulted**, and the line is worth stating because
+`:ambiguous` went the other way. Two guards on one `[from event]` is nondeterminism *in the
+machine*, so it is refused. Two reportable events is a question about *who produces an event*;
+the machine is deterministic either way, and a shape may perfectly well want the world to
+choose. What would be wrong is a driver choosing for it, and that is what the crank refuses.
+
+A generative property asserts that `driving`'s verdict and `awaiting`'s answer agree for every
+state a driven run lands in. Neither is derived from the other, so it is the only thing that can
+catch one drifting from the other — and a static check nobody can rely on is a static check
+nobody runs.
+
+
 ## :the-crank-is-the-door-report-was-missing
 
 The author's, 2026-09-04, and the second time they had said it: *"again, `drive` and `step`, if
