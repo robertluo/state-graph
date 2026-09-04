@@ -275,6 +275,62 @@ data visibility from the inside brings security problems easily. BOTH HALVES ARE
   for a real shape to ask. See :open-questions.
 
 
+## :a-shape-has-a-derived-id
+
+THE AUTHOR'S, 2026-09-04, and it came out of the transcript question rather than from anything
+in this library: `to make sure the transcript log file correspond to a FSM, we may need a stable
+id for the FSM.` A transcript row that cannot say which machine produced it is a row nobody can
+audit, so yes — and the cheap answer is dead on arrival.
+
+- `(hash shape)` IS NOT IT, MEASURED. Two structurally identical shapes, built separately in one
+  process, are neither `=` nor equal-hashed: their handlers are distinct closures and their
+  schemas distinct compiled objects. So it changes on every namespace load, and a transcript
+  written yesterday would match nothing today. :ubergraph-0-9-0 records that an ubergraph IS `=`
+  and IS EDN, and that is true — for a graph whose attributes are VALUES. :a-shape-is-code
+  guarantees ours are not, and that is the whole of why this needed building.
+
+- `canonical` IS THE ORDERED, READABLE FORM and `fingerprint` is SHA-256 over its printed
+  representation, as 64 hex characters. Everything that is DATA goes in: node ids, the `m/form`
+  of every schema, `:initial` and `:final`, every edge as `[from event to]` with its guard,
+  `:out`, `:sees` and `:reads`, and every completion edge with its `:yield`. ORDERED BY PRINTED
+  FORM, because ubergraph keeps nodes and out-edges in SETS and an id that depended on iteration
+  order would not be one.
+
+- A NESTED MACHINE IS ITS CHILD'S FINGERPRINT, which terminates the recursion and still moves
+  the parent when something deep in a child changes. Asserted both ways.
+
+- CLOSURES ARE ERASED AND NOT RENDERED, and this is the decision the rest rests on. `m/form`
+  will happily render a closure — MEASURED: `[:fn {:error/message "nope"} (fn [v] ...)]` prints
+  as `#object[user$f2$fn__44837 0x3442b587 ...]`, and two builds of it have forms that are NOT
+  `=`. A hex address differs every process, so a fingerprint over the printed form would be
+  worthless to a transcript. Everything that is not a value becomes one marker, `::opaque`.
+  This is not academic: ../coder's `Signature` is exactly `[:and vector? [:fn {...} (fn [x] ...)]]`
+  and it is embedded in eight of that task's state schemas.
+
+- WHAT IT PROVES IS THE GRAPH AND NOT THE CODE, and it has to be said wherever it is used.
+  Change what a handler returns without changing its `:out`, or change what an `:fn` predicate
+  checks, and the fingerprint does not move. That is the same limit :a-shape-is-code imposes
+  everywhere else, and it is the price of a shape whose behaviour is closures.
+
+- AND THE ENV DOES NOT MOVE IT EITHER, measured on ../coder's own task shape once a shape became
+  a function of its env: `(shape {})` and `(shape {:writer ... :repl ...})` fingerprint the same,
+  the env being closed over in reports and reports being erased. That is RIGHT — it is the same
+  machine — and it means the fingerprint does not tell you where it ran. Where it ran belongs in
+  the log's context beside the name.
+
+- IT IS DERIVED AND NOT DECLARED, which is the whole reason to have one rather than a version
+  number: nobody can forget to bump it. This repository's own cross-component rule is that a rule
+  living only in a declaration is a rule nothing checks.
+
+- AND IT CARRIES NO NAME. What a machine is called is a fact about the JOB rather than about the
+  graph, and belongs to whoever owns the job — so identity is two-part and only half of it is the
+  library's. ../coder puts the name on the mulog context and the fingerprint rides on every row.
+
+- WHAT IT REOPENS, PARTLY. :what-is-persisted put shape versioning out of v1 `with the question
+  it drags behind it: which shape an instance mid-flight belongs to`. A fingerprint on every row
+  answers that for a FINISHED run, which is the audit case and the one that was asked for. An
+  instance in flight across a shape change is still open, and is left open deliberately.
+
 ## :an-event-may-say-how-it-is-reported
 
 THE AUTHOR'S, 2026-09-04, and it arrived from a CONSUMER rather than from this library, which

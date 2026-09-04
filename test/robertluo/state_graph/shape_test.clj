@@ -431,3 +431,63 @@
                (shape/state :z [:map] {:final true})
                (shape/event :go [:map] (fn [_] {}) nil {:reads [:map [:n :int]]})
                (shape/transition :a :go :z))))))
+
+(deftest a-shape-has-a-stable-id-and-hash-is-not-it
+  ;; A TRANSCRIPT ROW THAT CANNOT SAY WHICH MACHINE PRODUCED IT is a row nobody
+  ;; can audit, so a shape needs an id that survives a JVM restart.
+  (let [sig  (fn [] [:and vector? [:fn {:error/message "nope"} (fn [x] (vector? x))]])
+        make (fn [{:keys [to schema handler guard]
+                   :or {to :z schema :int handler (fn [e] (select-keys e [:n]))}}]
+               (shape/shape
+                (shape/state :a [:map [:n schema] [:sig (sig)]] {:initial true})
+                (shape/state :z [:map [:n :int] [:sig (sig)]] {:final true})
+                (shape/state :y [:map [:n :int] [:sig (sig)]] {:final true})
+                (shape/event :go [:map [:n :int]] handler)
+                (if guard
+                  (shape/transition :a :go to {:when guard})
+                  (shape/transition :a :go to))))
+        base (make {})]
+
+    (testing "`hash` CANNOT be it, and that is why this exists: two structurally
+              identical shapes are neither = nor equal-hashed, their handlers being
+              distinct closures and their schemas distinct compiled objects — so it
+              would change on every namespace load"
+      (is (not= (hash base) (hash (make {}))))
+      (is (not= base (make {}))))
+
+    (testing "the fingerprint IS stable, including over a schema holding an INLINE
+              closure — which `m/form` renders as an #object with a hex address that
+              differs every process, hence `plain` erasing it"
+      (is (= (shape/fingerprint base) (shape/fingerprint (make {}))))
+      (is (= 64 (count (shape/fingerprint base)))))
+
+    (testing "and it moves for everything that is DATA"
+      (is (not= (shape/fingerprint base) (shape/fingerprint (make {:schema :string}))))
+      (is (not= (shape/fingerprint base) (shape/fingerprint (make {:to :y}))))
+      (is (not= (shape/fingerprint base)
+                (shape/fingerprint (make {:guard [:map [:n [:int {:max 3}]]]})))))
+
+    (testing "AND NOT FOR A HANDLER, which is the limit and has to be said out loud:
+              it proves the GRAPH matched, never that the same code ran"
+      (is (= (shape/fingerprint base)
+             (shape/fingerprint (make {:handler (fn [_] {:n 99})})))))
+
+    (testing "`canonical` is what to diff when two disagree, since a hash can only
+              say `different`"
+      (is (= (shape/canonical base) (shape/canonical (make {}))))
+      (is (not= (shape/canonical base) (shape/canonical (make {:to :y})))))))
+
+(deftest a-nested-machine-is-its-child-s-fingerprint
+  ;; So the recursion terminates, and a change deep in a child still moves the parent.
+  (let [child (fn [s] (shape/shape (shape/state :c1 [:map] {:initial true})
+                                   (shape/state :c2 [:map [:v s]] {:final true})
+                                   (shape/event :inner [:map [:v s]])
+                                   (shape/transition :c1 :inner :c2)))
+        parent (fn [s] (shape/shape
+                        (shape/state :p1 [:map] {:initial true :machine (child s)})
+                        (shape/state :p2 [:map] {:final true})
+                        (shape/event :out [:map])
+                        (shape/transition :p1 :out :p2)))]
+    (is (= (shape/fingerprint (parent :int)) (shape/fingerprint (parent :int))))
+    (is (not= (shape/fingerprint (parent :int)) (shape/fingerprint (parent :string)))
+        "a change inside the CHILD moves the parent's fingerprint")))

@@ -274,6 +274,39 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     again. AND THE ORDER WAS FORCED: the view check is only sound UNDER projection, so holding had to
     land first. Node-side EXPOSURE is not built — see :open-questions."
 
+   :a-shape-has-a-derived-id
+   "THE AUTHOR'S, 2026-09-04, out of the transcript question: `to make sure the transcript log
+    file correspond to a FSM, we may need a stable id for the FSM.` Yes, and the cheap answer is
+    dead on arrival.
+    - `(hash shape)` IS NOT IT, MEASURED: two structurally identical shapes are neither = nor
+      equal-hashed, their handlers being distinct closures and their schemas distinct compiled
+      objects. So it changes on every namespace load and a transcript written yesterday would
+      match nothing today. :ubergraph-0-9-0 is right that an ubergraph is = and EDN — but only
+      for a graph whose attributes are VALUES, and :a-shape-is-code guarantees ours are not.
+    - `canonical` IS THE ORDERED, READABLE FORM and `fingerprint` is SHA-256 over it. Everything
+      that is DATA is in — node ids, schema FORMS, [from event to], guards, :out, :sees, :reads,
+      completion edges and their :yield — ordered by printed form, ubergraph keeping nodes and
+      out-edges in SETS. A nested machine is its CHILD'S fingerprint, so it terminates and a
+      change deep in a child still moves the parent.
+    - CLOSURES ARE ERASED AND NOT RENDERED, which is the decision the rest rests on. `m/form`
+      happily prints a closure as #object[... 0x3442b587 ...] — MEASURED, two builds of
+      [:fn {...} (fn [v] ...)] have forms that are not = — so a fingerprint over the printed
+      form would change every process. ::opaque instead.
+    - WHAT IT PROVES IS THE GRAPH AND NOT THE CODE, and that has to be said wherever it is used:
+      change what a handler returns without changing its :out, or change what an :fn checks, and
+      it does not move. Same limit :a-shape-is-code imposes everywhere else.
+    - AND THE ENV DOES NOT MOVE IT EITHER, measured on ../coder's task shape: a shape built as a
+      function of its env fingerprints the same in every env, the env being closed over in
+      functions that are erased. Right — it is the same machine — and it means the fingerprint
+      does not say WHERE it ran.
+    - IT IS DERIVED AND NOT DECLARED, which is the whole reason to have one: nobody can forget to
+      bump it. And IT CARRIES NO NAME — what a machine is called is a fact about the job, and
+      belongs to whoever owns the job. Two-part identity, and only half of it is the library's.
+    - WHAT IT REOPENS, PARTLY. :what-is-persisted put shape versioning out of v1 `with the
+      question it drags behind it: which shape an instance mid-flight belongs to`. A fingerprint
+      on every transcript row answers that for a FINISHED run, which is the audit case. Mid-flight
+      across a shape change is still open and stays open."
+
    :an-event-may-say-how-it-is-reported
    "THE AUTHOR'S, 2026-09-04, arrived at from a CONSUMER rather than from this library: coder's
     driver carried a map of `acts` keyed by state, and the author's objection was that it
@@ -587,7 +620,10 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     AND AN EVENT MAY SAY HOW IT IS REPORTED, 2026-09-04 — {:report :reads} — which is the
     driver/world distinction this file had called `a label and not a feature`. It came from the
     first CONSUMER of the facade rather than from here; see :an-event-may-say-how-it-is-reported.
-    VERIFIED 2026-09-04 by running it: 135 TESTS, 400 ASSERTIONS, both suites green. Two are
+    AND A SHAPE HAS A DERIVED ID, 2026-09-04 — `fingerprint` and `canonical` — which is what a
+    transcript row needs to say which machine produced it, and which `(hash shape)` cannot be.
+    See :a-shape-has-a-derived-id.
+    VERIFIED 2026-09-04 by running it: 137 TESTS, 412 ASSERTIONS, both suites green. Two are
     ^:integration, so THE COMMIT GATE IS A REAL GATE, and that suite NEEDS GRAPHVIZ.
     HOW THE COUNTS ARE CHECKED, and it is A REPL HABIT AND NOT AN ASSERTION — worth knowing before
     trusting a number here. `ts/instrumented` collects and instruments and returns nothing, and NO TEST

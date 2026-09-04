@@ -688,6 +688,93 @@
   (into {} (for [t (transitions shape) :when (:report t)]
              [(:event t) (select-keys t [:report :reads])])))
 
+(declare fingerprint continuations)
+
+(defn- plain
+  "A value with every UNREADABLE thing replaced by ::opaque, and every collection put in
+   a deterministic order.
+
+   WHY ERASING AND NOT RENDERING. `m/form` happily renders a closure as
+   #object[user$fn__44837 0x3442b587 ...] — a hex address that differs every process — so a
+   fingerprint over the printed form would change on every JVM start and be worth nothing to
+   a transcript written yesterday. MEASURED: two builds of [:fn {...} (fn [v] ...)] have
+   forms that are NOT =. So anything that is not a value becomes one marker.
+
+   THE COST IS REAL AND IS THE SAME COST HANDLERS HAVE: a predicate's BODY is invisible, so
+   changing what an :fn checks does not move the fingerprint. What is proven is the SHAPE of
+   the schema and the presence of a predicate, not its meaning."
+  [x]
+  (cond
+    (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) x
+    (map? x) (vec (sort-by pr-str (map (fn [[k v]] [(plain k) (plain v)]) x)))
+    (set? x) (vec (sort-by pr-str (map plain x)))
+    (sequential? x) (mapv plain x)
+    :else ::opaque))
+
+(defn canonical
+  "The shape as ORDERED, READABLE DATA — what a fingerprint is taken over, and what to diff
+   when two fingerprints disagree and you need to know why.
+
+   EVERYTHING THAT IS DATA IS IN: node ids, the FORM of every schema, :initial and :final,
+   every edge as [from event to] with its guard, :out, :sees and :reads, and every completion
+   edge with its :yield. EVERYTHING THAT IS A CLOSURE IS IN ONLY AS ITS PRESENCE — a handler,
+   a report and a combine are booleans here, because :a-shape-is-code means they cannot be
+   anything else.
+
+   A NESTED MACHINE IS ITS CHILD'S FINGERPRINT, so the recursion terminates and a change deep
+   in a child still moves the parent.
+
+   ORDERED BY PRINTED FORM, because ubergraph keeps nodes and out-edges in SETS and a
+   fingerprint that depended on iteration order would not be one."
+  {:malli/schema [:=> [:cat Shape] :map]}
+  [sh]
+  {:states
+   (vec (sort-by pr-str
+                 (for [id (states sh)
+                       :let [a (uber/attrs sh id)]]
+                   (plain [id {:schema (m/form (:schema a))
+                               :initial (boolean (:initial a))
+                               :final (boolean (:final a))
+                               :machine (some-> (:machine a) fingerprint)}]))))
+   :events
+   (vec (sort-by pr-str
+                 (for [t (transitions sh)]
+                   (plain [(:from t) (:event t) (:to t)
+                           {:schema (m/form (:schema t))
+                            :when (some-> (:when t) m/form)
+                            :out (some-> (:out t) m/form)
+                            :sees (some-> (:sees t) m/form)
+                            :reads (some-> (:reads t) m/form)
+                            :handler (some? (:handler t))
+                            :report (some? (:report t))}]))))
+   :done
+   (vec (sort-by pr-str
+                 (for [[from c] (continuations sh)]
+                   (plain [from (:to c) {:yield (some-> (:yield c) m/form)}]))))})
+
+(defn fingerprint
+  "A stable id for the SHAPE of this machine: SHA-256 over `canonical`, as hex.
+
+   WHAT IT IS FOR. A transcript is a file of rows, and a row that cannot say which machine
+   produced it is a row nobody can audit. `(hash shape)` will not do — MEASURED: two
+   structurally identical shapes are neither = nor equal-hashed, because their handlers are
+   distinct closures and their schemas distinct compiled objects, so it changes on every
+   namespace load. This is derived from the shape's DATA and is the same in every process.
+
+   IT IS DERIVED AND NOT DECLARED, which is the whole reason to have it: nobody can forget to
+   bump it. What it does NOT carry is a NAME — that is a fact about the job rather than about
+   the graph, and it belongs to whoever owns the job.
+
+   WHAT IT PROVES AND WHAT IT DOES NOT, and this must be read before trusting one: it proves
+   THE GRAPH MATCHED — the same states, schemas, events, guards and targets. It does not prove
+   the same CODE ran. Change what a handler returns without changing its :out, or change what
+   an :fn predicate checks, and the fingerprint is unmoved. See `plain`."
+  {:malli/schema [:=> [:cat Shape] :string]}
+  [sh]
+  (let [bs (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                    (.getBytes (pr-str (canonical sh)) "UTF-8"))]
+    (apply str (map #(format "%02x" %) bs))))
+
 (defn continuations
   "{from -> {:to <id>, :yield <schema>}} for every COMPLETION TRANSITION — where a state
    goes when it COMPLETES, with no event and no handler. Empty for a shape that declares

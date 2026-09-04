@@ -483,6 +483,41 @@ no `:report` at construction:
 ;=> [{:from :a :event :go :problem :reads-unavailable}]
 ```
 
+## Identifying a machine: the fingerprint
+
+A transcript row that cannot say which machine produced it is a row nobody can audit. So a
+shape has a **derived** id:
+
+```clojure
+(shape/fingerprint sh)   ;=> "5375cc61b250cc5b…"   64 hex chars, SHA-256
+(shape/canonical sh)     ;=> the ordered data it is taken over
+```
+
+**`hash` will not do**, and this is measured rather than assumed: two structurally identical
+shapes are neither `=` nor equal-hashed, because their handlers are distinct closures and
+their schemas distinct compiled objects. It changes on every namespace load, so a transcript
+written yesterday would match nothing today.
+
+`canonical` puts everything that is **data** in — node ids, the *form* of every schema,
+`:initial` `:final`, every edge as `[from event to]` with its guard, `:out`, `:sees` and
+`:reads`, every completion edge with its `:yield` — ordered by printed form, since ubergraph
+keeps nodes and out-edges in sets. A nested machine is its child's fingerprint, so the
+recursion terminates and a change deep in a child still moves the parent. Keep it for when two
+fingerprints disagree and you need to know *why*: a hash can only say "different".
+
+Everything that is a **closure** is in only as its presence, because `m/form` renders one as
+`#object[… 0x3442b587 …]` — a hex address that differs every process. Two consequences worth
+knowing before trusting one:
+
+- it proves **the graph matched**, not that the same code ran. Change what a handler returns
+  without changing its `:out`, or change what an `:fn` predicate checks, and it does not move;
+- a shape built as a function of its environment has **the same fingerprint in every
+  environment**, the environment being closed over in functions that are erased. That is right
+  — it is the same machine — but it means the fingerprint does not tell you where it ran.
+
+It carries **no name**. What a machine is called is a fact about the job rather than about the
+graph, and belongs to whoever owns the job.
+
 ## Two doors, one machine
 
 A shape compiles to an ordinary function of a state and an event. **The caller owns the
