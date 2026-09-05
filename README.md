@@ -826,6 +826,57 @@ the pair was proved to land in the same one either way — but an audit trail sh
 what happened rather than a sequence that did not. A caller who wants strict arrival order
 everywhere drives `robertluo.state-graph.async/drive` with no licence.
 
+## Covering the graph by running it
+
+Everything above answers *could this ever have worked*, from the graph alone. `.explore`
+answers **did it** — by driving, for real, through the handlers and the guards and the schema
+at every crossing.
+
+The technique is one sentence: **a shape is a function of its env**, so whatever a report
+reaches for — a model, a socket, a clock, a budget — arrived as a *value*, and an ordinary
+function goes in its place. Give one constructor a set of alternative envs and every branch is
+reachable on purpose, at no cost and with no flake.
+
+```clojure
+(explore/covering signup-machine
+                  {:notify (constantly :sent)}          ; the part that does not vary
+                  {:verdict [(constantly :ok) (constantly :rejected)]
+                   :budget  [1 2]})                     ; the part that does
+;=> {:of 10 :covered 7 :runs 4
+;    :gaps []
+;    :uncovered [{:transition [:both :note :both]  :why :no-report}
+;                {:transition [:ready :a :did-a]   :why :join-order}
+;                {:transition [:did-a :b :both]    :why :unvisited-state}]}
+```
+
+One run per combination — the *product* of the alternatives, not a search over turns.
+
+**What it adds over driving by hand is the accounting**, and the accounting has a subtlety.
+Some transitions cannot be taken by *any* driver:
+
+| | |
+|---|---|
+| `:no-report` | the event carries no `:report` — only the world supplies it |
+| `:join-order` | the state is a proven `:join`, so the crank takes its events at once in **one** order, and the other orderings' halfway states are never entered |
+| `:unvisited-state` | nothing entered the state this edge leaves from; the reason is upstream |
+
+That middle row is the one worth knowing: *exactly the property that makes a join safe is what
+makes half its diamond undrivable*. `confluence` proves the order cannot be observed, so the
+crank picks one — and a report that did not know this would call a correct machine half-tested
+for ever.
+
+Subtract those and what is left is **`:gaps`** — a transition a driver *could* have taken and
+your alternatives never produced a payload for. That is the only number that means you missed
+something.
+
+**Anything in the env, not just a function.** A budget that is an edge is covered by varying a
+plain number, where otherwise it would take as many real laps as the budget allows.
+
+A throw propagates rather than being collected: driving already enforces the event's schema,
+the guards, the target's schema and a loud miss, so anything that goes wrong is a defect and
+stopping on it beats a tally. `:steps` bounds a run, because exploration is exactly where you
+find out that your stopping rule is not an edge after all.
+
 ## What v1 does not do
 
 Said plainly, because each is a design decision and not an oversight.
@@ -902,8 +953,9 @@ Plus the schemas it publishes: `Instance`, `State`, `Event`, `Transition`.
 Underneath, and directly usable — the facade is the convenience, these are the truth:
 `.shape` (the graph and its referential checks), `.compile` (shape → function), `.check`
 (the static checks and the drawing), `.drive` (the crank: `awaits`, `awaiting`, `where`,
-`advance`, `step`, `drive`), `.async` (manifold streams: `drive` for one machine, `fan` for
-many). Nothing below `.async` requires manifold, `.drive` included.
+`advance`, `step`, `drive`), `.explore` (`covering`: the same questions asked by *running*
+it), `.async` (manifold streams: `drive` for one machine, `fan` for many). Nothing below
+`.async` requires manifold, `.drive` included.
 
 Dependencies: ubergraph, malli, manifold, test.check. Drawing needs graphviz installed.
 

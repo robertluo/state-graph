@@ -112,6 +112,92 @@ licence, all as VALUES.
   the same way for the same reason.
 
 
+## :cover-the-graph-by-running-it
+
+The author of ../coder, 2026-09-05, of a hand-written test that drove one branch of an agent
+workflow with plain functions in place of the models: *"the ability of fully cover the graph
+using this technique is very important and general, I think maybe it worth a seat in `src`:
+useful not only for its own test, but also for users."* And then the question that decided the
+shape of it: *"we can substitute not only LLM functions, but any functions in system, I wonder
+if we can make it a thorough testing for a machine: our check does its work statically, while
+this can check in the runtime"* — clarified: **runtime means by actual executing**.
+
+### The technique is one sentence
+
+A shape is a function of its env, so whatever a report reaches for — a model, a socket, a
+clock, a budget — arrived as a **value**, and an ordinary function goes in its place. That is
+not a testing trick bolted on; it is `:the-shape-is-the-only-integration-point` cashed. What was
+missing was not the ability to do it but the **accounting** for having done it.
+
+### What the accounting found
+
+Some transitions cannot be taken by any driver, however you fake the world:
+
+| why | meaning |
+| --- | --- |
+| `:no-report` | the event carries no `:report` — only the world supplies it |
+| `:join-order` | the state is a proven `:join`, so the crank takes its events at once in ONE order, and the other orderings' halfway states are never entered |
+| `:unvisited-state` | nothing entered the state this edge leaves from; the reason is upstream |
+
+That middle row is the one worth the entry. **Exactly the property that makes a join safe is
+what makes half its diamond undrivable.** `confluence` proves the order cannot be observed, so
+the crank picks one — and a coverage report that did not know this would call a correct machine
+half-tested, for ever, with no way to fix it. Worse, a report that *did* let you fix it would be
+inviting you to depend on which order the crank picked, which is the one thing the library
+promises you may not observe. The explore test asserts that one of the two orderings is skipped
+and never which, for that reason.
+
+Subtract the three and the residue is `:gaps` — an edge a driver **could** have taken and your
+alternatives never produced a payload for. That is the only number that means you missed
+something, and driving it to zero is the whole exercise.
+
+### Measured, on ../coder's machine
+
+Fourteen states, twenty-two transitions, three agents and a REPL replaced by constants:
+
+| | |
+| --- | --- |
+| covered | 19 of 22 |
+| runs | 24 — the *product* of the alternatives |
+| gaps | none |
+| uncovered | one `:no-report` (`:amend`), one `:join-order`, one `:unvisited-state` |
+
+The first attempt covered 14 and reported three `:gaps`, all of them the way back from a
+failure. The fix was to vary `:rounds` — **a plain number in the env, not a function** — which
+is the author's "any functions in system" arriving at its strongest form: a budget that is an
+edge is covered by substituting a constant, where before it would have taken nine real laps.
+
+### One fixed env per run
+
+A fake that answers differently on its third call reaches paths a fixed one cannot — a
+*recovery*, tests failing and then passing. It was turned down as the default: it makes the run
+count unpredictable and the failure hard to read, and **transition** coverage does not need it,
+since to take an edge you need an env that produces its payload rather than a particular
+history. Reach for a stateful fake when the thing under test is a sequence. `covering` is for a
+graph.
+
+### Where it sits, and what it is not
+
+A sibling of `drive`, above it in the arrow, requiring it and `check` and `shape`. It is **not**
+in `check`, which never touches the runtime path — an application shipping a working shape must
+not load a graph algorithm, and this one *runs the machine*. It is **not** on the facade, for
+the reason `coverage`, `confluence`, `commuting`, `subsumption` and `views` are not.
+
+**A throw propagates and is not collected.** Driving already enforces the event's schema, the
+guards, the target's schema and a loud miss, so anything that goes wrong is a defect in the
+machine; stopping on it with the exception intact beats a tally. There is no `try` in this
+library's src and this did not become the first one.
+
+**One machine, the outermost**, for the reason `:a-published-check-answers-about-the-machine`
+gives for `reachable`, `traps` and `dead-ends`: two machines may name a state `:done`, and a
+report keyed by state id has nowhere to say which it meant. A child's transitions are counted
+under `:nested` by `:within` and are not scored.
+
+**A step cap, where `drive` has none.** `drive` needs no counter because the stopping rule is an
+edge — but exploration is exactly where you find out that yours is not, and hanging the suite is
+a poor way to report an infinite loop.
+
+
 ## :two-kinds-of-check-and-two-places-for-them
 
 shape/problems is REFERENTIAL — answerable from the PARTS alone, so it runs inside the

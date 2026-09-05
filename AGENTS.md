@@ -137,7 +137,7 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     reflow a whole source file on first touch — see :what-completion-taught"]
 
   :layering
-  ["EVERY LAYER IS BUILT. Four namespaces and one arrow through them; the store that was once in
+  ["EVERY LAYER IS BUILT. Five namespaces and one arrow through them; the store that was once in
     this list is GONE, see :nothing-is-persisted-here.
 
     robertluo.state-graph          — THE FACADE: the vocabulary a user needs, and the only require
@@ -147,6 +147,15 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
                                      THREE doors. Requires everything below it, `check` included,
                                      which is what one require costs.
                                      See :the-facade-is-a-vocabulary-and-two-doors
+    robertluo.state-graph.explore  — COVER THE GRAPH BY RUNNING IT, added 2026-09-05: the RUNTIME
+                                     counterpart of `check`, which answers only from the graph.
+                                     `covering` drives one run per combination of alternative ENVS
+                                     and says which transitions were actually taken — and, for each
+                                     that was not, whether any driver COULD have: :no-report,
+                                     :join-order, :unvisited-state, or a real :gap. A SIBLING of
+                                     drive and above it in the arrow; requires drive, check and
+                                     shape, and is NOT on the facade, for the reason coverage never
+                                     is. See :cover-the-graph-by-running-it
     robertluo.state-graph.drive    — THE CRANK: the door that FINDS its own events, added 2026-09-04
                                      because `:report` had been declared with nothing here consuming
                                      it, so two applications wrote the same driver. awaits, awaiting,
@@ -218,6 +227,32 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     and lose nothing, so it takes a step, an initial-of, a result-of and a licence, all as VALUES,
     and never a shape. THE HONEST STATEMENT OF THE RULE: the facade DOES load manifold; what it
     protects survives one level down, robertluo.state-graph.compile requiring none and never will."
+
+   :cover-the-graph-by-running-it
+   "2026-09-05, the author of ../coder: `the ability of fully cover the graph using this technique is
+    very important and general` — and `we can substitute not only LLM functions, but any functions in
+    system, I wonder if we can make it a thorough testing for a machine: our check does its work
+    statically, while this can check in the runtime`, where runtime means BY ACTUAL EXECUTING.
+    THE TECHNIQUE IS ONE SENTENCE: a shape is a function of its env, so whatever a report reaches for
+    arrived as a VALUE, and a plain function goes in its place. Give one constructor a set of
+    alternative envs and every branch is reachable on purpose. `explore/covering` drives one run per
+    combination — the PRODUCT of the alternatives, not a search over turns — and answers which
+    transitions were taken. ONE FIXED ENV PER RUN: to take an edge you need an env that produces its
+    payload, not a particular history, so a stateful fake is for testing a SEQUENCE and this is for
+    testing a GRAPH.
+    WHAT IT ADDS OVER DRIVING BY HAND IS THE ACCOUNTING, and that is where the finding is. Three
+    kinds of transition CANNOT be taken by any driver, and calling them failures would cry wolf on
+    every real machine: :no-report (the event is the world's — an approval, an amendment),
+    :join-order (the state is a PROVEN join, so the crank takes its events at once in one order and
+    the other orderings' halfway states are never entered), and :unvisited-state (the reason is
+    upstream). Subtract those and what is left is :gaps — an edge a driver COULD have taken, which is
+    the only number that means you missed something. Measured on ../coder's machine: 19 of 22, 24
+    runs, gaps empty, and the three uncovered are exactly one of each kind.
+    A THROW PROPAGATES rather than being collected: driving enforces the event schema, the guards,
+    the target's schema and a loud miss, so anything that goes wrong is a defect and stopping on it
+    beats a tally. NOT ON THE FACADE, for the reason no coverage check is. ONE MACHINE, THE OUTERMOST,
+    for the reason :a-published-check-answers-about-the-machine gives for reachable and traps: two
+    machines may name a state :done. See DESIGN.md :cover-the-graph-by-running-it."
 
    :two-kinds-of-check-and-two-places-for-them
    "shape/problems is REFERENTIAL — answerable from the PARTS alone, so it runs inside the constructor
