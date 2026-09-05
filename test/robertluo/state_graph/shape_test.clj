@@ -310,8 +310,11 @@
     (testing "`transitions` is about EVENTS and leaves it out"
       (is (empty? (shape/transitions sh))))
     (testing "`continuations` is where it is read, and nothing is left on the node"
-      (is (= {:a {:to :b}} (shape/continuations sh)))
-      (is (nil? (uber/attr sh :a :done))))))
+      (is (= {:a [{:to :b}]} (shape/continuations sh)))
+      (is (nil? (uber/attr sh :a :done))))
+    (testing "and with no :outcome on it, which is what says EVERY way of finishing goes
+              here — the form every shape written before outcomes existed has"
+      (is (= [nil] (map :outcome (get (shape/continuations sh) :a)))))))
 
 (deftest a-yield-rides-on-the-completion-edge
   (let [child (shape/shape (shape/state :c1 [:map] {:initial true})
@@ -321,9 +324,9 @@
         sh (shape/shape (shape/state :a [:map] {:initial true :machine child
                                                 :done :b :yield [:map [:r :string]]})
                         (shape/state :b [:map [:r :string]] {:final true}))]
-    (is (= :b (get-in (shape/continuations sh) [:a :to])))
+    (is (= :b (:to (first (get (shape/continuations sh) :a)))))
     (is (= [:map [:r :string]]
-           (m/form (get-in (shape/continuations sh) [:a :yield]))))))
+           (m/form (:yield (first (get (shape/continuations sh) :a))))))))
 
 (deftest what-a-completion-transition-may-not-be
   (let [ok (fn [& parts] (map :problem (apply shape/problems parts)))
@@ -399,6 +402,94 @@
                                        :yield [:map]})
                (shape/state :z [:map] {:final true})
                (shape/event :go [:map]) (shape/transition :a :go :z))))))
+
+(deftest a-nesting-node-may-say-what-its-child-STARTS-with
+  ;; :seed IS :yield'S MIRROR — one carries parent -> child at entry, the other child ->
+  ;; parent at completion. Without it a nested machine could only ever be told its job by
+  ;; the closure its shape was built from, so a node could not be RE-ENTERED with a
+  ;; different job, which is exactly what a loop over a child machine is.
+  (let [child (shape/shape (shape/state :c1 [:map [:job :string]] {:initial true})
+                           (shape/state :c2 [:map [:job :string]] {:final true})
+                           (shape/event :fin [:map])
+                           (shape/transition :c1 :fin :c2))
+        sh (shape/shape (shape/state :a [:map [:job :string]]
+                                     {:initial true :machine child :seed [:map [:job :string]]})
+                        (shape/state :z [:map] {:final true})
+                        (shape/event :out [:map]) (shape/transition :a :out :z))]
+    (testing "it is read off the NODE, where a yield is read off the edge — a seed is about
+              entering this state, which is not a transition anywhere"
+      (is (= [:map [:job :string]] (m/form (shape/seed sh :a))))
+      (is (nil? (shape/seed sh :z))))
+    (testing "and the child, which insists on data, could not have been nested WITHOUT one"
+      (is (= [:machine-cannot-start]
+             (map :problem
+                  (shape/problems (shape/state :a [:map] {:initial true :machine child})
+                                  (shape/state :z [:map] {:final true})
+                                  (shape/event :out [:map]) (shape/transition :a :out :z))))))
+    (testing "a seed with nothing to sow into is a declaration nobody reads, exactly as a
+              yield with nothing to harvest from is"
+      (is (= [:seed-without-machine]
+             (map :problem
+                  (shape/problems (shape/state :a [:map] {:initial true :seed [:map]})
+                                  (shape/state :z [:map] {:final true})
+                                  (shape/event :out [:map])
+                                  (shape/transition :a :out :z))))))))
+
+(deftest a-completion-may-say-where-each-OUTCOME-goes
+  ;; NOT A GUARD, and that is the whole argument for it: what it reads is the STRUCTURAL
+  ;; fact :done already reads — which state the child is in — one notch finer, over a set
+  ;; that is finite and known at construction. No schema, no predicate, nothing to prove
+  ;; disjoint. `MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA?` refuses the
+  ;; ARITHMETIC cases and refuses them on decidability; this is not one of them.
+  (let [child (shape/shape (shape/state :c1 [:map] {:initial true})
+                           (shape/state :won  [:map [:prize :int]] {:final true})
+                           (shape/state :lost [:map] {:final true})
+                           (shape/event :win  [:map [:prize :int]])
+                           (shape/event :lose [:map])
+                           (shape/transition :c1 :win  :won)
+                           (shape/transition :c1 :lose :lost))
+        sh (shape/shape
+            (shape/state :a [:map] {:initial true :machine child
+                                    :done {:won  {:to :paid :yield [:map [:prize :int]]}
+                                           :lost {:to :done}}})
+            (shape/state :paid [:map [:prize :int]] {:final true})
+            (shape/state :done [:map] {:final true}))]
+    (testing "one EDGE per outcome, which is what buys the traversals for nothing all over
+              again: two ways for a child to finish are two arrows"
+      (is (= #{:paid :done} (set (map uber/dest (uber/out-edges sh :a)))))
+      (is (= [{:outcome :lost :to :done}
+              {:outcome :won :to :paid}]
+             (mapv #(dissoc % :yield) (get (shape/continuations sh) :a)))))
+    (testing "and the yield belongs to the branch it is harvested on"
+      (is (= [nil [:map [:prize :int]]]
+             (mapv #(some-> (:yield %) m/form) (get (shape/continuations sh) :a)))))
+))
+
+(deftest an-outcome-is-one-of-the-child-s-final-states
+  (let [ok (fn [& parts] (map :problem (apply shape/problems parts)))
+        child (shape/shape (shape/state :c1 [:map] {:initial true})
+                           (shape/state :c2 [:map] {:final true})
+                           (shape/event :fin [:map])
+                           (shape/transition :c1 :fin :c2))]
+    (testing "a key naming anything else is a branch that can never be taken"
+      (is (= [:unknown-outcome]
+             (ok (shape/state :a [:map] {:initial true :machine child
+                                         :done {:c1 {:to :z}}})
+                 (shape/state :z [:map] {:final true})))))
+    (testing "and outcomes need a child to have them"
+      (is (= [:outcome-without-machine]
+             (ok (shape/state :a [:map] {:initial true :done {:c2 {:to :z}}})
+                 (shape/state :z [:map] {:final true})))))
+    (testing "a per-outcome :done carries each branch's own :yield, so one beside it is a
+              second spelling that could only ever drift"
+      (is (= [:yield-with-outcomes]
+             (ok (shape/state :a [:map] {:initial true :machine child
+                                         :done {:c2 {:to :z}} :yield [:map]})
+                 (shape/state :z [:map] {:final true})))))
+    (testing "every target is still checked for being there at all"
+      (is (= [:unknown-state]
+             (ok (shape/state :a [:map] {:initial true :machine child
+                                         :done {:c2 {:to :nope}}})))))))
 
 (deftest an-event-may-say-how-it-is-reported
   ;; THE ONE THING THE SHAPE COULD NOT SAY until now: whether an event comes from

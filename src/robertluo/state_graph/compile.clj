@@ -152,7 +152,8 @@
    :machines (into {}
                    (for [[id child] (shape/machines sh)]
                      [id {:shape child :index (index child)}]))
-   ;; {from {:to <id> :yield <schema>}} — WHERE A STATE GOES WHEN IT COMPLETES, read once
+   ;; {from [{:outcome <id?> :to <id> :yield <schema>} ...]} — WHERE A STATE GOES WHEN IT
+   ;; COMPLETES, and where each OUTCOME goes where it says so. Read once
    ;; so that the step pays a map lookup and not a walk over every edge.
    :continuations (shape/continuations sh)})
 
@@ -195,7 +196,7 @@
        (when-let [m (get-in idx [:machines (:id state)])]
          (admits? (:index m) (:sub state) event)))))
 
-(declare enter)
+(declare enter sown)
 
 (defn- arrive
   "A VALUE ARRIVING AT A NODE: projected onto what that node declares, given the node's
@@ -219,17 +220,41 @@
    sideways past the edge that decides where it lands, cannot move it to another run, and
    cannot reach into a nested machine. A child left behind would ride into a state that
    never declared it, so :sub is dropped and re-seeded rather than carried."
-  [value to enter-schema seed ctx]
-  (conform! enter-schema
-            (cond-> (-> (select-keys value (mu/keys enter-schema))
-                        (assoc :id to)
-                        (into (select-keys value [:instance]))
-                        (dissoc :sub))
-              seed (assoc :sub seed))
-            (assoc ctx :crossing :enter :to to)))
+  [sh value to enter-schema ctx]
+  (let [base (-> (select-keys value (mu/keys enter-schema))
+                 (assoc :id to)
+                 (into (select-keys value [:instance]))
+                 (dissoc :sub))]
+    (conform! enter-schema
+              (cond-> base
+                (shape/machine sh to) (assoc :sub (sown sh to base)))
+              (assoc ctx :crossing :enter :to to))))
+
+(defn- sown
+  "THE FIRST STATE OF THE MACHINE THIS NODE NESTS, started with what the node sows into it:
+   nothing at all where it declares no :seed, and otherwise the seed's own keys taken off
+   the value that has just ARRIVED here.
+
+   OFF THE PROJECTED VALUE AND NOT THE ONE IN FLIGHT, which is what makes the check local
+   and sound: a node holds exactly what it declares, so `check/seeds` asks whether THIS
+   node's schema guarantees the seed and gets a proof rather than a guess. Sowing out of
+   the pre-projection merge would have let a key three transitions back reach a child that
+   no state on the way ever admitted holding.
+
+   IT IS A SEAM AND IS CHECKED HERE, exactly as a :sees view and a :yield are. The static
+   check proves what it can from the schemas; this holds in production and gives the
+   diagnosis `the node did not provide the seed` rather than letting a nil into a child."
+  [sh to value]
+  (let [child (shape/machine sh to)]
+    (enter child nil (if-let [seed (shape/seed sh to)]
+                       (conform! seed (select-keys value (mu/keys seed))
+                                 {:crossing :seed :to to})
+                       {}))))
 
 (defn- completed
   "THE VALUE A COMPLETED STATE HANDS ON, or nil where the state has not completed.
+
+   ANSWERS [<the completion taken> <the value>], or nil.
 
    A state with no nested machine completes ON ENTRY: there is no activity to finish, so
    finishing it is arriving. One WITH a machine completes when that child sits in a final
@@ -238,19 +263,31 @@
    escape by an ordinary event is an ABORT and yields nothing, which is the semantics
    nesting already had and this does not change.
 
+   WHICH final state it sat in is the one thing about the child a completion may read, and
+   reading it is not a guard: the set is finite and known at construction, and the dispatch
+   is a map lookup on an id rather than a schema anybody has to prove disjoint. It is the
+   same structural fact `is the child final` asked one notch finer.
+
    THE YIELD IS A SEAM AND IS CHECKED HERE, exactly as a :sees view is. The static check
    proves what it can from the schemas; this holds in production and gives the diagnosis
    `the child did not provide the yield` rather than letting a nil into the parent."
-  [sh state yield]
-  (let [id (:id state)
-        child (shape/machine sh id)]
-    (cond
-      (nil? child) state
-      (not (shape/final? child (:id (:sub state)))) nil
-      (nil? yield) state
-      :else (merge state (conform! yield
-                                   (select-keys (:sub state) (mu/keys yield))
-                                   {:crossing :yield :from id})))))
+  [sh state entries]
+  (let [id    (:id state)
+        child (shape/machine sh id)
+        ;; WHICH COMPLETION THIS IS, and it is a LOOKUP. An entry with no :outcome is the
+        ;; unconditional form and answers every way the child can finish; one with an
+        ;; :outcome answers only the final state it names. A child that has finished in a
+        ;; way this node declares no transition for has not completed it — the parent goes
+        ;; on sitting there, and its own edges are still the escape.
+        final (when child (:id (:sub state)))
+        entry (when (or (nil? child) (shape/final? child final))
+                (first (filter #(or (nil? (:outcome %)) (= final (:outcome %))) entries)))]
+    (when entry
+      [entry (if-let [yield (:yield entry)]
+               (merge state (conform! yield
+                                      (select-keys (:sub state) (mu/keys yield))
+                                      {:crossing :yield :from id}))
+               state)])))
 
 (defn- continue
   "EVERY COMPLETION TRANSITION FROM HERE, followed until the machine is somewhere that
@@ -270,15 +307,12 @@
    assembled by hand, and a diagnosis is worth more than a hang."
   [sh conts state]
   (loop [state state seen #{}]
-    (let [id (:id state)
-          {:keys [to yield]} (conts id)]
-      (if-let [value (and to (completed sh state yield))]
+    (let [id (:id state)]
+      (if-let [[{:keys [to]} value] (some->> (conts id) (completed sh state))]
         (if (seen id)
           (throw (ex-info "A completion transition cycles"
                           {:crossing :done :at id :seen seen}))
-          (recur (arrive value to (shape/enter-schema sh to)
-                         (some-> (shape/machine sh to) (enter nil {}))
-                         {:from id})
+          (recur (arrive sh value to (shape/enter-schema sh to) {:from id})
                  (conj seen id)))
         state))))
 
@@ -293,10 +327,10 @@
   [sh instance data]
   (let [id (shape/initial-id sh)]
     (continue sh (shape/continuations sh)
-              (arrive (cond-> data (some? instance) (assoc :instance instance))
+              (arrive sh
+                      (cond-> data (some? instance) (assoc :instance instance))
                       id
                       (shape/enter-schema sh id)
-                      (some-> (shape/machine sh id) (enter nil {}))
                       {}))))
 
 (def Patch
@@ -362,14 +396,18 @@
         idx   (index sh)
         conts (:continuations idx)
         ;; Every nested machine split ONCE, with the SAME Context, so a child may answer a
-        ;; deferred wherever its parent may. `enter` is what makes its first state, and it
-        ;; is computed here because entering a node is not the moment to discover that a
-        ;; child cannot start.
+        ;; deferred wherever its parent may.
+        ;;   ITS FIRST STATE IS NOT PRECOMPUTED ANY MORE, and could not be: a node that
+        ;;   sows a :seed starts its child with what has just arrived, so what the child
+        ;;   begins with is a function of the run and not of the shape. `arrive` makes it,
+        ;;   once per entry, through `sown`. That a child CAN start is answered before
+        ;;   anything runs — :machine-cannot-start for a seedless node and `check/seeds`
+        ;;   for a seeded one — so nothing was being discovered here that is not still
+        ;;   discovered earlier.
         subs (into {}
                    (for [[id {:keys [shape index]}] (:machines idx)]
                      [id {:phases (phases shape context)
-                          :index index
-                          :first (enter shape nil {})}]))
+                          :index index}]))
         ;; ONE READING OF `whose event is this`, asked by both halves. INNER FIRST: a
         ;; nested machine gets every event before this node's own edges do, which is what
         ;; makes the parent's edges the ESCAPE and needs no guard — a child that has
@@ -452,8 +490,8 @@
                   ;; say and is said in one place; a state that completes on arrival goes
                   ;; on at once, with no event — see `continue`.
                   (pure (continue sh conts
-                                  (arrive (landed state answer (get-in idx [:combines to]))
-                                          to enter-schema (:first (subs to)) ctx))))
+                                  (arrive sh (landed state answer (get-in idx [:combines to]))
+                                          to enter-schema ctx))))
                 ;; THE LICENCE PROMISED THIS EDGE. `commutes` proves the diamond closes
                 ;; before anything is applied out of order, so an edge missing HERE is a
                 ;; licence that was wrong or a caller applying a patch where it does not

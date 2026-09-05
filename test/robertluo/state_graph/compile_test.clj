@@ -702,6 +702,71 @@
     (is (= {:id :cancelled :total 30}
            (step (c/initial sh {:total 30}) {:id :cancel})))))
 
+(deftest a-nesting-node-SOWS-its-child-and-may-do-it-twice
+  ;; THE THING NESTING COULD NOT DO. A child was always entered with NO data, so what job it
+  ;; was doing could only come from the closure its shape was built from — which fixes it for
+  ;; the life of the shape and makes re-entering the node with a DIFFERENT job impossible.
+  ;; A :seed is :yield read backwards, and one loop over a child machine needs both.
+  (let [sh   (ts/refining)
+        step (c/compile sh)
+        at   (fn [st] [(:id st) (:job st) (:id (:sub st)) (:job (:sub st)) (:answer st)])]
+    (testing "the child starts holding what the parent sowed, and nothing else"
+      (is (= [:working "write it" :idle "write it" nil]
+             (at (step (c/initial sh {}) {:id :begin :job "write it"})))))
+    (testing "it finishes, the parent harvests, and the child is dropped on the way out"
+      (let [judging (-> (c/initial sh {})
+                        (step {:id :begin :job "write it"})
+                        (step {:id :answer :answer "v1"}))]
+        (is (= [:judging "write it" nil nil "v1"] (at judging)))
+        (is (not (contains? judging :sub)))
+
+        (testing "and the SAME node is entered again with a different job — the child
+                  restarted, sown afresh, holding the second job and not the first"
+          (is (= [:working "polish it" :idle "polish it" "v1"]
+                 (at (step judging {:id :verdict :verdict :again :job "polish it"})))))))))
+
+(deftest a-completion-may-say-where-each-OUTCOME-goes-and-what-each-takes
+  ;; The parent could not tell WHICH way its child finished: :done had one target, and a
+  ;; :yield had to hold at every final state, so `it worked` and `it gave up` arrived
+  ;; identically. Here they are two arrows, and the branch that gave up harvests NOTHING —
+  ;; which is what lets the parent keep the answer it already had.
+  (let [sh   (ts/refining)
+        step (c/compile sh)
+        run  (fn [& events] (reduce step (c/initial sh {}) events))]
+    (testing "the child finishing well is harvested and reviewed"
+      (is (= {:id :judging :job "write it" :answer "v1"}
+             (run {:id :begin :job "write it"} {:id :answer :answer "v1"}))))
+    (testing "the child giving up goes somewhere else and yields nothing"
+      (is (= {:id :kept :job "write it"}
+             (run {:id :begin :job "write it"} {:id :give-up}))))
+    (testing "AND A SECOND LAP THAT GIVES UP KEEPS THE FIRST LAP'S ANSWER, which is the
+              property the whole branch exists for: a state holds what it declares, so the
+              good answer survives by never being overwritten"
+      (is (= {:id :kept :job "polish it" :answer "v1"}
+             (run {:id :begin :job "write it"}
+                  {:id :answer :answer "v1"}
+                  {:id :verdict :verdict :again :job "polish it"}
+                  {:id :give-up}))))))
+
+(deftest a-seed-is-a-seam-and-is-checked-at-runtime-too
+  ;; :seed-unavailable is STRUCTURAL, so a shape whose node cannot provide the seed can
+  ;; still be BUILT — `problems` is opt-in. What holds in production is this, and it says
+  ;; which crossing failed rather than letting a nil into a child.
+  (let [child (shape/shape (shape/state :c1 [:map [:job :string]] {:initial true})
+                           (shape/state :c2 [:map [:job :string]] {:final true})
+                           (shape/event :fin [:map])
+                           (shape/transition :c1 :fin :c2))
+        sh (shape/shape (shape/state :a [:map] {:initial true}
+                                     )
+                        (shape/state :b [:map [:job {:optional true} :string]]
+                                     {:machine child :seed [:map [:job :string]]})
+                        (shape/event :go [:map])
+                        (shape/transition :a :go :b))
+        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"seed"
+                                ((c/compile sh) (c/initial sh {}) {:id :go})))]
+    (is (= :seed (:crossing (ex-data e))))
+    (is (= :b (:to (ex-data e))))))
+
 (deftest a-yield-is-a-seam-and-is-checked-at-runtime-too
   ;; :yield-unavailable is STRUCTURAL, so a shape whose child cannot provide the yield can
   ;; still be BUILT — `problems` is opt-in. What holds in production is this.

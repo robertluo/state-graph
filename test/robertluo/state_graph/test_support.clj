@@ -290,6 +290,45 @@
      (shape/event :cancel [:map])
      (shape/transition :paying :cancel :cancelled))))
 
+(defn refining
+  "A SEED AND A PER-OUTCOME COMPLETION, together, because they are what one loop over a
+   nested machine needs and neither is much use alone.
+
+   :working NESTS a worker and SOWS it with a :job — so the same node is entered twice with
+   two different jobs, which is the thing a nesting could not do while a child was always
+   started with nothing. The worker finishes either :done, and its result is harvested and
+   reviewed, or :stuck, and the parent goes to :kept holding whatever it already had.
+
+   IT IS THE SHAPE OF `make it work, then make it beautiful`: the second lap is the first
+   lap's answer handed back with a different job, and the branch that gives up must not
+   overwrite the answer that worked. That is why :stuck yields NOTHING — a state holds what
+   it declares, so keeping the good answer costs no key and no copy."
+  []
+  (let [worker (shape/shape
+                (shape/state :idle [:map [:job :string]] {:initial true})
+                (shape/state :done [:map [:job :string] [:answer :string]] {:final true})
+                (shape/state :stuck [:map [:job :string]] {:final true})
+                (shape/event :answer [:map [:answer :string]])
+                (shape/event :give-up [:map])
+                (shape/transition :idle :answer  :done)
+                (shape/transition :idle :give-up :stuck))]
+    (shape/shape
+     (shape/state :start [:map] {:initial true})
+     (shape/state :working [:map [:job :string] [:answer {:optional true} :string]]
+                  {:machine worker
+                   :seed [:map [:job :string]]
+                   :done {:done  {:to :judging :yield [:map [:answer :string]]}
+                          :stuck {:to :kept}}})
+     (shape/state :judging [:map [:job :string] [:answer :string]])
+     (shape/state :kept [:map [:job :string] [:answer {:optional true} :string]] {:final true})
+     (shape/state :happy [:map [:job :string] [:answer :string]] {:final true})
+     (shape/event :begin [:map [:job :string]])
+     (shape/event :verdict [:map [:verdict [:enum :good :again]] [:job {:optional true} :string]]
+                  (fn [e] (select-keys e [:job])) nil)
+     (shape/transition :start :begin :working)
+     (shape/transition :judging :verdict :happy   {:when [:map [:verdict [:= :good]]]})
+     (shape/transition :judging :verdict :working {:when [:map [:verdict [:= :again]]]}))))
+
 (defn gathering
   "FAN-OUT, and the shape of it is one self-loop. n workers each report a result as ONE
    event of ONE id, and the state accumulates them under a key whose combine is SET UNION —

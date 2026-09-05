@@ -41,7 +41,16 @@
   own state ids, and two machines may name a state `:done` — so this stays with one
   graph, for the reason :a-published-check-answers-about-the-machine gives for
   `reachable`, `traps` and `dead-ends`. What a child took is answered under
-  `:nested`, keyed by `:within`, and is not scored."
+  `:nested`, keyed by `:within`, and is not scored.
+
+  A COMPLETION TRANSITION IS SCORED TOO, and it had to be once one could BRANCH. While
+  a `:done` was a single unconditional target there was nothing to cover — the edge was
+  taken exactly when its state was entered — but a `:done` keyed by the child's final
+  state is a fork, and a fork no run took is precisely what this exists to name. It
+  fires no event, so it is never reported and is RECONSTRUCTED instead, which
+  :a-state-may-say-where-it-goes-when-it-completes says an auditor holding the shape
+  can do: a row says where the whole machine ended up, so a host it is no longer
+  sitting in has completed, by the branch that child's own final state names."
   (:require [robertluo.state-graph.check :as check]
             [robertluo.state-graph.drive :as drive]
             [robertluo.state-graph.shape :as shape]))
@@ -100,6 +109,38 @@
           [env]
           alternatives))
 
+(defn- entry-chain
+  "The completion edges an ENTRY-FIRED continuation took, walking from where an edge
+   landed to where the machine actually ended up — or nil where the walk does not get
+   there.
+
+   A state that completes on entry has no child, so it has ONE unconditional way out
+   and the walk is deterministic, which is the same argument :done-cycle rests on."
+  [conts to at]
+  (loop [a to acc []]
+    (cond
+      (= a at) acc
+      :else (if-let [c (first (filter (comp nil? :outcome) (conts a)))]
+              (recur (:to c) (conj acc [a nil (:to c)]))
+              nil))))
+
+(defn- travelled
+  "THE EDGES ONE REPORTED TRANSITION ACTUALLY CROSSED: the event's own, and every
+   COMPLETION that carried the machine on from where it landed.
+
+   A ROW SAYS WHERE THE MACHINE ENDED UP and not where the edge pointed — a state that
+   completes on entry is passed straight through inside the same step, and the
+   intermediate hops are deliberately not published. They are a PURE FUNCTION of the
+   shape and the state, so an auditor holding the shape can reconstruct them, and this
+   is the auditor: the edge is the declared target the chain from which reaches `to`."
+  [sh conts from event to]
+  (or (some (fn [t] (when-let [chain (entry-chain conts t to)]
+                      (into [[from event t]] chain)))
+            (for [x (shape/transitions sh)
+                  :when (and (= from (:from x)) (= event (:event x)))]
+              (:to x)))
+      [[from event to]]))
+
 (defn- driven!
   "Drive one shape to a standstill, telling `on` about every transition, and stop
   after `steps` turns whatever happens.
@@ -154,24 +195,46 @@
          nested (atom {})
          sh     (constructor env)
          seen   (atom #{(shape/initial-id sh)})
+         conts  (shape/continuations sh)
          on     (fn [{:keys [event from to within]}]
                   (if (seq within)
-                    (swap! nested update within (fnil inc 0))
-                    (do (swap! taken conj [from (:id event) to])
-                        (swap! seen into [from to]))))
+                    (do (swap! nested update within (fnil inc 0))
+                        ;; A CHILD FINISHING COMPLETES ITS HOST, and the row says so by
+                        ;; moving the OUTERMOST state: `from` is where the whole machine
+                        ;; was and `to` is where it is now. WHICH BRANCH was taken is
+                        ;; read off the TARGET, the child's own final state having been
+                        ;; dropped on the way out — which is exact wherever the branches
+                        ;; go different places, and that is what branching is for. Two
+                        ;; outcomes completing to ONE target are a merge, and this counts
+                        ;; both: the shape has made them indistinguishable in a history.
+                        (when (not= from to)
+                          (doseq [c (conts from) :when (= to (:to c))]
+                            (swap! taken conj [from (:outcome c) to]))
+                          (swap! seen into [from to])))
+                    (doseq [[a e b] (travelled sh conts from (:id event) to)]
+                      (swap! taken conj [a e b])
+                      (swap! seen into [a b]))))
          runs   (envs env alternatives)]
      (doseq [e runs]
        (driven! (constructor e) on steps))
-     (let [all       (mapv (juxt :from :event :to) (shape/transitions sh))
+     (let [done      (set (for [[from cs] conts, c cs] [from (:outcome c) (:to c)]))
+           all       (into (mapv (juxt :from :event :to) (shape/transitions sh)) done)
            reports   (set (keys (shape/reports sh)))
            joins     (set (for [{:keys [id verdict]} (check/driving sh)
                                 :when (= :join verdict)]
                             id))
-           why       (fn [[from event _]]
-                       (cond (not (reports event))  :no-report
-                             (joins from)           :join-order
-                             (not (@seen from))     :unvisited-state
-                             :else                  :gap))
+           why       (fn [[from event _ :as t]]
+                       (cond (not (@seen from)) :unvisited-state
+                             ;; A COMPLETION HAS NO EVENT AND IS STILL COVERABLE, so
+                             ;; it is asked about before :no-report — which is about an
+                             ;; event only the WORLD can supply, and arriving is not
+                             ;; something anybody supplies. Asked as MEMBERSHIP and not
+                             ;; by the source state, a nesting node's own edges being
+                             ;; its escape and perfectly ordinary events.
+                             (done t)              :gap
+                             (not (reports event)) :no-report
+                             (joins from)          :join-order
+                             :else                 :gap))
            uncovered (sort (remove @taken all))]
        {:of        (count all)
         :covered   (count (filter @taken all))

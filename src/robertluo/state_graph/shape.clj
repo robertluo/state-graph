@@ -70,21 +70,41 @@
    FIRST and only then to this node's own edges. The child's state lives under :sub, which
    the machinery writes and a handler may not.
 
+   :seed IS WHAT THE CHILD IS STARTED WITH — a map schema, projected off this node's own
+   value on the way in and handed to the child as its first state's data. It is :yield's
+   MIRROR: one carries parent -> child at entry, the other child -> parent at completion,
+   and a nesting that could only ever be told its job by the closure its shape was built
+   from is a nesting that cannot be re-entered with a different job.
+
    :done IS A COMPLETION TRANSITION — where this state goes when it COMPLETES, with no
    event, no handler and no patch. A state with no :machine completes ON ENTRY; one with a
    machine completes when that child reaches a final state. ONE RULE, and it is UML's: a
    simple state has no activity to finish, so finishing it is arriving.
 
+   IT MAY SAY WHERE EACH OUTCOME GOES. Given an Id it is one unconditional target for every
+   way the child can finish; given a MAP FROM THE CHILD'S FINAL STATE it is one target per
+   outcome, each with a :yield of its own:
+
+     {:done {:implemented {:to :working :yield [:map [:code Code]]}
+             :abandoned   {:to :refused}}}
+
+   That is still not a guard. What it reads is the STRUCTURAL fact :done already reads —
+   which state the child is in — one notch finer, over a finite set known at construction,
+   dispatched by a map lookup on an id. No schema, no predicate, nothing to prove disjoint.
+
    :yield IS WHAT A FINISHED CHILD HANDS UP — a map schema, projected off the child's own
    final state and merged in before the continuation lands. It needs a :machine to harvest
    from and a :done to harvest ON, because completing is the only moment the child is
    GUARANTEED final and so the only moment the schema is a guarantee rather than a hope.
-   An escape by an ordinary event is still an ABORT and still yields nothing."
+   An escape by an ordinary event is still an ABORT and still yields nothing. Beside a
+   per-outcome :done it belongs to the outcome and not here."
   [:map [::kind [:= :state]] [:id Id] [:schema MapSchema]
         [:initial {:optional true} :boolean]
         [:final {:optional true} :boolean]
         [:machine {:optional true} Shape]
-        [:done {:optional true} Id]
+        [:seed {:optional true} MapSchema]
+        [:done {:optional true} [:or Id [:map-of Id [:map [:to Id]
+                                                          [:yield {:optional true} MapSchema]]]]]
         [:yield {:optional true} MapSchema]])
 
 (def EventDef
@@ -132,7 +152,11 @@
 
    A STATE MAY SAY WHERE IT GOES WHEN IT COMPLETES, with {:done <id>} — no event and no
    handler, and for a node nesting a machine, {:yield <a map schema>} to harvest the child's
-   result on the way. See StateDef."
+   result on the way, or a {:done {<the child's final state> {:to ... :yield ...}}} saying
+   where each OUTCOME goes.
+
+   A NESTING NODE MAY SAY WHAT ITS CHILD STARTS WITH, using {:seed <a map schema>} — the
+   mirror of :yield, projected off this node's own value on the way in. See StateDef."
   {:malli/schema [:function [:=> [:cat Id MapSchema] StateDef]
                             [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]}
   ([id schema] (state id schema nil))
@@ -413,6 +437,27 @@
   [t]
   [(:from t) (:event t) (:to t)])
 
+(defn completions
+  "The COMPLETION TRANSITIONS a state definition declares, as a seq of
+   {:outcome <the child's final state, or nil for any> :to <id> :yield <schema or nil>}.
+
+   ONE READING OF `:done` AND `:yield`, so the constructor, the referential checks and the
+   drawing cannot come to disagree about what a spelling means. A bare {:done <id>} answers
+   ONE entry whose :outcome is nil — every way the child can finish goes there — and a map
+   answers one entry per outcome. A state declaring neither answers nothing.
+
+   IT TAKES A PART AND NOT A BUILT SHAPE, because `problems` has to answer about parts that
+   may never become one. `continuations` is the same reading off the graph."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [s]
+  (let [done (:done s)]
+    (cond
+      (map? done)  (vec (for [outcome (sort (keys done))
+                              :let [{:keys [to yield]} (get done outcome)]]
+                          {:outcome outcome :to to :yield yield}))
+      (some? done) [{:to done :yield (:yield s)}]
+      :else        [])))
+
 (defn- on-entry?
   "Whether this state COMPLETES ON ENTRY — the only moment at which a :done continuation
    fires with no event having arrived.
@@ -520,21 +565,48 @@
             :when (and (nil? combine) commutes?)]
         {:problem :law-without-combine :id (:id p) :key k})
       ;; 7 — a nested machine must be able to START. Entering a node with one enters that
-      ;; child at its own initial state with NO data, so a child whose first state insists
-      ;; on some is a nesting that could never begin. Answerable from the parts alone,
-      ;; which is why it is here and not in the structural checks.
+      ;; child at its own initial state with WHATEVER THE NODE SOWS, which is nothing at all
+      ;; unless it declares a :seed — so a child whose first state insists on data a
+      ;; seedless node cannot give it is a nesting that could never begin. Answerable from
+      ;; the parts alone, which is why it is here and not in the structural checks.
+      ;;   A SEEDED NODE IS NOT ANSWERABLE HERE and is deliberately left to `check/seeds`:
+      ;;   whether one map schema guarantees another is SUBSUMPTION, which is the structural
+      ;;   checker's question and is answered there in both directions — can this node
+      ;;   provide the seed, and will the child take it.
       (for [s state
             :let [child (:machine s)]
-            :when (and child (uber/ubergraph? child))
+            :when (and child (uber/ubergraph? child) (not (:seed s)))
             :let [id (initial-id child)]
             :when (not (m/validate (enter-schema child id) {:id id}))]
         {:problem :machine-cannot-start :id (:id s) :initial id})
+      ;; A :seed needs something to sow INTO, exactly as a :yield needs something to
+      ;; harvest FROM. Without a machine it is a declaration nothing ever reads.
+      (for [s state :when (and (:seed s) (not (:machine s)))]
+        {:problem :seed-without-machine :id (:id s)})
       ;; 8 — A COMPLETION TRANSITION, and what it may not be. The STRUCTURAL half of this
       ;; costs nothing at all: :done is a real EDGE, so `reachable`, `dead-ends`,
       ;; `finishable` and `traps` see it without being told. What is left is what only the
       ;; parts can answer.
-      (for [s state :when (and (:done s) (not (state-ids (:done s))))]
-        {:problem :unknown-state :in [(:id s) nil (:done s)] :key :done :id (:done s)})
+      (for [s state, c (completions s) :when (not (state-ids (:to c)))]
+        {:problem :unknown-state :in [(:id s) nil (:to c)] :key :done :id (:to c)})
+      ;; AN OUTCOME IS ONE OF THE CHILD'S FINAL STATES and there is nothing else it could
+      ;; be: the map is keyed by where the child STOPPED, so a key naming anything else is
+      ;; a branch that can never be taken. Both halves are answerable from the parts, the
+      ;; child being a built shape already.
+      (for [s state :when (map? (:done s))
+            :let [child (:machine s)]
+            :when (not (and child (uber/ubergraph? child)))]
+        {:problem :outcome-without-machine :id (:id s)})
+      (for [s state :when (and (map? (:done s))
+                               (:machine s) (uber/ubergraph? (:machine s)))
+            outcome (sort (keys (:done s)))
+            :when (not (final? (:machine s) outcome))]
+        {:problem :unknown-outcome :id (:id s) :outcome outcome})
+      ;; A per-outcome :done carries each branch's own :yield, so one beside it is a
+      ;; declaration nobody reads — and the two spellings disagreeing about what is
+      ;; harvested is exactly the drift `completions` exists to make impossible.
+      (for [s state :when (and (:yield s) (map? (:done s)))]
+        {:problem :yield-with-outcomes :id (:id s)})
       ;; Completing and being FINAL are contradictory: a final state is where a machine
       ;; stops and :done says where it goes next.
       (for [s state :when (and (:done s) (:final s))]
@@ -559,7 +631,15 @@
       ;; child needs events to finish is legal and is not reported — the events are what
       ;; break it.
       (let [chain (into {} (for [s state :when (and (:done s) (on-entry? s))]
-                             [(:id s) (:done s)]))]
+                             ;; WHICH continuation an entry-completing state takes is
+                             ;; decided: it has no machine, or its child's first state is
+                             ;; already final and names the outcome. So the relation stays
+                             ;; functional and a cycle in it is still a proof.
+                             [(:id s) (let [child (:machine s)]
+                                        (:to (first (filter #(or (nil? (:outcome %))
+                                                                 (= (:outcome %)
+                                                                    (and child (initial-id child))))
+                                                            (completions s)))))]))]
         (for [id (sort (keys chain))
               :when (loop [at (chain id) seen #{}]
                       (cond (nil? at) false
@@ -570,7 +650,7 @@
       ;; 9 — :yield needs something to harvest FROM and a moment to harvest ON. Without
       ;; the second it is a declaration nothing ever reads, and this library does not keep
       ;; those: completion is the only moment a child is guaranteed final.
-      (for [s state :when (and (:yield s) (not (:machine s)))]
+      (for [s state, c (completions s) :when (and (:yield c) (not (:machine s)))]
         {:problem :yield-without-machine :id (:id s)})
       (for [s state :when (and (:yield s) (not (:done s)))]
         {:problem :yield-without-done :id (:id s)})))))
@@ -593,7 +673,8 @@
         catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :sees :report :reads]))) event)]
     (-> (uber/multidigraph)
         (uber/add-nodes-with-attrs*
-         (for [s state] [(:id s) (select-keys s [:schema :initial :final :machine])]))
+         (for [s state] [(:id s) (cond-> (select-keys s [:schema :initial :final :machine])
+                                   (:seed s) (assoc :seed (m/schema (:seed s))))]))
         (uber/add-directed-edges*
          (for [t transition]
            [(:from t) (:to t)
@@ -608,10 +689,15 @@
         ;; IT CARRIES NO :event, and that absence is the whole distinction: `transitions`
         ;; reads it to leave these out, because an edge fired by an EVENT and an edge fired
         ;; by ARRIVING are different things to everything above here.
+        ;; ONE EDGE PER OUTCOME, which is what makes the per-outcome form cost the
+        ;; traversals nothing either: two ways for a child to finish are two arrows, and
+        ;; `reachable`, `dead-ends`, `finishable` and `traps` walk them without being told
+        ;; that a state can complete in more than one way.
         (uber/add-directed-edges*
-         (for [s state :when (:done s)]
-           [(:id s) (:done s) (cond-> {:done true}
-                                (:yield s) (assoc :yield (m/schema (:yield s))))])))))
+         (for [s state, c (completions s)]
+           [(:id s) (:to c) (cond-> {:done true}
+                              (:outcome c) (assoc :outcome (:outcome c))
+                              (:yield c) (assoc :yield (m/schema (:yield c))))])))))
 
 ;;; ------------------------------------------------------------------- reading
 
@@ -732,10 +818,15 @@
    (vec (sort-by pr-str
                  (for [id (states sh)
                        :let [a (uber/attrs sh id)]]
-                   (plain [id {:schema (m/form (:schema a))
-                               :initial (boolean (:initial a))
-                               :final (boolean (:final a))
-                               :machine (some-> (:machine a) fingerprint)}]))))
+                   (plain [id (cond-> {:schema (m/form (:schema a))
+                                       :initial (boolean (:initial a))
+                                       :final (boolean (:final a))
+                                       :machine (some-> (:machine a) fingerprint)}
+                                ;; ADDED ONLY WHERE THERE IS ONE, so that a shape which
+                                ;; sows nothing fingerprints exactly as it did before seeds
+                                ;; existed. A transcript written yesterday still names the
+                                ;; machine that wrote it.
+                                (:seed a) (assoc :seed (m/form (:seed a))))]))))
    :events
    (vec (sort-by pr-str
                  (for [t (transitions sh)]
@@ -749,8 +840,9 @@
                             :report (some? (:report t))}]))))
    :done
    (vec (sort-by pr-str
-                 (for [[from c] (continuations sh)]
-                   (plain [from (:to c) {:yield (some-> (:yield c) m/form)}]))))})
+                 (for [[from cs] (continuations sh), c cs]
+                   (plain [from (:to c) (cond-> {:yield (some-> (:yield c) m/form)}
+                                          (:outcome c) (assoc :outcome (:outcome c)))]))))})
 
 (defn fingerprint
   "A stable id for the SHAPE of this machine: SHA-256 over `canonical`, as hex.
@@ -776,23 +868,40 @@
     (apply str (map #(format "%02x" %) bs))))
 
 (defn continuations
-  "{from -> {:to <id>, :yield <schema>}} for every COMPLETION TRANSITION — where a state
-   goes when it COMPLETES, with no event and no handler. Empty for a shape that declares
-   none, which is every shape written before this existed.
+  "{from -> [{:outcome <id or absent>, :to <id>, :yield <schema>} ...]} for every COMPLETION
+   TRANSITION — where a state goes when it COMPLETES, with no event and no handler. Empty
+   for a shape that declares none, which is every shape written before this existed.
 
-   A MAP AND NOT A SEQ, because a state declares at most ONE. :done is a single target and
-   unconditional, so there is no ambiguity to prove away and determinism costs nothing
-   here — which is the difference between this and a guard.
+   A VECTOR PER STATE, because a state may say where each OUTCOME goes: an entry with no
+   :outcome is the unconditional form and there is then exactly one of them, and an entry
+   WITH one is taken when the child stopped in that final state. Either way it is a lookup
+   on an id and never a search — nothing is guarded, so there is still no ambiguity to prove
+   away, which is the difference between this and a guard.
 
-   THE EDGE IS THE ONLY RECORD OF IT. `state` takes :done and :yield, the constructor turns
-   them into an edge, and nothing is left behind on the node: two places saying one thing is
-   how a shape drifts from itself."
-  {:malli/schema [:=> [:cat Shape] [:map-of Id :map]]}
+   ORDERED, because ubergraph keeps out-edges in a SET and a runtime that depended on
+   iteration order would not be one.
+
+   THE EDGE IS THE ONLY RECORD OF IT. `state` takes :done, :yield and :seed, the constructor
+   turns the first two into edges, and nothing about them is left behind on the node: two
+   places saying one thing is how a shape drifts from itself."
+  {:malli/schema [:=> [:cat Shape] [:map-of Id [:vector :map]]]}
   [shape]
-  (into {} (for [e (uber/edges shape)
-                 :when (uber/attr shape e :done)
-                 :let [y (uber/attr shape e :yield)]]
-             [(uber/src e) (cond-> {:to (uber/dest e)} y (assoc :yield y))])))
+  (->> (for [e (uber/edges shape)
+             :when (uber/attr shape e :done)
+             :let [y (uber/attr shape e :yield)
+                   o (uber/attr shape e :outcome)]]
+         [(uber/src e) (cond-> {:to (uber/dest e)} o (assoc :outcome o) y (assoc :yield y))])
+       (reduce (fn [m [from c]] (update m from (fnil conj []) c)) {})
+       (into {} (map (fn [[from cs]] [from (vec (sort-by pr-str cs))])))))
+
+(defn seed
+  "The map schema a state sows its nested machine with, or nil where it sows nothing.
+
+   THE MIRROR OF `continuations`' :yield, and read off the NODE where that is read off the
+   edge — a seed is about entering this state, which is not a transition anywhere."
+  {:malli/schema [:=> [:cat Shape Id] [:maybe MapSchema]]}
+  [shape id]
+  (uber/attr shape id :seed))
 
 (defn combines
   "{k {:combine f :commutes? bool :schema S}} for a NODE — what its own schema declares

@@ -164,3 +164,59 @@
                      (sg/transition :going :again :going)))]
       (is (= [] (:gaps (sut/covering forever {} {} {:steps 5})))
           "five turns and it stops asking, having taken both edges"))))
+
+;;; -------------------------------------------------- a completion is scored too
+
+(defn- outcomes
+  "A host whose child can finish TWO WAYS, and drivable — one event carrying a
+  verdict and two guarded edges, which is the only shape a crank can take a fork by.
+  `:work` is the seam, so both ways are one `constantly` apart."
+  [env]
+  (let [worker (shape/shape
+                (shape/state :idle  [:map [:job :string]] {:initial true})
+                (shape/state :done  [:map [:job :string] [:answer :string]] {:final true})
+                (shape/state :stuck [:map [:job :string]] {:final true})
+                (shape/event :tried [:map [:outcome [:enum :ok :stuck]]
+                                     [:answer {:optional true} :string]]
+                             (fn [e] (select-keys e [:answer])) nil
+                             {:reads  [:map [:job :string]]
+                              :report (fn [{:keys [job]}] ((:work env) job))})
+                (shape/transition :idle :tried :done  {:when [:map [:outcome [:= :ok]]]})
+                (shape/transition :idle :tried :stuck {:when [:map [:outcome [:= :stuck]]]}))]
+    (shape/shape
+     (shape/state :start [:map] {:initial true})
+     (shape/state :working [:map [:job :string] [:answer {:optional true} :string]]
+                  {:machine worker
+                   :seed    [:map [:job :string]]
+                   :done    {:done  {:to :kept :yield [:map [:answer :string]]}
+                             :stuck {:to :lost}}})
+     (shape/state :kept [:map [:job :string] [:answer :string]] {:final true})
+     (shape/state :lost [:map [:job :string] [:answer {:optional true} :string]] {:final true})
+     (shape/event :begin [:map [:job :string]]
+                  {:reads [:map] :report (fn [_] {:job "a job"})})
+     (shape/transition :start :begin :working))))
+
+(deftest a-branching-completion-is-covered-or-it-is-a-GAP
+  ;; IT HAD TO BE SCORED ONCE ONE COULD BRANCH. While a :done was a single unconditional
+  ;; target there was nothing to cover — the edge was taken exactly when its state was
+  ;; entered — but a :done keyed by the child's final state is a FORK, and a fork no run
+  ;; took is precisely what this namespace exists to name. It fires no event, so it is
+  ;; never reported and is RECONSTRUCTED: a row says where the whole machine ended up,
+  ;; so a host it is no longer sitting in has completed, by the branch that child's own
+  ;; final state names.
+  (let [ok    (constantly {:outcome :ok :answer "v"})
+        stuck (constantly {:outcome :stuck})
+        both  (sut/covering outcomes {} {:work [ok stuck]})
+        one   (sut/covering outcomes {:work ok} {})]
+    (testing "the two completions are IN the count, beside the one event edge"
+      (is (= 3 (:of both)))
+      (is (= 3 (:covered both)))
+      (is (= [] (:gaps both))))
+    (testing "and the branch no run took is a GAP — not :no-report, which is about an
+              event only the WORLD can supply, and ARRIVING is not something anybody
+              supplies"
+      (is (= [[:working :stuck :lost]] (:gaps one)))
+      (is (= 2 (:covered one))))
+    (testing "the state only that branch reaches was never entered, and says so"
+      (is (contains? (:visited both) :lost))
+      (is (not (contains? (:visited one) :lost))))))

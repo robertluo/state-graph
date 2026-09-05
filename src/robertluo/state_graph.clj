@@ -6,7 +6,8 @@
    and `dot`, which is what having a graph buys; then RUN it through one of three doors.
 
    A NODE MAY NEST A WHOLE MACHINE — {:machine sh} on a state — which is how a big problem
-   stays readable. See `state`.
+   stays readable. It is SOWN with {:seed} on the way in and HARVESTED with {:yield} on the
+   way out, and {:done} may say where each of its OUTCOMES goes. See `state`.
 
    WHAT ANYTHING INSIDE THE MACHINE MAY SEE IS DECLARED, never automatic. A node holds exactly
    the keys its schema names, and a handler reads only through a view its event declares —
@@ -119,6 +120,11 @@
    on the way out, and visible on every result. It is an ordinary shape, so it is checked
    and drawn as one.
 
+   {:seed <a map schema>} IS WHAT THAT CHILD IS STARTED WITH, projected off this node's own
+   value on the way in — :yield's MIRROR, and the reason a nesting node can be RE-ENTERED
+   with a different job. Without one the child starts with nothing at all, so what it was
+   doing could only come from the closure its shape was built from.
+
    {:done <id>} IS A COMPLETION TRANSITION — where this state goes when it COMPLETES, with
    no event, no handler and no patch. A state with no :machine completes ON ENTRY, so it is
    passed straight through; one WITH a machine completes when that child reaches a final
@@ -126,17 +132,25 @@
    rather than aborting it. One rule, and it is UML's: a simple state has no activity to
    finish, so finishing it is arriving.
 
-   It is not a guard and not an event. There is one target and it is unconditional, so
-   determinism is untouched, and a CYCLE among states that complete on entry is refused as
-   :done-cycle — an unconditional relation is a plain graph, so a cycle in it PROVES the
-   machine would continue for ever rather than merely suggesting it might. Two states may
-   complete to ONE target, which is a MERGE and not a join: one arrival continues.
+   IT MAY SAY WHERE EACH OUTCOME GOES. Given an id it is one target for every way the child
+   can finish; given a MAP FROM THE CHILD'S FINAL STATE it is one target per outcome, each
+   with a :yield of its own — {:done {:paid {:to :shipping :yield [:map [:receipt :string]]}
+   :refused {:to :cancelled}}}.
+
+   It is not a guard and not an event. What it reads is the STRUCTURAL fact it always read —
+   which state the child is in — over a set that is finite and known at construction, so the
+   dispatch is a map lookup on an id and there is no schema to prove disjoint. A CYCLE among
+   states that complete on entry is refused as :done-cycle — an unconditional relation is a
+   plain graph, so a cycle in it PROVES the machine would continue for ever rather than
+   merely suggesting it might. Two states may complete to ONE target, which is a MERGE and
+   not a join: one arrival continues.
 
    {:yield <a map schema>} IS WHAT A FINISHED CHILD HANDS UP, harvested off the child's own
    final state and merged in before the continuation lands. It needs a :machine and a :done:
    completing is the only moment the child is GUARANTEED final, and so the only moment the
    schema is a guarantee rather than a hope. An escape by an ordinary event is still an
-   ABORT and still yields nothing."
+   ABORT and still yields nothing. Beside a per-outcome :done it belongs to the outcome —
+   and is then checked against THAT final state alone, which is sharper rather than looser."
   ([id schema] (shape/state id schema))
   ([id schema opts] (shape/state id schema opts)))
 

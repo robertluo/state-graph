@@ -231,9 +231,10 @@
             :verdict (if-let [p (produced sh t)]
                        (admits (shape/enter-schema sh (:to t)) p)
                        :undeclared)))
-   (for [[from c] (shape/continuations sh)]
-     {:from from :to (:to c) :done true
-      :verdict (admits (shape/enter-schema sh (:to c)) (continued sh from c))})
+   (for [[from cs] (shape/continuations sh), c cs]
+     (cond-> {:from from :to (:to c) :done true
+              :verdict (admits (shape/enter-schema sh (:to c)) (continued sh from c))}
+       (:outcome c) (assoc :outcome (:outcome c))))
    (inside sh subsumption)))
 
 (defn views
@@ -291,8 +292,12 @@
    state as what is PRODUCED; `views` was the second. Three structural checks off one
    subsumption function is the argument for having written it.
 
-   EVERY FINAL STATE AND NOT JUST ONE, because a child may finish in any of them, and a
-   yield that rests on only some is a yield that is sometimes not there.
+   EVERY FINAL STATE AND NOT JUST ONE for an UNCONDITIONAL completion, because a child may
+   finish in any of them and a yield that rests on only some is a yield that is sometimes
+   not there. A PER-OUTCOME completion is asked about its OWN final state and no other,
+   which is not a relaxation but the same rule read where it applies: that branch is taken
+   only when the child stopped there, so that is the only state the yield has to rest on.
+   Naming the outcome is what makes the check sharper rather than looser.
 
    SOUND ONLY BECAUSE A YIELD IS HARVESTED AT COMPLETION. Were it taken on an ordinary
    escape the child could be in ANY state, so :no would prove nothing and this would condemn
@@ -301,13 +306,48 @@
   {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
   [sh]
   (concat
-   (for [[from {:keys [yield]}] (shape/continuations sh)
+   (for [[from cs] (shape/continuations sh)
+         {:keys [yield outcome]} cs
          :when yield
          :let [child (shape/machine sh from)]
-         id (sort (filter #(shape/final? child %) (shape/states child)))]
+         id (if outcome
+              [outcome]
+              (sort (filter #(shape/final? child %) (shape/states child))))]
      {:from from :final id
       :verdict (admits yield (shape/enter-schema child id))})
    (inside sh yields)))
+
+(defn seeds
+  "Every declared :seed and whether it can actually be sown — TWO verdicts per seeded node,
+   as plain data, because a seed is a crossing with two sides and either can be wrong.
+
+   :provides  can this node GIVE the seed? `admits` with the seed as the TARGET and the
+              node's own schema as what is produced — the same question `views` asks of a
+              :sees and `readings` of a :reads, which is `admits` for the fifth and sixth
+              time and is the argument for having written it once.
+   :accepts   will the child TAKE it? `admits` with the child's first state as the target
+              and the seed, plus the :id the machinery writes, as what is produced.
+
+   IT IS `yields` READ BACKWARDS, and deliberately shaped like it: one carries parent ->
+   child at entry and the other child -> parent at completion, so the checks are mirror
+   images and neither needed machinery the other did not.
+
+   SOUND FOR THE REASON EVERY READ CHECK HERE IS SOUND: a node holds exactly what it
+   declares, and the seed is taken off the node's own PROJECTED value — so :no is a proof.
+   A node that only OPTIONALLY has the key is :no, a child handed a seed being no better
+   off with a maybe than a handler is."
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  [sh]
+  (concat
+   (for [id (sort (shape/states sh))
+         :let [seed (shape/seed sh id), child (shape/machine sh id)]
+         :when (and seed child)
+         :let [first-id (shape/initial-id child)]]
+     {:from id :initial first-id
+      :provides (admits seed (shape/enter-schema sh id))
+      :accepts (admits (shape/enter-schema child first-id)
+                       (mu/assoc seed :id [:= first-id]))})
+   (inside sh seeds)))
 
 (defn- domains
   "{k #{v}} for every key an event INSISTS on whose values are FINITE — the only keys a
@@ -789,6 +829,15 @@
           ;; COMPLETION — the one moment the child is guaranteed to be in a final state.
           (for [{:keys [verdict] :as v} (own (yields sh)) :when (= :no verdict)]
             (-> v (dissoc :verdict) (assoc :problem :yield-unavailable)))
+          ;; AND THE SAME CROSSING READ THE OTHER WAY. A parent asking to sow what it does
+          ;; not hold, and a child that will not take what it is sown — two faults off one
+          ;; declaration, because a seed has two sides and either can be wrong. The second
+          ;; is `:machine-cannot-start` proven where the parts alone could not prove it:
+          ;; a seedless node is answered referentially, a seeded one needs subsumption.
+          (for [{:keys [provides] :as v} (own (seeds sh)) :when (= :no provides)]
+            {:problem :seed-unavailable :from (:from v)})
+          (for [{:keys [accepts] :as v} (own (seeds sh)) :when (= :no accepts)]
+            {:problem :seed-refused :from (:from v) :initial (:initial v)})
           ;; A NESTED MACHINE IS CHECKED AS AN ORDINARY SHAPE, which is most of why
           ;; nesting cost so little: every check above is about one graph, and a child is
           ;; one. :within names the path of nodes it was found under, so a fault three
@@ -852,17 +901,23 @@
 (defn- edge-label
   "What a person reads on an arrow: Harel's own event [guard].
 
-   A COMPLETION TRANSITION IS UNLABELLED, which is UML's own notation for it and is honest
-   here for a better reason — there is no event to name, arriving being the whole of its
-   cause, and a :yield is about the DATA rather than about where the machine goes. The
-   label test set by :a-node-is-labelled-by-its-id is whether a thing is STRUCTURAL, and a
-   yield is not. `labelled` draws these DASHED, because an unlabelled solid arrow among
-   labelled ones reads as a bug rather than as a convention."
+   AN UNCONDITIONAL COMPLETION TRANSITION IS UNLABELLED, which is UML's own notation for it
+   and is honest here for a better reason — there is no event to name, arriving being the
+   whole of its cause, and a :yield is about the DATA rather than about where the machine
+   goes. The label test set by :a-node-is-labelled-by-its-id is whether a thing is
+   STRUCTURAL, and a yield is not. `labelled` draws these DASHED, because an unlabelled
+   solid arrow among labelled ones reads as a bug rather than as a convention.
+
+   A PER-OUTCOME ONE IS LABELLED WITH THE CHILD'S FINAL STATE, and by that same test it has
+   to be: two dashed arrows leaving one node are two different structural facts, and a
+   drawing that cannot tell them apart is showing the reader a machine that does not exist.
+   What it names is a NODE OF THE CHILD, so it is written the way a guard is — in brackets,
+   the condition on an otherwise causeless arrow."
   [sh e]
   (if-let [ev (uber/attr sh e :event)]
     (let [w (uber/attr sh e :when)]
       (str (name ev) (when w (str " [" (guard-label w) "]"))))
-    ""))
+    (if-let [o (uber/attr sh e :outcome)] (str "[" (name o) "]") "")))
 
 (defn labelled
   "The shape with its attributes replaced by things a person can read. ubergraph's own

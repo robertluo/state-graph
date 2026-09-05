@@ -252,7 +252,13 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     the target's schema and a loud miss, so anything that goes wrong is a defect and stopping on it
     beats a tally. NOT ON THE FACADE, for the reason no coverage check is. ONE MACHINE, THE OUTERMOST,
     for the reason :a-published-check-answers-about-the-machine gives for reachable and traps: two
-    machines may name a state :done. See DESIGN.md :cover-the-graph-by-running-it."
+    machines may name a state :done.
+    A COMPLETION TRANSITION IS SCORED TOO, 2026-09-05, and it had to be once one could BRANCH: a
+    :done keyed by the child's final state is a fork, and a fork no run took is what this exists to
+    name. It fires no event, so it is RECONSTRUCTED — a row says where the whole machine ended up, so
+    a host it is no longer sitting in has completed, and WHICH branch is read off the target. Never
+    :no-report: that is about an event only the WORLD can supply, and ARRIVING is not something
+    anybody supplies. See DESIGN.md :cover-the-graph-by-running-it."
 
    :two-kinds-of-check-and-two-places-for-them
    "shape/problems is REFERENTIAL — answerable from the PARTS alone, so it runs inside the constructor
@@ -430,13 +436,22 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
    :a-state-may-say-where-it-goes-when-it-completes
    "{:done <id>} on a state, plus {:yield <a map schema>} where it nests a machine. ONE RULE, UML'S: a
     state completes when it HAS NOTHING LEFT TO DO, so a plain state completes ON ENTRY and a nesting
-    one when its child reaches a final state — and that unification is why this is small. IT IS NOT A
-    GUARD: one unconditional target, so compile stays a lookup and a CYCLE among entry-completing
-    states is a PROVEN infinite loop, refused referentially. :yield IS HARVESTED AT COMPLETION ONLY,
-    which is what makes the check SOUND — completing is the only moment the child is guaranteed final.
-    AN ESCAPE IS STILL AN ABORT AND YIELDS NOTHING. IT IS A REAL EDGE AND NOT A NODE ATTRIBUTE, which
-    is why `reachable`, `dead-ends`, `finishable` and `traps` needed not one line. Drawn dashed and
-    UNLABELLED. NOT TAKEN: a conditional completion, and a node still holds ONE child."
+    one when its child reaches a final state — and that unification is why this is small. :yield IS
+    HARVESTED AT COMPLETION ONLY, which is what makes the check SOUND — completing is the only moment
+    the child is guaranteed final. AN ESCAPE IS STILL AN ABORT AND YIELDS NOTHING. IT IS A REAL EDGE
+    AND NOT A NODE ATTRIBUTE, which is why `reachable`, `dead-ends`, `finishable` and `traps` needed
+    not one line.
+    IT MAY SAY WHERE EACH OUTCOME GOES, 2026-09-05: {:done {<the child's final state> {:to <id>
+    :yield <schema>}}}, one edge per outcome, the bare form unchanged and fingerprinting as before.
+    STILL NOT A GUARD — it reads the STRUCTURAL fact :done already reads, over a set FINITE AND KNOWN
+    AT CONSTRUCTION, dispatched by a map lookup on an id, so compile stays a lookup and nothing is
+    proved disjoint. A CYCLE among entry-completing states is still a PROVEN infinite loop, refused
+    referentially. It makes `yields` SHARPER, a per-outcome yield resting on its OWN final state and
+    no other. Drawn dashed, UNLABELLED when unconditional and `[<the child's final state>]` when not
+    — two dashed arrows out of one node are two structural facts. New faults: :unknown-outcome,
+    :outcome-without-machine, :yield-with-outcomes.
+    NOT TAKEN: a completion on a condition over DATA, which is refused on DECIDABILITY and is a
+    different question — see :open-questions. A node still holds ONE child."
 
    :parallel-is-across-instances
    "`Automatically parallel` means ACROSS INSTANCES and nothing else. Orthogonal regions inside one
@@ -595,10 +610,17 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     constrains HANDLERS — a child's step belongs to the COMPILER. INNER FIRST, so the parent's edges
     are the ESCAPE and THE CHILD'S OWN VOCABULARY DECIDES who handles an event. A FINISHED CHILD STOPS
     COMPETING, which is what made nesting cost the design nothing — v1's constraints turned out to give
-    correct hierarchical semantics. :sub IS MACHINERY'S: seeded, DROPPED on leaving, RESTARTED on
-    re-entry. A CHILD MUST BE ABLE TO START, checked referentially. The checks RECURSE FOR FREE, faults
-    carrying :within as a PATH. AN ESCAPE IS UNCONDITIONAL and abort stayed expressible; {:done} is a
-    SECOND way out that WAITS."
+    correct hierarchical semantics. :sub IS MACHINERY'S: sown, DROPPED on leaving, RESTARTED on
+    re-entry. The checks RECURSE FOR FREE, faults carrying :within as a PATH. AN ESCAPE IS
+    UNCONDITIONAL and abort stayed expressible; {:done} is a SECOND way out that WAITS.
+    A NODE MAY SOW ITS CHILD, {:seed <a map schema>}, 2026-09-05, and it is :yield'S MIRROR — parent
+    -> child at ENTRY where that is child -> parent at COMPLETION. WITHOUT IT A NESTED MACHINE COULD
+    ONLY BE TOLD ITS JOB BY THE CLOSURE ITS SHAPE WAS BUILT FROM, so a host could not RE-ENTER it with
+    a different job, which is what a loop over a child machine is. Sown off the PROJECTED value, which
+    is what keeps `seeds` sound — a node holds what it declares. `seeds` is `admits` in BOTH
+    directions, :provides and :accepts, reported as :seed-unavailable and :seed-refused; the
+    referential :machine-cannot-start stays for the seedless case. `phases` lost its precomputed
+    :first — a child's first state is a function of the RUN now."
 
    :a-node-is-labelled-by-its-id
    "Labels are the name and the structural markers — ▸ initial, ◼ final, ⊞ n states for nesting, a
@@ -695,8 +717,12 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   ;; question left in the list is a question that gets asked again.
   ["MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? Three wants knock on this door — `all n
     reports are in`, `k branches have arrived`, `still under budget` — and each is a COUNT or a
-    COMPARISON over what the state holds, so each is a guard over the state. THE LINE ALREADY DRAWN is
-    that the shape may read a STRUCTURAL fact to decide COMPLETION, never to decide WHICH WAY. ONE OF
+    COMPARISON over what the state holds, so each is a guard over the state. NARROWED 2026-09-05 AND
+    STILL OPEN: a :done keyed by the child's FINAL STATE was built, and that is NOT this question
+    answered — it is a case this question never contemplated, the fact being STRUCTURAL and the set
+    finite and known at construction. So WHICH WAY is now decided by a structural fact and still never
+    by a data one. THE LINE ALREADY DRAWN is that the shape may read a STRUCTURAL fact to decide
+    COMPLETION, never a DATA one to decide anything. ONE OF
     THE THREE NEEDED NO DOOR: a retry budget is a NUMERIC BOUND on a count the driver reports, and
     lives in the shape today. THE OBSTRUCTION IS DECIDABILITY — `(= expected (count reviews))` is a
     relation between two keys that no malli schema expresses, so it could only be a CLOSURE, and a

@@ -197,6 +197,31 @@ under `:nested` by `:within` and are not scored.
 edge — but exploration is exactly where you find out that yours is not, and hanging the suite is
 a poor way to report an infinite loop.
 
+**A completion transition is scored too**, 2026-09-05, and it had to be once one could branch.
+While a `:done` was a single unconditional target there was nothing to cover — the edge was taken
+exactly when its state was entered — but a `:done` keyed by the child's final state is a FORK, and
+a fork no run took is precisely what this exists to name. Leaving it out would have been the
+quieter version of the mistake that prompted the whole change: a tool blind to a branch tempts you
+to weaken the test until it matches the tool.
+
+**It fires no event, so it is reconstructed.** `:a-state-may-say-where-it-goes-when-it-completes`
+says an auditor holding the shape can do exactly this, the intermediate hops being a pure function
+of the shape and the state. A row says where the whole machine ENDED UP, so a host it is no longer
+sitting in has completed; WHICH branch is read off the target. Exact wherever the branches go
+different places, which is what branching is for — two outcomes completing to ONE target are a
+merge this counts both of, the shape having made them indistinguishable in a history.
+
+**And an edge may land somewhere that carries on**, with no child in it at all. `:to` in a row is
+where the machine ended up and not where the edge pointed, so `travelled` walks the declared
+targets and takes the one whose entry-fired chain reaches it. That was a LATENT inaccuracy before
+outcomes existed — an edge into a state that completes on entry scored as uncovered — and no
+fixture had one.
+
+**A completion is never `:no-report`**, and the ordering of `why` says so: that reason is about an
+event only the WORLD can supply, and ARRIVING is not something anybody supplies. Asked as
+membership in the completion set rather than by the source state, a nesting node's own edges being
+its escape and perfectly ordinary events.
+
 
 ## :two-kinds-of-check-and-two-places-for-them
 
@@ -689,10 +714,43 @@ one thing genuinely missing that this file had already named twice and not opene
   through by the reduction too.
 - THE DRAWING IS UML'S: dashed and UNLABELLED. There is no event to name, and a :yield is about
   the DATA rather than about where the machine goes.
-- WHAT IS NOT TAKEN. A CONDITIONAL COMPLETION is a guard over the STATE and stays refused, see
-  :open-questions. A NODE STILL HOLDS ONE CHILD, so a parent waiting on SEVERAL independent
-  children is still orthogonal regions and still out. AND FAN-OUT IS STILL STATIC in the shape:
-  the width is a runtime value, and a graph shows structure while a count is data.
+- :done MAY SAY WHERE EACH OUTCOME GOES, ADDED 2026-09-05: given an id it is one target for every
+  way the child can finish, and given a MAP FROM THE CHILD'S FINAL STATE it is one target per
+  outcome, each carrying a :yield of its own. The bare form is unchanged and means what it always
+  meant, so no shape written before this moves — including its fingerprint, `canonical` emitting
+  :outcome only where there is one.
+  IT IS NOT THE CONDITIONAL COMPLETION THE OPEN QUESTION REFUSES, and the distinction is the whole
+  argument. That question is about a fact over DATA — `all n reports are in`, `k branches have
+  arrived` — and refuses it on DECIDABILITY: each is a relation between keys that no schema
+  expresses, so it could only be a CLOSURE, and a closure may decide a VALUE but never where the
+  machine goes. This reads the STRUCTURAL fact :done already reads — is the child final — one notch
+  finer, over a set that is FINITE AND KNOWN AT CONSTRUCTION, dispatched by a map lookup on an id.
+  No schema, no predicate, nothing to prove disjoint, and `compile` is still a lookup. The line
+  drawn was `a structural fact may decide COMPLETION, never WHICH WAY`, and it was drawn against
+  data conditions; the structural branch is a case that question never contemplated.
+  IT MAKES `yields` SHARPER RATHER THAN LOOSER, which is the tell that it is the right shape. An
+  unconditional completion's yield must hold at EVERY final state, a child being free to finish in
+  any of them; a per-outcome one is asked about its OWN final state and no other, because that
+  branch is taken only when the child stopped there. Naming the outcome is what buys the precision.
+  WHAT IT UNBLOCKS: a parent that can tell `it worked` from `it gave up`. Before it, both landed in
+  one state and a `:yield` could name only keys both final states hold — so ../coder's polish
+  machine had to read a `:fault`'s presence as a tea leaf and copy the good code aside under another
+  key to stop the failed attempt overwriting it. With it, the branch that gave up yields NOTHING and
+  the parent keeps what it had by never being written to. A state holding what it declares does the
+  rest.
+  ONE EDGE PER OUTCOME, so the four traversals were told nothing a second time — the same property
+  that made a completion an edge rather than a node attribute. `:done-cycle` follows the entry-fired
+  target, which stays decided: an entry-completing state has no machine, or its child's first state
+  is final and NAMES the outcome. Two new referential faults, :unknown-outcome and
+  :outcome-without-machine, plus :yield-with-outcomes for the second spelling of one thing.
+  AND THE DRAWING HAD TO LEARN. An unconditional completion stays dashed and UNLABELLED — there is
+  no event to name — but two dashed arrows leaving one node are two different STRUCTURAL facts, and
+  a picture that cannot tell them apart shows a machine that does not exist. A per-outcome one is
+  labelled `[<the child's final state>]`, written the way a guard is.
+- WHAT IS NOT TAKEN. A COMPLETION ON A CONDITION OVER DATA is a guard over the STATE and stays
+  refused, see :open-questions. A NODE STILL HOLDS ONE CHILD, so a parent waiting on SEVERAL
+  independent children is still orthogonal regions and still out. AND FAN-OUT IS STILL STATIC in the
+  shape: the width is a runtime value, and a graph shows structure while a count is data.
 
 
 ## :parallel-is-across-instances
@@ -1238,8 +1296,30 @@ machine the size a person can hold.
   left — a merge keeps every key, so a child left behind would ride into a state that never
   declared it — and RESTARTED when the node is re-entered, entering being entering.
 - A CHILD MUST BE ABLE TO START, checked at construction: entering a node with a machine enters
-  the child at its own initial with NO data, so a child whose first state insists on some could
-  never begin. :machine-cannot-start, and it is REFERENTIAL.
+  the child at whatever the node SOWS, so a child whose first state insists on data a seedless node
+  cannot give it could never begin. :machine-cannot-start, and it is REFERENTIAL.
+- A NODE MAY SOW ITS CHILD, {:seed <a map schema>}, ADDED 2026-09-05 and it is :yield'S MIRROR —
+  one carries parent -> child at ENTRY, the other child -> parent at COMPLETION. IT WAS NOT A
+  DECISION THAT DATA MUST NOT FLOW IN; there was simply nothing to carry it, `:yield` itself having
+  arrived late as `the {:yield} that dropping :sub had cost`. The consequence had been written down
+  as a check and read since as a principle, which is the mistake worth naming: `the library does not
+  do this` and `this must not be done` are different sentences.
+  WHAT IT UNBLOCKS IS RE-ENTRY WITH A DIFFERENT JOB. A shape is a function of its env, so a machine
+  told what to do by the closure it was built from is told once, for the life of the shape — and a
+  host that cannot tell its child what job to do cannot LOOP over it. That is the whole of what
+  ../coder's polish machine needed, and it could not be got any other way.
+  SOWN OFF THE PROJECTED VALUE and not off the merge in flight, which is what keeps the check local
+  and SOUND: a node holds exactly what it declares, so `seeds` asks whether THIS node's schema
+  guarantees the seed and gets a proof. Sowing out of the pre-projection value would have let a key
+  three transitions back reach a child no state on the way admitted holding — the same unsoundness
+  :internal-visibility-is-declared-and-not-automatic removed from views.
+  `seeds` IS `admits` FOR THE FIFTH AND SIXTH TIME, and it is TWO verdicts because a seam has two
+  sides: :provides (can this node give it) and :accepts (will the child take it), reported as
+  :seed-unavailable and :seed-refused. The referential :machine-cannot-start stays for the seedless
+  case, subsumption not being answerable from parts alone.
+  AND `:first` LEFT THE COMPILED PHASES. A child's initial state used to be computed once per
+  machine; it is now a function of the RUN, so `arrive` makes it per entry through `sown`. Nothing
+  was being discovered there that construction does not discover earlier.
 - THE CHECKS RECURSE FOR FREE because a child is an ordinary shape and every structural check is
   about ONE graph. Faults are reported :within [<host node> ...], a PATH because nesting nests.
   And there is no cross-boundary subsumption question at all: the child's slice is written only by
@@ -1504,6 +1584,16 @@ WHAT WOULD CHANGE IT is a decidable spelling. The one worth thinking about: a no
 keyed by item, where the KEY SET is fixed on entry and completion is `every value is present` —
 structural rather than arithmetic, and `every sub is final` wearing different clothes. The bar is
 an agent workflow that needs it, and `review these seven files` plausibly is one.
+NARROWED 2026-09-05 AND STILL OPEN. A `:done` keyed by the child's FINAL STATE was built, and it
+is not this question answered — it is a case this question never contemplated. All three wants
+above are relations over DATA and the refusal rests on decidability; which final state a child
+stopped in is the STRUCTURAL fact `:done` already reads, over a finite set known at construction,
+dispatched by a map lookup. So `which way` is now decided by a structural fact and still never by
+a data one, and the line moved exactly as far as `no closure decides where the machine goes`
+allows. See :a-state-may-say-where-it-goes-when-it-completes.
+WHAT IT SUGGESTS ABOUT THE REST: the useful question may not be `may completion be conditional`
+but `which facts are structural`. A count of arrived branches is not one today because nothing
+in the shape names the arrivals; a spelling that made them nodes would make it one.
 
 
 ## IS DYNAMIC FAN-OUT WANTED?
@@ -1834,6 +1924,46 @@ VERIFIED BY RUNNING, building {:machine <a shape>}:
   one generated shape into a node of another and assert the parent lands in one of ITS nodes and
   the child in one of the CHILD'S. The two share an event vocabulary, so the child shadows the
   parent constantly, which is the interesting half rather than an accident.
+
+
+## :what-seeding-and-outcomes-taught
+
+VERIFIED BY BUILDING BOTH 2026-09-05, at the request of ../coder's polish machine — the first
+consumer to want a nested machine it could LOOP over.
+- THE LESSON IS NOT ABOUT NESTING, and it is the one worth keeping: I read `a nested child is
+  entered with no data` and `a yield must hold at every final state` as facts about what nesting
+  IS, and designed around them — a whole alternative in which the child machine was engaged
+  through a function in the env instead. The author's correction was that these are
+  IMPLEMENTATION LIMITS AND NOT PRINCIPLE LIMITS, and that letting one pick the design is the
+  expensive mistake. Both turned out to be an absence rather than a decision: `:yield` had arrived
+  late and nothing had ever carried the other direction, and the completion's single target was
+  argued from DECIDABILITY, which says nothing about a finite set of node ids.
+  THE TEST THAT SEPARATES THEM: find the sentence that REFUSED it. For a seed there was none —
+  only a check recording the consequence. For a branching completion there was one, and reading it
+  showed it was about data conditions and had not contemplated a structural one.
+- THE TWO ARE ONE FEATURE IN PRACTICE and neither is much use alone. A seed lets a host RE-ENTER a
+  child with a different job; per-outcome completion lets it tell what the child made of the last
+  one. Without the second, polish had to read a `:fault`'s presence as a tea leaf and copy its good
+  code aside under an invented key to stop a failed attempt overwriting it — a noun invented to
+  route around a limit, which is exactly what the correction was about.
+- WHAT THEY COST THE CHECKS: nothing structural, and the same reasons as ever. `seeds` is `admits`
+  for the fifth and sixth time, `yields` got SHARPER, and one edge per outcome meant `reachable`,
+  `dead-ends`, `finishable` and `traps` were told nothing.
+- WHAT THEY COST AT RUNTIME: `phases` lost its precomputed `:first`, a child's initial state now
+  being a function of the run. `arrive` takes the shape and makes it per entry.
+- AND `covering` HAD A HOLE THE CHANGE OPENED, found by writing a consumer test that asserted a
+  branch the tool could not see. A completion fires no event, so it was never scored — invisible
+  while unconditional, and a silent gap once it could fork. See :cover-the-graph-by-running-it.
+  THE TEMPTATION IS THE THING TO NOTE: the fix I nearly made was to weaken the assertion.
+- MEASURED: 165 tests, 512 assertions, lint clean. In ../coder, 47 unit tests and 214 assertions
+  over a machine that nests another, every branch of both driven by `covering` on `constantly`,
+  with no model and no JVM.
+- AND IT RAN LIVE THE SAME DAY, which is what says the two features are one: ../coder's
+  notebook/beautiful_words.clj drove TWENTY TURNS through both machines in ONE run — a person's
+  `:amend` reaching the nested machine, its own disputed branch firing inside the host, the host
+  completing by `:implemented`, and the SAME NODE re-entered with a brief built from what the
+  review found. None of that is expressible with a child that starts empty and a completion with
+  one target.
 
 
 ## :what-guards-taught

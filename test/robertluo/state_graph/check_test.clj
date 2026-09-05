@@ -587,6 +587,61 @@
     (is (= [{:from :p :final :bad :problem :yield-unavailable}]
            (filter (comp #{:yield-unavailable} :problem) (check/problems sh))))))
 
+(deftest a-PER-OUTCOME-yield-is-asked-about-its-OWN-final-state-and-no-other
+  ;; NOT A RELAXATION OF THE RULE ABOVE — the same rule read where it applies. That branch
+  ;; is taken only when the child stopped THERE, so that is the only state the yield has to
+  ;; rest on, and naming the outcome makes the check SHARPER rather than looser: the very
+  ;; shape condemned above is fine once each way of finishing says where it goes.
+  (let [child (shape/shape (shape/state :d1 [:map] {:initial true})
+                           (shape/state :ok  [:map [:r :string]] {:final true})
+                           (shape/state :bad [:map] {:final true})
+                           (shape/event :win  [:map [:r :string]])
+                           (shape/event :lose [:map])
+                           (shape/transition :d1 :win :ok)
+                           (shape/transition :d1 :lose :bad))
+        sh (shape/shape (shape/state :p [:map] {:initial true :machine child
+                                                :done {:ok  {:to :z :yield [:map [:r :string]]}
+                                                       :bad {:to :nothing}}})
+                        (shape/state :z [:map [:r :string]] {:final true})
+                        (shape/state :nothing [:map] {:final true}))]
+    (is (= [{:from :p :final :ok :verdict :yes}] (vec (check/yields sh))))
+    (is (empty? (check/problems sh)))))
+
+(deftest seeds-is-admits-in-BOTH-directions-because-a-seed-has-two-sides
+  ;; `yields` READ BACKWARDS. One carries child -> parent at completion, this one parent ->
+  ;; child at entry, and either side of the crossing can be wrong: a node asked to sow what
+  ;; it does not hold, and a child that will not take what it is sown.
+  (let [child (fn [schema] (shape/shape (shape/state :c1 schema {:initial true})
+                                        (shape/state :c2 [:map] {:final true})
+                                        (shape/event :fin [:map] (constantly {}) [:map])
+                                        (shape/transition :c1 :fin :c2)))
+        sh (fn [node seed child-schema]
+             (shape/shape (shape/state :a [:map] {:initial true})
+                          (shape/state :b node {:machine (child child-schema) :seed seed})
+                          (shape/event :go [:map] (constantly {}) [:map])
+                          (shape/transition :a :go :b)))
+        v  (fn [& args] (select-keys (first (check/seeds (apply sh args))) [:provides :accepts]))]
+    (is (= {:provides :yes :accepts :yes}
+           (v [:map [:job :string]] [:map [:job :string]] [:map [:job :string]])))
+    (is (= {:provides :no :accepts :yes}
+           (v [:map] [:map [:job :string]] [:map [:job :string]]))
+        "the node was asked to sow a key it does not hold")
+    (is (= {:provides :no :accepts :yes}
+           (v [:map [:job {:optional true} :string]] [:map [:job :string]] [:map [:job :string]]))
+        "AND ONLY OPTIONALLY IS ALSO :no — a child is no better off with a maybe than a
+         handler is")
+    (is (= {:provides :yes :accepts :no}
+           (v [:map [:job :string]] [:map [:job :string]] [:map [:job :int]]))
+        "the child will not take it at that type")
+    ;; `:b` is a dead end in these fixtures and says so; what is asserted is the seed.
+    (let [seedy (fn [s] (filter (comp #{:seed-unavailable :seed-refused} :problem)
+                                (check/problems s)))]
+      (is (= [{:problem :seed-unavailable :from :b}]
+             (seedy (sh [:map] [:map [:job :string]] [:map [:job :string]])))
+          "and the proven half is a fault, exactly as :yield-unavailable is")
+      (is (= [{:problem :seed-refused :from :b :initial :c1}]
+             (seedy (sh [:map [:job :string]] [:map [:job :string]] [:map [:job :int]])))))))
+
 (deftest a-continuing-JOIN-NODE-keeps-its-licence
   ;; AND THAT MATTERS RATHER THAN BEING A NICETY. x is where both orders arrive — the
   ;; diamond having proved they arrive at the SAME x — and a continuation is a pure
@@ -634,6 +689,16 @@
   (let [d (check/dot (ts/shipping))]
     (is (re-find #"dashed" d))
     (is (not (re-find #"\$eval" d)) "no closure ever reaches a picture")))
+
+(deftest a-PER-OUTCOME-completion-is-labelled-with-the-child-s-final-state
+  ;; By the same test :a-node-is-labelled-by-its-id sets. Two dashed arrows leaving one node
+  ;; are two different STRUCTURAL facts, and a drawing that cannot tell them apart is showing
+  ;; a machine that does not exist. What it names is a node of the CHILD, so it is written
+  ;; the way a guard is — in brackets, the condition on an otherwise causeless arrow.
+  (let [d (check/dot (ts/refining))]
+    (is (re-find #"\[done\]" d))
+    (is (re-find #"\[stuck\]" d))
+    (is (re-find #"dashed" d))))
 
 ;;; ---------------------------------------------------------- the fan-out licence
 
