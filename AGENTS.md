@@ -270,11 +270,16 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     [<host node> ...] where nested, and a :witness where something could construct one.
       REFERENTIAL, refused by the constructor — :unused-event, :reserved-declared (a state declaring
       :id, :instance or :sub), :machine-cannot-start, :ambiguous, :done-cycle, :done-with-edges,
-      :reads-without-report
+      :reads-without-report, :seed-without-machine, :unknown-outcome, :outcome-without-machine,
+      :yield-with-outcomes
       STRUCTURAL, reported by check/problems — :unreachable, :dead-end, :trap, :target-refuses,
-      :view-unavailable, :yield-unavailable, :reads-unavailable
+      :view-unavailable, :yield-unavailable, :reads-unavailable, :seed-unavailable, :seed-refused
       PUBLISHED AND NEVER FAULTED, being coverage rather than fault — subsumption, views, coverage,
-      confluence, commuting, laws, readings, yields, DRIVING
+      confluence, commuting, laws, readings, yields, seeds, DRIVING
+      AND THIS LIST IS NOT THE WHOLE VOCABULARY, which is worth knowing before trusting it: the
+      malformed-part and duplicate-id family, :unknown-state, :unknown-event, :machine-cannot-finish,
+      :done-and-final, :yield-without-done, :yield-without-machine, :combine-not-a-function and
+      :law-without-combine are all reported and none is named here. Grep :problem in src for the set.
     AND A PUBLISHED CHECK ANSWERS ABOUT THE MACHINE. Every one that answers in MAPS recurses into
     nested children and carries :within; the ones answering a SET OF IDS — reachable, traps,
     dead-ends, finishable — are about ONE graph and stay there, a set having nowhere to say which
@@ -792,6 +797,11 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
     docs/tutorial.html, gitignored because it is derived. IT COVERS ALL THREE DOORS since
     2026-09-04 — the crank's four `awaiting` answers, `:permitted`, `:on`, a fork it refuses,
     a join it takes whole, a nested child it reports into, and `check/driving`.
+    AND BOTH DIRECTIONS ACROSS A NESTING BOUNDARY since 2026-09-05 — `:seed` and the node
+    re-entered with a different job, `check/seeds`, `:machine-cannot-start` as the fault that
+    recorded the absence, a `:done` keyed by the child's final state with its two labelled dashed
+    arrows and its sharper `yields`, and `explore/covering` with a real `:gaps` closed by varying
+    one alternative.
     RENDERING IT IS A TEST THE SUITE CANNOT BE —
     it runs every cell, and it has caught two bugs no test would have."
 

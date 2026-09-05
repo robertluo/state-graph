@@ -99,13 +99,13 @@
    An escape by an ordinary event is still an ABORT and still yields nothing. Beside a
    per-outcome :done it belongs to the outcome and not here."
   [:map [::kind [:= :state]] [:id Id] [:schema MapSchema]
-        [:initial {:optional true} :boolean]
-        [:final {:optional true} :boolean]
-        [:machine {:optional true} Shape]
-        [:seed {:optional true} MapSchema]
-        [:done {:optional true} [:or Id [:map-of Id [:map [:to Id]
-                                                          [:yield {:optional true} MapSchema]]]]]
-        [:yield {:optional true} MapSchema]])
+   [:initial {:optional true} :boolean]
+   [:final {:optional true} :boolean]
+   [:machine {:optional true} Shape]
+   [:seed {:optional true} MapSchema]
+   [:done {:optional true} [:or Id [:map-of Id [:map [:to Id]
+                                                [:yield {:optional true} MapSchema]]]]]
+   [:yield {:optional true} MapSchema]])
 
 (def EventDef
   "A catalogue entry, and WHERE A HANDLER LIVES. It is consumed at construction and not
@@ -117,10 +117,10 @@
    It also completes the claim: the handler is a [:=> [:cat <this :schema>] <this :out>],
    BOTH HALVES off this map and nothing at all off the graph."
   [:map [::kind [:= :event]] [:id Id] [:schema MapSchema] [:handler fn?]
-        [:out {:optional true} MapSchema]
-        [:sees {:optional true} MapSchema]
-        [:report {:optional true} fn?]
-        [:reads {:optional true} MapSchema]])
+   [:out {:optional true} MapSchema]
+   [:sees {:optional true} MapSchema]
+   [:report {:optional true} fn?]
+   [:reads {:optional true} MapSchema]])
 
 (def TransDef
   "An edge: which event moves the machine from where to where. What handles the event is
@@ -134,7 +134,7 @@
    closure could never be: `disjoint` is what proves two guards on one [state, event] can
    never both fire, and without that proof the shape is refused."
   [:map [::kind [:= :transition]] [:from Id] [:event Id] [:to Id]
-        [:when {:optional true} MapSchema]])
+   [:when {:optional true} MapSchema]])
 
 ;;; -------------------------------------------------------------- constructors
 
@@ -158,7 +158,7 @@
    A NESTING NODE MAY SAY WHAT ITS CHILD STARTS WITH, using {:seed <a map schema>} — the
    mirror of :yield, projected off this node's own value on the way in. See StateDef."
   {:malli/schema [:function [:=> [:cat Id MapSchema] StateDef]
-                            [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]}
+                  [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]}
   ([id schema] (state id schema nil))
   ([id schema opts] (into {::kind :state :id id :schema (m/schema schema)} opts)))
 
@@ -208,9 +208,9 @@
    The function schema stays complete either way:
    [:=> [:cat <this :schema> <this :sees>] <this :out>], both halves off this map."
   {:malli/schema [:function [:=> [:cat Id MapSchema] EventDef]
-                            [:=> [:cat Id MapSchema [:or fn? :map]] EventDef]
-                            [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]
-                            [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]}
+                  [:=> [:cat Id MapSchema [:or fn? :map]] EventDef]
+                  [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]
+                  [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]}
   ([id schema] (event id schema (lifting (m/schema schema)) schema nil))
   ;; A PURE LIFT MAY STILL HAVE OPTIONS. A handler is a fn and options are a map, so the
   ;; third argument says which it is with no ceremony — and without this, declaring a
@@ -245,7 +245,7 @@
    out-edges are a SET. There is no :else — an event no guard admits fires no edge, which
    is `ignored`, and the reduction stays total."
   {:malli/schema [:function [:=> [:cat Id Id Id] TransDef]
-                            [:=> [:cat Id Id Id [:maybe :map]] TransDef]]}
+                  [:=> [:cat Id Id Id [:maybe :map]] TransDef]]}
   ([from event to] (transition from event to nil))
   ([from event to opts]
    (cond-> {::kind :transition :from from :event event :to to}
@@ -599,8 +599,15 @@
         {:problem :outcome-without-machine :id (:id s)})
       (for [s state :when (and (map? (:done s))
                                (:machine s) (uber/ubergraph? (:machine s)))
+            :let [child-ids (set (states (:machine s)))]
             outcome (sort (keys (:done s)))
-            :when (not (final? (:machine s) outcome))]
+            ;; ASKED AS MEMBERSHIP FIRST, exactly as :unknown-state above is. `final?`
+            ;; reads an attribute off a NODE and ubergraph THROWS on one it does not
+            ;; hold — so an outcome naming no state at all, which is what a misspelling
+            ;; looks like, would escape as an ubergraph error instead of the fault this
+            ;; line exists to report. Not final and not there at all are one fault, the
+            ;; branch being untakeable either way.
+            :when (not (and (child-ids outcome) (final? (:machine s) outcome)))]
         {:problem :unknown-outcome :id (:id s) :outcome outcome})
       ;; A per-outcome :done carries each branch's own :yield, so one beside it is a
       ;; declaration nobody reads — and the two spellings disagreeing about what is

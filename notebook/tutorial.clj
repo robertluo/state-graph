@@ -625,6 +625,69 @@
  (sg/drive paying [])
  (drive/where paying (sg/drive paying []))]
 ;;
+;; ### Sowing the child: `:seed`
+;;
+;; A child starts with **nothing at all** unless the node says otherwise, and for a while that
+;; was the whole story: whatever the child was doing had to come from the closure its shape was
+;; built from, which is a constant. `{:seed <a map schema>}` is the other half — projected off
+;; the node's own value on the way **in**, exactly as `:yield` is projected off the child's
+;; final state on the way **out**. One boundary, and now both directions across it.
+
+(def attempt
+  (sg/shape
+   (sg/state :calling [:map [:endpoint :string]] {:initial true})
+   (sg/state :replied [:map [:endpoint :string]] {:final true})
+
+   (sg/event :reply [:map])
+   (sg/transition :calling :reply :replied)))
+
+(def fetch
+  (sg/shape
+   (sg/state :trying   [:map [:endpoint :string]] {:initial true
+                                                   :machine attempt
+                                                   :seed  [:map [:endpoint :string]]
+                                                   :done  :choosing})
+   (sg/state :choosing [:map [:endpoint :string]])
+   (sg/state :over     [:map [:endpoint :string]] {:final true})
+
+   (sg/event :again [:map [:endpoint :string]])
+   (sg/event :stop  [:map])
+
+   (sg/transition :choosing :again :trying)
+   (sg/transition :choosing :stop  :over)))
+
+;; **What it buys is one node re-entered with a different job.** `:trying` is entered twice
+;; below and the child runs twice, on a different endpoint each time — and which endpoint is a
+;; fact about the *run*, which is the thing a closure could never have been:
+
+(def fetch-step (sg/compile fetch))
+
+(kind/table
+ {:column-names [:event :fetch :endpoint :attempt :sown]
+  :row-vectors (let [events [{:id :reply} {:id :again :endpoint "backup"} {:id :reply}]]
+                 (map (fn [e s] [(:id e) (:id s) (:endpoint s)
+                                 (-> s :sub :id) (-> s :sub :endpoint)])
+                      (cons nil events)
+                      (reductions fetch-step (sg/initial fetch {:endpoint "primary"}) events)))})
+
+;; Take the seed away and that machine **cannot be built at all**. `:calling` insists on an
+;; `:endpoint` and a node that sows nothing could never give it one, so the child could never
+;; begin — which the parts alone can say, so it is referential and the constructor refuses it:
+
+(shape/problems
+ (shape/state :trying   [:map [:endpoint :string]] {:initial true :machine attempt
+                                                    :done :choosing})
+ (shape/state :choosing [:map [:endpoint :string]] {:final true}))
+
+;; A seed is a crossing with **two sides, and either can be wrong**, so `check/seeds` answers
+;; twice for every seeded node — can this node *provide* it, and will the child *take* it:
+
+(check/seeds fetch)
+
+;; Which is `yields` read backwards, and deliberately shaped like it: one carries parent to
+;; child at entry and the other child to parent at completion, so the two checks are mirror
+;; images and neither needed machinery the other did not.
+;;
 ;; ### An escape is an ABORT
 ;;
 ;; Nothing stops `:ship` firing while the payment is half done, and the child's work is
@@ -716,12 +779,75 @@
 
 (reduce waiting-step (sg/initial waiting-order {:total 30}) [{:id :checkout} {:id :cancel}])
 
+;; ### Or say where each OUTCOME goes
+;;
+;; That `:bad` fault has a second answer, and it is the better one whenever the two ways of
+;; finishing *mean* different things. `:done` may be **a map keyed by the child's final
+;; state** — one edge per outcome, each carrying a `:yield` of its own:
+
+(def settle
+  (sg/shape
+   (sg/state :deciding [:map] {:initial true})
+   (sg/state :ok       [:map [:receipt :string]] {:final true})
+   (sg/state :bad      [:map] {:final true})
+
+   (sg/event :win  [:map [:receipt :string]])
+   (sg/event :lose [:map])
+
+   (sg/transition :deciding :win  :ok)
+   (sg/transition :deciding :lose :bad)))
+
+(def claim
+  (sg/shape
+   (sg/state :settling [:map] {:initial true
+                               :machine settle
+                               :done {:ok  {:to :receipted :yield [:map [:receipt :string]]}
+                                      :bad {:to :written-off}}})
+   (sg/state :receipted   [:map [:receipt :string]] {:final true})
+   (sg/state :written-off [:map] {:final true})))
+
+(picture claim)
+
+;; **Two dashed arrows out of one node**, and labelled now — `[ok]` and `[bad]` — because
+;; there are two structural facts to tell apart where before there was one. The child's own
+;; final state is the whole of the label: there is still no event, and still nothing else to
+;; name. One `:win` or one `:lose` inside the child is the whole difference:
+
+(def claim-step (sg/compile claim))
+
+[(reduce claim-step (sg/initial claim {}) [{:id :win :receipt "r-1"}])
+ (reduce claim-step (sg/initial claim {}) [{:id :lose}])]
+
+;; And it makes the check **sharper rather than looser**. A per-outcome yield rests on its
+;; own final state and no other, so `:ok` is asked about `:ok` alone — where the bare form
+;; had to ask every final state the child has, and `:bad` was exactly what broke it:
+
+(check/yields claim)
+
+;; An outcome must name one of the child's own final states, and a misspelling is a branch
+;; that can never be taken. Referential, like the rest of this:
+
+(shape/problems
+ (shape/state :settling  [:map] {:initial true :machine settle :done {:nope {:to :receipted}}})
+ (shape/state :receipted [:map] {:final true}))
+
+;; Two more come with it, and both are declarations nobody would read: outcomes without a
+;; `:machine` to have them (`:outcome-without-machine`), and a `:yield` sitting *beside* a
+;; per-outcome `:done` when each branch already carries its own (`:yield-with-outcomes`).
+;;
+;; What a completion still cannot be is a condition over the **data** — "complete to `:a` if
+;; the total is over 100" — which is a different question and a much harder one.
+
 ;; ### It is not a guard, and that is what it buys
 ;;
-;; There is one target and it is unconditional, so determinism is untouched and nothing has
-;; to be proved disjoint. What that gets you is a fault no guard could have: a **cycle**
-;; among states that complete on entry is a *proven* infinite loop, because an unconditional
-;; relation is a plain graph.
+;; Neither form is. What both read is a **structural** fact — that the child has finished,
+;; and which of its final states it finished in — over a set that is finite and known at
+;; construction, dispatched by a map lookup on an id. No schema, no predicate, and nothing to
+;; prove disjoint, so determinism is untouched.
+;;
+;; What that gets you is a fault no guard could have: a **cycle** among states that complete
+;; on entry is a *proven* infinite loop. Those states have no child and so exactly one
+;; unconditional way out, which makes the relation a plain graph.
 ;;
 ;; This one is **referential** — answerable from the parts alone — so it is `shape/problems`
 ;; that is asked, and a machine that would spin for ever never gets built at all:
@@ -1106,9 +1232,10 @@
 ;; ## Beneath the facade
 ;;
 ;; `robertluo.state-graph` is the only namespace an application needs, but it is a
-;; convenience over five that are usable directly — `.shape`, `.compile`, `.check`, `.drive`
-;; and `.async`. Drop through when you want something the facade does not offer, which is what
-;; `drive/awaiting`, `drive/where`, `drive/advance` and `check/driving` were above.
+;; convenience over six that are usable directly — `.shape`, `.compile`, `.check`, `.drive`,
+;; `.async` and `.explore`. Drop through when you want something the facade does not offer,
+;; which is what `drive/awaiting`, `drive/where`, `drive/advance`, `check/driving` and
+;; `check/seeds` were above.
 ;;
 ;; `check/confluence`, for instance, publishes every verdict and not merely the licences, so
 ;; the check's own coverage is readable. For this pipeline the answer is none — divergence is
@@ -1134,6 +1261,82 @@
 ;; The other reason to drop through is starting data: `sg/run` gives every machine the same
 ;; initial data, and `async/fan` takes a function of the instance instead. This pipeline
 ;; sidesteps it by having `:draft` carry nothing and letting `:submit` bring the title.
+
+;; ### Covering the graph by RUNNING it
+;;
+;; Everything in `check` answers *could this ever have worked*, from the graph alone.
+;; `robertluo.state-graph.explore` answers **did it** — by driving, for real, through the
+;; handlers and the guards and the schema at every crossing.
+
+(require '[robertluo.state-graph.explore :as explore])
+
+;; The technique is one sentence, and this page has already paid for it: **a shape is a
+;; function of its env**, so whatever a report reaches for — a model, a socket, a clock, a
+;; budget — arrived as a *value*, and an ordinary function goes in its place. Here is `review`
+;; from further up written that way, with a `:write` that goes and finds the code rather than
+;; being handed it, and both seams taken as arguments:
+
+(defn reviewing
+  [{:keys [writer judge]}]
+  (sg/shape
+   (sg/state :blank       [:map] {:initial true})
+   (sg/state :written     [:map [:code :string]])
+   (sg/state :implemented [:map [:code :string]] {:final true})
+   (sg/state :faulted     [:map [:code :string] [:fault {:optional true} [:string {:min 1}]]])
+
+   (sg/event :write  [:map [:code :string]] {:reads [:map] :report writer})
+   (sg/event :judged [:map [:verdict [:enum :green :red]]
+                           [:fault {:optional true} [:string {:min 1}]]]
+             (fn [e] (select-keys e [:fault]))
+             [:map [:fault {:optional true} [:string {:min 1}]]]
+             {:reads [:map [:code :string]] :report judge})
+   (sg/event :again  [:map])
+
+   (sg/transition :blank   :write  :written)
+   (sg/transition :written :judged :implemented {:when [:map [:verdict [:= :green]]]})
+   (sg/transition :written :judged :faulted     {:when [:map [:verdict [:= :red]]]})
+   (sg/transition :faulted :again  :written)))
+
+;; `covering` takes that constructor, a base env, and the alternatives to vary. The base env
+;; has to build a shape **on its own** — the constructor is called once on it alone, to ask
+;; the structural questions — so every seam has a value here even where it is about to be
+;; overridden:
+
+(def env {:writer (constantly {:code "(defn answer [] 42)"})
+          :judge  (constantly {:verdict :green})})
+
+(explore/covering reviewing env {})
+
+;; Two of four, on one run, and the interesting number is **`:gaps`** —
+;; `[:written :judged :faulted]` is an edge a driver *could* have taken and nothing produced
+;; a payload for. That is the red branch: the one a live run reaches once a week and a suite
+;; reaches never. Vary the judge and it closes:
+
+(explore/covering reviewing env
+                  {:judge [(constantly {:verdict :green})
+                           (constantly {:verdict :red :fault "it threw"})]})
+
+;; One run per **combination**, so the cost is the product of the alternatives and not a
+;; search over turns — and no model, no socket and no clock in any of them.
+;;
+;; **`:gaps` is empty and one transition is still uncovered, and that is the whole design.**
+;; Three kinds of edge cannot be taken by any driver however you fake the world, and calling
+;; them failures would cry wolf on every real machine:
+;;
+;; - `:no-report` — the event is the **world's**. `:again` is a person deciding to try again,
+;;   and no substitution reaches a person. That is the one left above.
+;; - `:join-order` — the state is a *proven* join, so the crank takes its events at once in
+;;   one order and the other orderings' halfway states are never entered. Exactly the property
+;;   that makes a join safe is what makes half its diamond undrivable.
+;; - `:unvisited-state` — nothing reached the state this edge leaves from, so the reason is
+;;   upstream and this edge is not the thing to fix.
+;;
+;; Subtract those and the residue is `:gaps`, which is the only number that means you missed
+;; something. **A completion transition is scored too** — a `:done` keyed by the child's final
+;; state is a fork, and a fork no run took is precisely what this exists to name.
+;;
+;; And it is not only functions. A budget that is an edge is covered by varying a **plain
+;; number**, where otherwise it would take as many real laps as the budget allows.
 
 ;; ## Rendering this notebook
 ;;

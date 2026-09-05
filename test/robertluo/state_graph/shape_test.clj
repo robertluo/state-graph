@@ -15,15 +15,15 @@
   ;; The independent invariant for a checker: it must not ACCUSE what is fine. Every
   ;; example below asserts a check fires; only a property can assert it stays quiet.
   (prop/for-all [parts ts/gen-shape]
-    (empty? (apply shape/problems parts))))
+                (empty? (apply shape/problems parts))))
 
 (defspec no-transition-is-lost-to-the-graph 100
   ;; Not a test that ubergraph adds an edge — a test that `multidigraph` was the right
   ;; call. Two events joining one pair of states are two edges, and a plain digraph
   ;; would silently keep one of them, which is the kind of loss nothing else notices.
   (prop/for-all [parts ts/gen-shape]
-    (= (count (ts/parts-of :transition parts))
-       (count (shape/transitions (apply shape/shape parts))))))
+                (= (count (ts/parts-of :transition parts))
+                   (count (shape/transitions (apply shape/shape parts))))))
 
 ;;; ------------------------------------------------------------------- the checks
 
@@ -210,7 +210,7 @@
            [:unknown [:map [:v [:= :green]]]  [:map [:v [:enum :green :red]]]]
            [:unknown [:map [:n [:int {:min 0 :max 5}]]] [:map [:n [:int {:min 3}]]]]
            [:unknown [:map [:v {:optional true} :int]]
-                     [:map [:v {:optional true} :string]]]]]
+            [:map [:v {:optional true} :string]]]]]
     (is (= verdict (shape/disjoint a b)) (pr-str [a b])))
 
   (testing "a key OPTIONAL ON BOTH SIDES conflicts with nothing, a value being free to
@@ -462,8 +462,7 @@
              (mapv #(dissoc % :yield) (get (shape/continuations sh) :a)))))
     (testing "and the yield belongs to the branch it is harvested on"
       (is (= [nil [:map [:prize :int]]]
-             (mapv #(some-> (:yield %) m/form) (get (shape/continuations sh) :a)))))
-))
+             (mapv #(some-> (:yield %) m/form) (get (shape/continuations sh) :a)))))))
 
 (deftest an-outcome-is-one-of-the-child-s-final-states
   (let [ok (fn [& parts] (map :problem (apply shape/problems parts)))
@@ -475,6 +474,13 @@
       (is (= [:unknown-outcome]
              (ok (shape/state :a [:map] {:initial true :machine child
                                          :done {:c1 {:to :z}}})
+                 (shape/state :z [:map] {:final true})))))
+    (testing "and a key naming NO state of the child is the same fault, not a throw —
+              `final?` reads an attribute off a node and ubergraph refuses one it does
+              not hold, so the commonest way to write this wrong is the way that escaped"
+      (is (= [:unknown-outcome]
+             (ok (shape/state :a [:map] {:initial true :machine child
+                                         :done {:nope {:to :z}}})
                  (shape/state :z [:map] {:final true})))))
     (testing "and outcomes need a child to have them"
       (is (= [:outcome-without-machine]

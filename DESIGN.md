@@ -1870,6 +1870,18 @@ than another test of it, which is why it found things the suites could not.
   :browse true. `:render true` implies show, serve, browse and live-reload all false, which is what
   makes `clojure -X:notebook` headless. :exec-fn scicloj.clay.v2.api/make! with :exec-args is why
   the alias needs no build namespace.
+- AND IT CAUGHT A THIRD BUG, 2026-09-05, writing the nesting sections for `:seed` and the
+  outcome-keyed `:done` — which is the third time this file has recorded the same habit paying.
+  `:unknown-outcome` COULD NOT REPORT THE COMMONEST WAY OF WRITING IT WRONG. The check asked
+  `(final? child outcome)`, and `final?` reads an attribute off a NODE — ubergraph THROWS on one
+  it does not hold, so an outcome naming no state of the child at all escaped as an
+  `IllegalArgumentException: Invalid node or edge description` instead of the fault. A key naming
+  a state that exists but is not final was fine, which is why the suite missed it: the test wrote
+  the outcome as `:c1`, a real state, because a person writing a TEST writes a name they can see
+  and a person writing a SHAPE writes one they meant. Fixed by asking membership first, which is
+  what the `:unknown-state` check three lines above already did — the idiom was there and this
+  line had not used it. The tutorial found it because a tutorial writes the fault the way a
+  READER would provoke it.
 
 
 ## :what-the-parts-library-showed

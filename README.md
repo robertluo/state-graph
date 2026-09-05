@@ -229,6 +229,28 @@ shape, so `problems` checks it and reports its faults under the node that hosts 
 (`:within [:paying]`), and `dot` marks a nesting node `⊞` — it does not draw the child
 inside its parent, so ask the child for its own picture.
 
+**A node may say what its child starts with**, using `{:seed <a map schema>}` — projected
+off the node's own value on the way *in*, exactly as `:yield` is projected off the child's
+final state on the way *out*. Without one a child starts with nothing at all, so what it was
+doing could only ever come from the closure its shape was built from; with one, **the same
+node can be re-entered with a different job**, which is what a loop over a child machine is.
+
+```clojure
+;; `payment` again, with a first state that needs to know what it is charging:
+(sg/state :unpaid [:map [:total :int]] {:initial true})
+
+;; and an order that sows it on the way in:
+(sg/state :paying [:map [:total :int]] {:machine payment
+                                        :seed  [:map [:total :int]]})
+```
+
+A seed is a crossing with two sides and either can be wrong, so `check/seeds` answers twice
+for every seeded node: `:provides` asks whether this node can *give* it, `:accepts` whether
+the child's first state will *take* it, and a `:no` is `:seed-unavailable` or `:seed-refused`.
+It is `yields` read backwards, and deliberately shaped like it. A **seedless** node whose
+child insists on data is `:machine-cannot-start` — referential, so a nesting that could never
+begin is never built.
+
 An **escape is an abort**, and it is unconditional: nothing stops `:ship` firing while
 payment is half done, because "only when the child has finished" is a fact about the state
 and not about the event. Aborting is the commoner need, so it stays the default. To have the
@@ -300,10 +322,38 @@ hops in between are a pure function of the shape and the state, so an auditor ho
 shape can reconstruct them — and an event is the thing a row could *not* be reconstructed
 without.
 
-**It is not a guard.** There is one target and it is unconditional, so determinism is
-untouched and nothing has to be proved disjoint. What that buys is a fault no guard could
-have: a **cycle** among states that complete on entry is refused as `:done-cycle`, because
-an unconditional relation is a plain graph and a cycle in it *proves* the machine would
+**Or it may say where each outcome goes.** Given an id, `:done` is one target for every way
+the child can finish. Given a **map keyed by the child's final state** it is one edge per
+outcome, each carrying a `:yield` of its own — which is the answer whenever the two ways of
+finishing *mean* different things:
+
+```clojure
+;; `payment` again, with a way to fail:
+(sg/state :refused [:map [:total :int]] {:final true})
+(sg/event :decline [:map])
+(sg/transition :unpaid :decline :refused)
+
+;; and an order that goes different ways depending on which way it finished:
+(sg/state :paying [:map [:total :int]] {:machine payment
+                                        :done {:captured {:to :shipped
+                                                          :yield [:map [:auth :string]]}
+                                               :refused  {:to :cancelled}}})
+```
+
+Three faults come with it, all referential: an outcome must name one of the child's own final
+states (`:unknown-outcome`), outcomes need a `:machine` to have them
+(`:outcome-without-machine`), and a `:yield` beside a per-outcome `:done` is a declaration
+nobody reads, since each branch already carries its own (`:yield-with-outcomes`).
+
+**It is not a guard**, in either form. What both read is a **structural** fact — that the
+child has finished, and which of its final states it finished in — over a set that is finite
+and known at construction, dispatched by a map lookup on an id. No schema, no predicate and
+nothing to prove disjoint, so determinism is untouched. What a completion still cannot be is a
+condition over the **data**, which is a different question and a harder one.
+
+What that buys is a fault no guard could have: a **cycle** among states that complete on entry
+is refused as `:done-cycle`. Those states have no child and so exactly one unconditional way
+out, which makes the relation a plain graph — and a cycle in it *proves* the machine would
 continue for ever.
 
 ```clojure
@@ -330,11 +380,14 @@ dead end — none of the four learned anything. On top of that:
   unknowable; a completion carries no closure at all, so what arrives is the state itself
   and its schema is known exactly.
 - `yields` is `admits` for the third time, with the yield as the target and the child's own
-  final state as what is produced. **Every** final state is asked, because a child may
-  finish in any of them and a yield resting on only some is a yield that is sometimes not
-  there. A `:no` is `:yield-unavailable`.
-- `dot` draws it **dashed and unlabelled**, which is UML's own notation: there is no event
-  to name, and a `:yield` is about the data rather than about where the machine goes.
+  final state as what is produced. Under a bare `:done`, **every** final state is asked,
+  because a child may finish in any of them and a yield resting on only some is a yield that
+  is sometimes not there. A per-outcome yield rests on its **own** final state and no other,
+  which is sharper rather than looser. A `:no` is `:yield-unavailable`.
+- `dot` draws it **dashed**, which is UML's own notation: there is no event to name, and a
+  `:yield` is about the data rather than about where the machine goes. Unlabelled where it is
+  unconditional, and `[<the child's final state>]` where it is not — two dashed arrows out of
+  one node being two structural facts.
 
 ```clojure
 (check/yields order)
@@ -891,8 +944,9 @@ Said plainly, because each is a design decision and not an oversight.
   is not expressible: the guard is over the *cause*, and the cause is the event. Where a
   decision depends on the state, whoever produces the event reports it as a fact the guard
   can read. The one fact about the state the shape settles for itself is **completion** —
-  `:done` is not a guard, having a single unconditional target — so "only when the child has
-  finished" is expressible after all, while "only when the total is over 100" is not.
+  `:done` reads a structural fact over a finite set known at construction, not a schema over
+  the data — so "only when the child has finished", and "which way it finished", are
+  expressible after all, while "only when the total is over 100" is not.
 - **Two edges on one event must be provably disjoint**, so a guard `disjoint` cannot
   separate — two overlapping ranges, a bare predicate — is refused rather than resolved by
   declaration order. There is no order to resolve it with: out-edges are a set.
@@ -910,13 +964,14 @@ Said plainly, because each is a design decision and not an oversight.
 - **A handler may not raise another event.** With no internal events there is no queue to
   drain and no run-to-completion to implement; a cascade is the caller feeding the next
   event.
-- **A completion transition has one target, and a node has one child.** `:done` is
-  unconditional, which is what keeps it out of the guard's way — "complete to `:a` or `:b`
-  depending on the result" is a branch on the state and is not expressible. And `:yield`
-  harvests from the one machine the node nests, so a node that waits for *several*
-  independent children is still out: that is orthogonal regions, and they need a shape to
-  ask for them. A join over plain *events* needs none of this — it is the product lattice,
-  and `confluence` proves it.
+- **A completion branches on the child's final state and on nothing else, and a node has one
+  child.** "Complete to `:a` or `:b` depending on where the child stopped" is a map keyed by
+  that state; "depending on whether the total is over 100" is a condition over the data and is
+  refused, being undecidable in general where the other is a lookup on an id. And `:yield`
+  harvests from the one machine the node nests, so a node that waits for *several* independent
+  children is still out: that is orthogonal regions, and they need a shape to ask for them. A
+  join over plain *events* needs none of this — it is the product lattice, and `confluence`
+  proves it.
 - **A fan-out's width is the driver's, and only two of its reports run at once.** *n*
   results accumulate into one state through a commutative combine, and two of those reports
   may land in either order — but not three, the licence being pairwise. Nothing in the shape
