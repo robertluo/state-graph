@@ -10,7 +10,8 @@ argument behind each of those paragraphs, and it never contradicts them: where i
 AGENTS.md is right about WHAT was decided and this file is right about WHY, and the disagreement is
 a bug to fix in one of the two.
 
-HOW TO USE IT. Every heading here matches a key in AGENTS.md's `:design` or `:project-knowledge`, so
+HOW TO USE IT. Every heading here matches a `## :key` heading in AGENTS.md, under *Design
+decisions* or *What has been learned*, so
 a pointer like `see DESIGN.md :a-guard-is-a-schema-over-the-event` is a grep away. Read the entry
 BEFORE reopening a question it settled, and before proposing anything it records as turned down.
 
