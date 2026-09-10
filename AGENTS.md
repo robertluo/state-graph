@@ -720,7 +720,32 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
   ;; The full case for each is DESIGN.md under `# Open questions`. Settle one WITH THE HUMAN before
   ;; building anything that touches it, and delete it from this list once answered — an answered
   ;; question left in the list is a question that gets asked again.
-  ["MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? Three wants knock on this door — `all n
+  ["CAN THE SHAPE ANSWER WHAT A RUN WILL COST AT WORST? ASKED BY ../coder 2026-09-09, and it is the
+    author's sentence rather than a wish of mine: `the ceiling is not an estimate, it is the number
+    calculated from the shape: how many LLM calls will we do in maximum — because it is costly, we
+    always want to know beforehand — it is the whole budget.`
+    WHAT THE CONSUMER DOES TODAY: `worst-case` in coder/notebook/arithmetic.clj is a HAND-WRITTEN
+    formula — laps, rounds, a fan bound and a lens count multiplied together — kept in step with
+    the machine by a person. It is right today and it is a second source of truth about a graph
+    this library already owns.
+    WHAT IT WOULD TAKE, and each part is a real question. AN EVENT WOULD HAVE TO DECLARE THAT IT
+    SPENDS: the library knows which events exist and never what a report DOES, which is the whole
+    of :the-handler-belongs-to-the-event — so this is an annotation on an event and not an
+    inference. THEN THE NUMBER IS A LONGEST PATH OVER A CYCLIC GRAPH, which is only finite because
+    every cycle here is bounded by a guard over a counter — `[:int {:max laps}]` — so the bound is
+    IN the guard and would have to be read out of it. AND A NESTED MACHINE MULTIPLIES: a node
+    holding a child costs the child's own worst case, once per entry, and ../coder is about to nest
+    the same machine RECURSIVELY to a depth (see its
+    :the-design-can-recurse-and-depth-is-a-budget-decision), where a hand formula stops being
+    maintainable at all.
+    AND THE ANSWER CANNOT BE A SCALAR. The same consumer now runs one agent on a bigger model than
+    the rest, so a call is not a unit of cost; whatever this computes has to be keyed BY SEAM and
+    let the consumer price it. `covering` is the precedent for the whole shape of it: reason over
+    the transitions, report per-transition, and let the consumer decide what the report means.
+    DO NOT BUILD IT WITHOUT THE HUMAN — an annotation on `sg/event` is a change to the one thing
+    every consumer writes."
+
+   "MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? Three wants knock on this door — `all n
     reports are in`, `k branches have arrived`, `still under budget` — and each is a COUNT or a
     COMPARISON over what the state holds, so each is a guard over the state. NARROWED 2026-09-05 AND
     STILL OPEN: a :done keyed by the child's FINAL STATE was built, and that is NOT this question

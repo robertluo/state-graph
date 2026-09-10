@@ -1561,6 +1561,54 @@ that application, and it is four lines.
 # Open questions
 
 
+## CAN THE SHAPE ANSWER WHAT A RUN WILL COST AT WORST?
+
+CAN THE SHAPE ANSWER WHAT A RUN WILL COST AT WORST? Asked by ../coder on 2026-09-09, in the
+author's words: `the ceiling is not an estimate, it is the number calculated from the shape: how
+many LLM calls will we do in maximum — because it is costly, we always want to know beforehand — it
+is the whole budget.` A model call is the unit that matters there, but the question is general: a
+workflow whose shape is a value should be able to say what running it can cost before anybody runs
+it.
+
+WHAT THE CONSUMER DOES TODAY, and why it is a second source of truth. `worst-case` in
+coder/notebook/arithmetic.clj multiplies a lap count by a lens count and a fan bound and a rounds
+bound: `1 + cycles * (1 + asked + jobs * rounds * 3)`. It is correct, it is checked against real
+runs — 23 spent against 137 allowed — and it is a formula about a graph THIS LIBRARY OWNS, kept in
+step by a person. Every argument for putting the workflow in a shape applies to it.
+
+WHAT IT WOULD TAKE, three parts, each a real question.
+
+AN EVENT WOULD HAVE TO DECLARE THAT IT SPENDS. The library knows which events exist and has never
+known what a report DOES — that is the whole of :the-handler-belongs-to-the-event, and the reason
+`covering` drives runs rather than reading handlers. So a cost cannot be inferred; it is an
+ANNOTATION on `sg/event`, which makes it a change to the one form every consumer writes. That is
+the part to settle with the human first.
+
+THEN THE NUMBER IS A LONGEST PATH OVER A CYCLIC GRAPH. It is finite only because every cycle in a
+real shape is bounded by a guard over a counter — `[:map [:lap [:int {:max laps}]]]` — so the bound
+is INSIDE the guard schema and would have to be read back out of it. That is not unreasonable: a
+guard is a schema, `:max` is data, and :a-guard-is-a-schema-over-the-event is exactly what makes it
+readable. But a shape whose cycles are bounded by something else — a set that shrinks, a queue that
+drains — carries its bound in the DATA, and for those the honest answer is `unbounded, as far as the
+shape can see`, which is a useful answer and has to be sayable.
+
+AND A NESTED MACHINE MULTIPLIES. A node holding a child costs the child's own worst case, once per
+entry, and ../coder is about to nest the same machine RECURSIVELY to a depth — see its
+:the-design-can-recurse-and-depth-is-a-budget-decision, where one extra level takes a ceiling from
+137 to order 1700. That is precisely where a hand-maintained formula stops being maintainable, and
+it is the strongest argument that this belongs here.
+
+AND THE ANSWER CANNOT BE A SCALAR. The same consumer now hires one agent on a bigger model than the
+rest, so two calls are not the same money. Whatever this computes has to be keyed BY SEAM — or by
+event — and let the consumer price it. `covering` is the precedent for the whole shape of the
+thing: reason over the transitions, report per transition, and have no opinion about what the
+report means.
+
+WHAT SAYS WAIT: one consumer, one formula, and it is currently right. The bar this library has held
+to is `a want, measured, twice` — and the recursion is the second want rather than the first, since
+it does not exist yet.
+
+
 ## MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA?
 
 MAY A STATE COMPLETE ON A CONDITION OVER ITS OWN DATA? The one door three separate wants knock
