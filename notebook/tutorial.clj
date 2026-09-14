@@ -8,6 +8,30 @@
 ;; page needs nothing installed; `sg/draw!` with a real image format needs graphviz.
 
 (ns tutorial
+  {:knowledge
+   [{:id :a-library-does-not-depend-on-the-thing-that-documents-it
+     :kind :decision
+     :says "clay 2.0.22 renders this tutorial and lives in the :notebook ALIAS and not in :deps: a library does not depend on the thing that documents it. clojure -X:notebook renders to docs/tutorial.html, gitignored because it is derived."}
+    {:id :rendering-the-notebook-is-a-test-the-suite-cannot-be
+     :kind :lesson
+     :says "Rendering this page runs every cell, and it has caught three bugs no test would have — twice a `problems` example asking the FACADE about a REFERENTIAL fault, whose constructor throws so there is no shape to ask about, and once :unknown-outcome failing to report a misspelled outcome. A tutorial writes the fault the way a READER would provoke it. The habit worth keeping is the render, not the memory: the second `problems` mistake was one the record had already written down."
+     :cites [:unknown-outcome-could-not-report-a-misspelling :two-kinds-of-check-and-two-places-for-them]}
+    {:id :a-notebook-example-for-a-referential-fault-asks-shape-problems
+     :kind :rule
+     :says "An example of a REFERENTIAL fault asks robertluo.state-graph.shape/problems of the PARTS. The facade's `problems` takes a BUILT shape, and the constructor refuses the parts, so there is nothing to hand it."
+     :cites [:rendering-the-notebook-is-a-test-the-suite-cannot-be]
+     :see [:robertluo.state-graph.shape/problems :robertluo.state-graph/problems]}
+    {:id :kind-graphviz-renders-client-side
+     :kind :lesson
+     :says "kind/graphviz takes a VECTOR whose first element is the dot source and renders it in the browser through viz.js, so a page full of this library's drawings needs NO graphviz installed to read. The one hazard is the JS template literal: a backtick in a node label would break it."
+     :cites [:dot-arrived-from-a-consumer]}
+    {:id :clay-render-true-is-headless
+     :kind :lesson
+     :says "Clay's defaults are :base-target-path docs, :format [:html], :show and :browse true. `:render true` implies show, serve, browse and live-reload all false, which is what makes clojure -X:notebook headless; :exec-fn scicloj.clay.v2.api/make! with :exec-args is why the alias needs no build namespace."}
+    {:id :the-cross-instance-interleaving-is-not-deterministic
+     :kind :lesson
+     :says "The cross-instance interleaving on :states is visible and is not deterministic, so the page says the ROW ORDER is not promised and shows the per-instance paths beside it, which are. A tutorial that asserted the interleaved order would flake."
+     :cites [:parallel-is-across-instances]}]}
   (:require [manifold.deferred :as d]
             [manifold.stream :as s]
             [robertluo.state-graph :as sg]

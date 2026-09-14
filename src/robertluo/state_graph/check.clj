@@ -10,6 +10,33 @@
    writing the machine, and they are the checks no other FSM library has.
 
    Requires the shape, ubergraph and malli."
+  {:knowledge
+   [{:id :what-the-graph-buys
+     :kind :decision
+     :says "The whole argument for not writing another FSM library: a shape that is a graph can be DRAWN, so a person sees the machine rather than reads it; CHECKED STATICALLY, which is the part that pays; and STORED, so history is queryable in the same shape as the definition."
+     :why "The check worth building first is the one no other FSM library has: a transition whose handler cannot produce a value the target's schema admits is a bug findable WITHOUT RUNNING ANYTHING. That is what malli on the nodes is for."
+     :cites [:the-shape-is-a-graph]}
+    {:id :two-kinds-of-check-and-two-places-for-them
+     :kind :decision
+     :says "shape/problems is REFERENTIAL — answerable from the parts alone, so it runs inside the constructor and a bad shape never exists. This namespace is STRUCTURAL — it needs the built graph, so it is separate and opt-in, off the runtime path: the compiler does not require it, and an application shipping a working shape never loads a graph algorithm."
+     :why "The drawing is in here too, and it belongs: it answers the same question by different means."
+     :cites [:where-a-check-lives-is-decided-by-when-it-must-answer]
+     :see [:robertluo.state-graph.shape/problems :robertluo.state-graph.check/problems]}
+    {:id :a-published-check-answers-about-the-machine
+     :kind :decision
+     :says "A published check answers about the MACHINE and not about one layer of it: every check answering MAPS recurses into nested children and carries :within, the path of nodes it was found under. The checks answering a SET OF IDS — reachable, traps, dead-ends, finishable — are about ONE graph and stay there, because two machines may name a state the same and a set has nowhere to say which it meant."
+     :why "Measured 2026-09-04: `problems` had recursed since nesting landed and NOTHING ELSE DID. Asked of a shape whose child had a proven :reads-unavailable, `readings` answered () while `problems` reported it with :within [:inner] — the same question, two doors, two answers, silently, and the complete answers were only on the complaint path."
+     :from "the author, 2026-09-04: `the 2 findings look like state-graph library's gaps`"
+     :when "2026-09-04"
+     :cites [:a-machine-can-nest-in-a-node]}
+    {:id :a-new-capability-is-not-local
+     :kind :lesson
+     :says "The lesson this project keeps relearning, three for three: a new capability is NOT LOCAL, and the place to look is whatever OTHER check reasoned about the same thing. Views made `commutes` unsound because it compared write sets only; the phase split found the licence decorative; the crank found every check but `problems` flat over a nested child. Each was found by asking `does this actually solve the problem it was built for`, and no test caught any of them."
+     :cites [:a-published-check-answers-about-the-machine :adding-a-read-made-commutes-unsound :the-licence-was-unsound-and-nothing-had-noticed]}
+    {:id :dependency-test-check
+     :kind :decision
+     :says "test.check 1.1.1 is in :deps and not :dev on purpose — generative tests are the unit suite here, not an extra — and `laws` loads it through malli.generator, so the facade does too. Nothing new is on the classpath for it; what changed is what is loaded."
+     :see [:robertluo.state-graph.check/laws]}]}
   (:require [clojure.string :as str]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -30,7 +57,12 @@
 (defn unreachable
   "States the shape declares and no run can ever be in. Not `has no in-edge`, which
    misses a whole island of states that only reach each other."
-  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]
+   :knowledge
+   [{:id :reachability-is-a-traversal-from-the-root
+     :kind :decision
+     :says "Unreachable is decided by a traversal from :initial and not by `has no in-edge`: two states that reach only each other both have in-edges and are both unreachable. The suite has exactly that island in it, because the weaker check passes it."
+     :cites [:what-the-graph-buys]}]}
   [sh]
   (into (sorted-set) (remove (reachable sh)) (shape/states sh)))
 
@@ -52,7 +84,12 @@
    EVERY state when the shape declares no :final at all, because a machine that was
    never meant to terminate is not a broken one. That is not a special case bolted on;
    it is what `can still finish` means where finishing is not a thing this machine does."
-  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]
+   :knowledge
+   [{:id :the-exception-lives-in-finishable
+     :kind :decision
+     :says "Where a shape declares no :final at all, EVERY state is finishable, vacuously — so a machine never meant to terminate is silent of its own accord, and `traps` needs no special case. That is what `can still finish` means where finishing is not a thing this machine does."
+     :cites [:a-trap-is-what-a-cycle-hides]}]}
   [sh]
   (let [finals (filter #(shape/final? sh %) (shape/states sh))]
     (if (empty? finals)
@@ -74,7 +111,17 @@
    TOTAL, so a dead end is in here too: the accessor is honest and `problems` is what
    filters, exactly as `subsumption` publishes every verdict. Empty where the shape
    declares no :final, by way of `finishable`."
-  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]
+   :knowledge
+   [{:id :a-trap-is-what-a-cycle-hides
+     :kind :decision
+     :says "`traps` answers the REACHABLE states from which no ending can be reached. It is `reachable` run backwards over the transposed graph from every :final, which is why it was cheap."
+     :why "Both other structural checks walk straight past it: a forward traversal gets there, and a trap HAS out-edges — going nowhere and going nowhere USEFUL are different faults. A dead end is a trap of size one; two states bouncing off each other are the smallest interesting one, and `problems` answered [] on exactly that fixture before this existed."
+     :cites [:reachability-is-a-traversal-from-the-root :the-exception-lives-in-finishable]}
+    {:id :traps-is-total-and-problems-filters
+     :kind :decision
+     :says "`traps` is total, so a dead end is in it too, and `problems` is what filters — each state is named once and by the sharper fault, :dead-end. The pattern `subsumption` set: the accessor publishes everything and the fault list is a projection of it."
+     :cites [:a-trap-is-what-a-cycle-hides]}]}
   [sh]
   (into (sorted-set) (remove (finishable sh)) (reachable sh)))
 
@@ -172,7 +219,21 @@
      bug by a distance, a handler that forgot to set something;
    - a value whose type cannot be the wanted one (see shape/primitive-types);
    - a [:= v] or an [:enum ...], where the values are finite and can simply be tried."
-  {:malli/schema [:=> [:cat shape/Schema shape/Schema] [:enum :yes :no :unknown]]}
+  {:malli/schema [:=> [:cat shape/Schema shape/Schema] [:enum :yes :no :unknown]]
+   :knowledge
+   [{:id :a-partial-subsumption-checker
+     :kind :decision
+     :says "`admits` answers :yes, :no or :unknown, and IT NEVER LIES. Malli has no subsumption — m/validate answers about a value, and nothing asks whether schema A is admitted by schema B — so it is written here, structurally over :map entries, and declines to answer wherever it cannot prove one."
+     :why "What it can prove, each decidable rather than heuristic: a REQUIRED key the produced value may not have, the common bug by a distance; a value whose TYPE cannot be the wanted one, over seven primitives verified pairwise disjoint; and a [:= v] or an [:enum ...], where the values are finite and can simply be tried."
+     :cites [:the-seven-primitive-types-are-pairwise-disjoint]}
+    {:id :unknown-is-an-answer-and-not-a-failure
+     :kind :rule
+     :says ":unknown is an answer and not a failure, and `problems` reports only PROVEN faults. A checker that cries about what it could not work out is a checker people turn off; publishing every verdict, :unknown and :undeclared included, makes the check's own coverage readable, which is better than pretending to be total."
+     :cites [:a-partial-subsumption-checker]}
+    {:id :soundness-is-tested-by-generation
+     :kind :decision
+     :says "Where `admits` says :yes, values generated from the produced schema must all validate against the target — a genuinely independent second opinion. That direction is the one worth paying for: a checker saying :no where it should say :unknown merely nags, one saying :yes where it should say :no HIDES A BUG."
+     :cites [:a-partial-subsumption-checker]}]}
   [target produced]
   (sub (m/schema target) (m/schema produced)))
 
@@ -189,7 +250,12 @@
 
    nil where the edge declared no :out. That declaration is what this check is FOR:
    without it there is nothing to say about a closure."
-  {:malli/schema [:=> [:cat shape/Shape :map] [:maybe shape/MapSchema]]}
+  {:malli/schema [:=> [:cat shape/Shape :map] [:maybe shape/MapSchema]]
+   :knowledge
+   [{:id :the-subsumption-check-had-to-learn-about-sub
+     :kind :lesson
+     :says "Until this composed :sub the way the compiler does, nesting was broken in a way only the check could see: a nesting target's enter-schema REQUIRES :sub, no handler may write it, and the step assocs the child's first state on entry, so every edge into a nested node was condemned :target-refuses. Found one minute after nesting first worked."
+     :cites [:what-is-checked-must-be-what-runs :sub-is-the-machinerys]}]}
   [sh {:keys [from to out]}]
   (when out
     (cond-> (-> (mu/merge (uber/attr sh from :schema) out)
@@ -209,7 +275,12 @@
    :sub IS NOT CARRIED. A child left behind would ride into a state that never declared it,
    so `arrive` drops it and re-seeds — and this starts from the node's OWN schema, which
    never held it, so the two agree without either mentioning the other."
-  {:malli/schema [:=> [:cat shape/Shape shape/Id :map] shape/MapSchema]}
+  {:malli/schema [:=> [:cat shape/Shape shape/Id :map] shape/MapSchema]
+   :knowledge
+   [{:id :a-completion-is-never-undeclared
+     :kind :decision
+     :says "A completion transition is checked HARDER than an event edge and is never :undeclared: it carries no closure, so what arrives is the state itself and its schema is known exactly. :sub is not carried, `arrive` dropping and re-seeding it, and this starts from the node's own schema, which never held it — so the two agree without either mentioning the other."
+     :cites [:what-is-checked-must-be-what-runs :a-completion-is-an-edge-and-not-a-node-attribute]}]}
   [sh from {:keys [to yield]}]
   (let [base (cond-> (uber/attr sh from :schema) yield (mu/merge yield))]
     (cond-> (mu/assoc base :id [:= to])
@@ -223,7 +294,21 @@
    A COMPLETION TRANSITION IS IN HERE TOO, marked {:done true} and carrying no :event,
    because it is a way a state is entered and this check is about what a target will
    admit. See `continued` for why none of them is ever :undeclared."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :an-edge-with-no-out-is-undeclared-and-not-a-fault
+     :kind :decision
+     :says "An edge whose event declared no :out is :undeclared and not a fault. That declaration is what the whole check is FOR; without it there is nothing to say about a closure, and the check degrades to the generative one — generate an event, run the handler, validate the answer — which is this project's testing style anyway."
+     :cites [:a-handler-answers-a-map-and-declares-it :unknown-is-an-answer-and-not-a-failure]}
+    {:id :the-out-is-the-events-and-that-is-the-friction
+     :kind :lesson
+     :says "The first consumer's real friction: an event leading to two targets needing DIFFERENT data — :fault requires a fault string, :implemented does not — shares one :out, so it must be weak enough for the green edge and then cannot prove the red one. :target-refuses, on a correct shape. The way out is to declare NO :out on the guarded event and let the runtime :answer and :enter crossings enforce it; this then says :undeclared, which is coverage rather than a fault."
+     :when "2026-09-03"
+     :cites [:two-edges-share-one-out :an-edge-with-no-out-is-undeclared-and-not-a-fault]}
+    {:id :weakening-a-schema-to-please-a-checker-is-refused
+     :kind :rejected
+     :says "Weakening the target's own schema to {:optional true} buys a :yes back and is weakening a schema to please a checker. Named so nobody takes that road."
+     :cites [:the-out-is-the-events-and-that-is-the-friction]}]}
   [sh]
   (concat
    (for [t (shape/transitions sh)]
@@ -252,7 +337,12 @@
 
    A source that only OPTIONALLY has the key is :no, and that is right: a view a handler is
    handed cannot rest on a maybe."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :views-is-admits-again
+     :kind :decision
+     :says "The view check is `admits` with the view as TARGET and the source node's schema as what is PRODUCED, and it needed no new machinery for the same reason nesting needed none. A source that only OPTIONALLY has the key is :no, and that is right: a view a handler is handed cannot rest on a maybe."
+     :cites [:a-partial-subsumption-checker :internal-visibility-is-declared-and-not-automatic :the-view-check-is-only-sound-under-projection]}]}
   [sh]
   (concat
    (for [{:keys [from event sees]} (shape/transitions sh)]
@@ -274,7 +364,12 @@
    SOUND FOR THE SAME REASON `views` IS: a node holds exactly what it declares, so :no is a
    proof rather than a guess. And a source that only OPTIONALLY has the key is :no — a report
    handed a view cannot rest on a maybe any more than a handler can."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :readings-is-admits-for-the-fourth-time
+     :kind :decision
+     :says "The :reads check is `admits` with the read as TARGET and the source node's schema as PRODUCED — `views` was the second and `yields` the third. A driver runs a report in the state that AWAITS the event, so that state is what must provide the keys. :undeclared where there is no report, which means the world supplies the event and there is nothing to check."
+     :cites [:views-is-admits-again :an-event-may-say-how-it-is-reported]}]}
   [sh]
   (concat
    (for [{:keys [from event reads report]} (shape/transitions sh)]
@@ -303,7 +398,12 @@
    escape the child could be in ANY state, so :no would prove nothing and this would condemn
    shapes that run — the same dependency `views` has on projection, and the same lesson: a
    read check is only ever as sound as the moment it reads at."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :yields-is-admits-for-the-third-time
+     :kind :decision
+     :says "The yield check is `admits` with the yield as TARGET and the child's own final state as PRODUCED. EVERY final state is asked for an unconditional completion, a child being free to finish in any of them, and a yield resting on only some is a yield that is sometimes not there. A per-outcome completion is asked about its OWN final state and no other — sharper, not looser."
+     :cites [:views-is-admits-again :yield-is-harvested-at-completion-only :done-may-say-where-each-outcome-goes]}]}
   [sh]
   (concat
    (for [[from cs] (shape/continuations sh)
@@ -336,7 +436,12 @@
    declares, and the seed is taken off the node's own PROJECTED value — so :no is a proof.
    A node that only OPTIONALLY has the key is :no, a child handed a seed being no better
    off with a maybe than a handler is."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :seeds-is-admits-in-both-directions
+     :kind :decision
+     :says "A seed is a crossing with two sides and either can be wrong, so this is `admits` for the fifth and sixth time: :provides — can this node give the seed, with the node's own schema as produced — and :accepts — will the child take it, with the child's first state as the target. It is `yields` read backwards, and deliberately shaped like it."
+     :cites [:views-is-admits-again :a-node-may-sow-its-child :sown-off-the-projected-value]}]}
   [sh]
   (concat
    (for [id (sort (shape/states sh))
@@ -405,7 +510,16 @@
    guard admits fires no edge, and that is `ignored` — legal, first-class, and exactly what
    a lone guard used as a FILTER is for. Reporting it as a fault would make `problems`
    publish a suspicion, which it has never done."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :coverage-is-published-and-never-faulted
+     :kind :decision
+     :says "Whether the guards on a [state, event] leave a GAP is published and never faulted. A gap means no edge admits the event, which is `ignored` — legal, first-class, and exactly what a lone guard used as a filter is for. Reporting it as a fault would make `problems` publish a SUSPICION, which it has never done."
+     :cites [:there-is-no-else :unknown-is-an-answer-and-not-a-failure]}
+    {:id :the-witness-landed-in-coverage
+     :kind :lesson
+     :says "The witness the guard design promised for :ambiguous is not there — two map schemas are never proven to overlap — but it did land here, where the probe pins one key to one value so a value is in hand. Same idea, and it works only where something CONSTRUCTS the value."
+     :cites [:dis-map-never-answers-no]}]}
   [sh]
   (concat
    (for [[[from ev] ts] (sort-by key (group-by (juxt :from :event) (shape/transitions sh)))]
@@ -642,7 +756,78 @@
 
    `commuting` TAKES ONLY THIS MACHINE'S, and that is not a detail: it is the licence a
    runtime layer looks up by state id, and a child may name a state whatever it likes."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :two-events-in-flight-at-once
+     :kind :decision
+     :says "SERIALISE BY DEFAULT, and take concurrency only where the shape PROVES the order of completion cannot be observed. A handler may answer a deferred, so a second event can arrive while the first is in flight; where the state admits only the first the second WAITS, and where it admits both they may be applied in order of completion — but only when they commute."
+     :from "the author, 2026-08-31, correcting :parallel-is-across-instances: every argument there was about events arriving one at a time and none touched two events PENDING in one state"
+     :when "2026-08-31"
+     :cites [:parallel-is-across-instances]}
+    {:id :both-admitted-is-not-the-condition
+     :kind :rejected
+     :says "`Both admitted` is not the condition, and it was the first analysis's mistake. Both admitted means each is INDIVIDUALLY legal there, not that they commute: idle -start-> running beside idle -cancel-> cancelled — if start completes first the machine is in running, which has no cancel edge, so the cancel is SILENTLY DISCARDED and the caller believes they cancelled. A flake, not a race anybody chose."
+     :cites [:two-events-in-flight-at-once]}
+    {:id :the-condition-is-confluence-plus-bernstein
+     :kind :decision
+     :says "The condition is CONFLUENCE — the diamond [s a]->ta, [s b]->tb, [ta b]->x, [tb a]->x with one x — plus BERNSTEIN'S conditions on the patches: neither writes what the other writes, and neither READS what the other writes. The intermediate states need no check of their own: if [ta b] is an edge at all, subsumption has already asked whether ta admits what b produces."
+     :why "Measured: writes of {:total} and {:n} are disjoint while :sum reads :n, and the two orders answer :total 2 and :total 18. The write-write half is no longer absolute — a key declaring a COMMUTATIVE COMBINE is licensed — and the read half is untouched and cannot be helped by one."
+     :cites [:two-events-in-flight-at-once :a-combine-is-how-a-patch-lands :the-patch-is-never-stale-only-the-admission-is]}
+    {:id :adding-a-read-made-commutes-unsound
+     :kind :lesson
+     :says "Adding a declared view made this check UNSOUND, because it compared WRITE sets only: a handler that computed :total from the :n another handler is changing has a patch that goes stale, and write sets alone cannot see it. Found by asking whether the check still solved the problem it was built for, two entries away from the change."
+     :cites [:the-condition-is-confluence-plus-bernstein]}
+    {:id :the-licence-was-unsound-under-nesting
+     :kind :lesson
+     :says "INNER FIRST means a child sees an event before the parent's own edges do, so a nesting node's self-loops describe a diamond that never runs: measured, a node whose child admitted both events had its self-loops licensed :yes while the child's own confluence proved that pair :no, and the two orders landed in visibly different states. `commutes` answers :unknown wherever a nested machine could take either event — where the pair is pending, or either state it would leave it in; the state a pair ENDS in may nest freely."
+     :why "It was decorative for two days and nothing noticed, because `drive` serialised whatever it said. The licence became load-bearing the day the runtime took it."
+     :cites [:the-condition-is-confluence-plus-bernstein :inner-first]}
+    {:id :the-licence-was-unsound-and-nothing-had-noticed
+     :kind :lesson
+     :says "The licence was unsound and nothing had noticed, found by ASKING rather than by a test, and harmless for exactly as long as `drive` ignored it. The habit worth keeping: before resting anything on a check, ask what it was reasoning about — a check that is decorative is a check nobody has tested against reality."
+     :cites [:the-licence-was-unsound-under-nesting]}
+    {:id :a-completion-refuses-the-licence-around-it
+     :kind :decision
+     :says "A completion transition leaving s, ta or tb makes the pair :unknown, for the same reason nesting does: if ta continues, the second patch is applied where ta CONTINUED TO and not at ta, so the lookup that would run is not the one read here. THE JOIN NODE x IS EXEMPT, and that matters: both orders were proved to arrive at the same x and a continuation is a pure function of the state, so a join's own :complete is exactly where a :done belongs."
+     :why "Implied today and stated anyway — no shape the constructor builds can reach it, :done-with-edges refusing a plain state that both continues and has out-edges — because the argument spans two namespaces and the licence is load-bearing."
+     :cites [:the-condition-is-confluence-plus-bernstein :a-state-may-say-where-it-goes-when-it-completes]}
+    {:id :the-diagonal-is-the-fan-out
+     :kind :decision
+     :says "The pair may be two of ONE event, and the diagonal is asked about since 2026-09-03: n workers feeding one accumulating state send n events of a single id, and an async handler makes two of them pending exactly as it does two ids. Licensed only where every key the :out writes declares a commutative combine. `commutes` needed NO CHANGE to say so — the whole change was (neg? (compare a b)) becoming (not (pos? ...)) — which is what says the condition was right all along."
+     :why "Measured: two 300ms reports went 613ms to 305ms. An event that writes nothing commutes with itself, the write-write filter being empty."
+     :when "2026-09-03"
+     :cites [:the-condition-is-confluence-plus-bernstein :a-combine-is-how-a-patch-lands]}
+    {:id :only-ever-two-in-flight
+     :kind :decision
+     :says "Only ever TWO events in flight. `commuting` is a pairwise relation on ONE state; a third would need the licence re-established at each intermediate state, and inventing that in the runtime would be taking more than was proven. The speculative take is one event deep for the same reason."
+     :cites [:the-condition-is-confluence-plus-bernstein]}
+    {:id :no-independence-is-declared
+     :kind :rejected
+     :says "An author-asserted independence between events was turned down twice over: the shape ALREADY says which events are self-loops, so nothing needs asserting; and independence is STATE-RELATIVE, so a global claim would be refuted somewhere in most real shapes. Dependency is the default and needs no saying."
+     :cites [:two-events-in-flight-at-once]}
+    {:id :confluence-was-measured-not-guessed
+     :kind :lesson
+     :says "ONE HUNDRED PER CENT of the concurrent-candidate pairs in this project's early fixtures fail confluence — set-then-stop lands :running then :done, stop-then-set lands :done and silently discards the :set — so `commute by default` would have been wrong in every case there was, silently and order-dependently. The finding is structural: different events take you to different places, and that is what a state machine is FOR. What those fixtures had none of was a JOIN."
+     :cites [:both-admitted-is-not-the-condition :a-join-is-the-product-and-the-licence]}
+    {:id :a-join-is-the-product-and-the-licence
+     :kind :decision
+     :says "A JOIN is the product construction and needed no new grammar: :complete declares both keys REQUIRED and two events reach it by two routes through intermediate states that declare what has arrived so far, at the DFA's own cost of 2^n states — 4 at n=2, 8 at n=3. Projection is why it works: the state name is the join's progress and the schema says so. And confluence PROVES it: the n=3 lattice is 8 states, 12 edges, problems [], confluence {:yes 6}, all six permutations landing in one identical state. A join is what a commuting pair IS."
+     :why "Parking needed nothing and already worked — a state waiting for :approve is a state with an :approve edge, and an event it does not admit comes back :fired false. So the feature was the runtime taking the licence, and only wall-clock had been lost."
+     :from "the author, 2026-09-03, asked for two features: park on a state waiting for an external signal, and transit only after two independent events"
+     :when "2026-09-03"
+     :cites [:the-condition-is-confluence-plus-bernstein :a-node-holds-what-it-declares :a-handler-answers-a-map-and-declares-it :orthogonal-regions-are-out :an-event-may-say-how-it-is-reported]}
+    {:id :a-join-helper-was-not-added
+     :kind :rejected
+     :says "A join is a PARTS ASSEMBLY and not a construct, so no `join` helper was added: the n=3 lattice was generated by a twenty-line function over the powerset. If one is ever wanted it belongs in whoever writes the workflows."
+     :cites [:a-join-is-the-product-and-the-licence :a-shared-catalogue-must-be-selected-from]}
+    {:id :a-join-guard-over-the-state-was-turned-down
+     :kind :rejected
+     :says "A {:join <schema>} plus {:done <target>} continuation — accumulate on self-loops and move on when the state satisfies a schema — was turned down. It is a GUARD OVER THE STATE wearing a different hat."
+     :cites [:a-join-is-the-product-and-the-licence :a-guard-over-the-state-is-refused]}
+    {:id :history-order-stops-matching-arrival-order
+     :kind :decision
+     :says "The cost of taking the licence, accepted by the author: where concurrency is taken, HISTORY ORDER STOPS MATCHING ARRIVAL ORDER, and an audit trail has to represent that honestly rather than pretend to a sequence that did not happen."
+     :cites [:two-events-in-flight-at-once]}]}
   [sh]
   (concat (confluent sh) (inside sh confluence)))
 
@@ -697,7 +882,32 @@
    A key whose schema malli cannot generate THROWS, which is malli's answer and not one to
    work around: give that schema a :gen/gen. The runtime check holds either way."
   {:malli/schema [:function [:=> [:cat shape/Shape] [:sequential :map]]
-                            [:=> [:cat shape/Shape [:maybe :map]] [:sequential :map]]]}
+                            [:=> [:cat shape/Shape [:maybe :map]] [:sequential :map]]]
+   :knowledge
+   [{:id :the-law-is-left-commutativity
+     :kind :decision
+     :says "The law the licence rests on is LEFT-COMMUTATIVITY over (state, patch, patch) triples — f(f(s,a),b) = f(f(s,b),a) — because that is the shape the fold has, and not commutativity of the binary operation. The second law is :closed and is not optional: f of two values of the key's schema must answer a value of that schema, or `produced`, which knows nothing of a combine, makes every edge into that state a lie."
+     :cites [:the-promise-is-data-and-checked-at-two-strengths]}
+    {:id :the-binary-law-was-the-wrong-law
+     :kind :lesson
+     :says "The law tested first was the wrong law: a function can be left-commutative in the fold and not commutative as a binary operation, the fold always putting the STATE first, so a rule that only ever discards the second argument is consistent in both orders. Two of three attempted counterexamples were not counterexamples for exactly that reason."
+     :cites [:the-law-is-left-commutativity]}
+    {:id :the-prototype-refuted-my-own-sound-example
+     :kind :lesson
+     :says "`best-of` written as (if (>= score-a score-b) a b) was offered as the correct example and generation broke it in forty samples: a TIE has no canonical winner, and it took a TOTAL order — (compare [score by]) — to make the law hold. If the person proposing the mechanism gets it wrong in the first example, the mechanism needs a checker and not a docstring."
+     :cites [:the-promise-is-data-and-checked-at-two-strengths]}
+    {:id :generation-cannot-reach-every-violation
+     :kind :lesson
+     :says "A plausible domain rule — `a pinned choice wins outright` — is not left-commutative, and 27,000 generated triples found nothing, malli having no reason to invent the string `pinned`. So this never answers :yes: generation can REFUTE a law and cannot prove one, and the runtime check on the concrete values is the enforcement."
+     :cites [:the-law-is-left-commutativity :agree-verifies-the-law-on-the-concrete-values]}
+    {:id :laws-is-not-part-of-problems
+     :kind :decision
+     :says "`laws` is deliberately not part of `problems`. `problems` is static, cheap and runs nothing; this runs the author's own function a couple of thousand times, and mixing them would make a static check a test runner. Seeded, so it answers the same thing twice; an :fn schema with no :gen/gen throws no-generator, which is malli's answer and not one to work around."
+     :cites [:the-promise-is-data-and-checked-at-two-strengths]}
+    {:id :the-accumulator-must-be-a-set
+     :kind :lesson
+     :says "`into` on a VECTOR is order-dependent, so the obvious spelling of a join accumulator is not commutative — which worker reported first is visible in the answer — and this refuted it in forty samples. Set union works, and so does a map keyed by the item. Both are fixtures, and the trap is in the README and the tutorial because everyone meets it first."
+     :cites [:most-domain-merges-are-not-commutative :the-diagonal-is-the-fan-out]}]}
   ([sh] (laws sh nil))
   ([sh opts]
    (let [{:keys [samples seed]} (merge {:samples law-samples :seed 1} opts)]
@@ -743,7 +953,18 @@
    it together with the child's entries, which carry :within — the crank asks the innermost
    machine first, and a nesting node whose child is running is not where the next event
    comes from."
-  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:sequential :map]]
+   :knowledge
+   [{:id :driving-is-the-static-half-of-awaiting
+     :kind :decision
+     :says "One verdict per state about who can move it — :final, :driver, :world, :join, :fork — asked of the GRAPH before anything runs, where drive's `awaiting` asks the same question of a running machine. A generative property asserts the two answers agree for every state a driven run lands in; neither is derived from the other, so it is the only thing that can catch one drifting."
+     :why "The crank discovers at runtime that a state offers two reportable events it cannot choose between, and parks. Nothing said so beforehand — `problems` called such a shape fine — which for a library whose argument is that a graph can be checked before it runs was a hole in the newest door."
+     :when "2026-09-04"
+     :cites [:the-driver-world-distinction-is-data :a-join-is-the-product-and-the-licence]}
+    {:id :a-fork-is-published-and-never-faulted
+     :kind :decision
+     :says ":fork — several events reportable and the shape does not prove the order irrelevant — is the verdict worth looking for, a shape that will park for ever at a state you meant to be automatic. It is published and never faulted, where :ambiguous went the other way: two guards on one [from event] is nondeterminism IN THE MACHINE, while two reportable events is a question about who produces an event, and a shape may perfectly well want the world to choose. What would be wrong is a driver choosing for it."
+     :cites [:driving-is-the-static-half-of-awaiting :ambiguous-inverts-and-demands-proven-safety]}]}
   [sh]
   (let [reported (set (keys (shape/reports sh)))
         pairs    (into {} (for [{:keys [in pair verdict]} (own (confluence sh))]
@@ -780,7 +1001,12 @@
    THIS IS NOW LOAD-BEARING AND WAS ONCE DECORATIVE. `sg/run` hands it to the async layer
    as the LICENCE, so a wrong :yes here is an order-dependent flake and not merely an
    unused claim — which is what makes every :unknown above worth its caution."
-  {:malli/schema [:=> [:cat shape/Shape] [:map-of shape/Id [:set [:set shape/Id]]]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:map-of shape/Id [:set [:set shape/Id]]]]
+   :knowledge
+   [{:id :the-licence-is-one-machines
+     :kind :decision
+     :says "`commuting` takes only THIS machine's pairs and not its children's, and that is sharper than tidiness: it is a lookup keyed by STATE ID that the stream door hands down as the licence, so a child's pair would merge into a parent state that happens to share its name and license a concurrency nothing proved. A wrong :yes there is an order-dependent flake. The crank's own lookup filters the same way, asking each LEVEL about its own shape."
+     :cites [:a-published-check-answers-about-the-machine :the-licence-was-unsound-under-nesting]}]}
   [sh]
   (reduce (fn [m {:keys [in pair verdict]}]
             (cond-> m (= :yes verdict) (update in (fnil conj #{}) (set pair))))
@@ -801,7 +1027,16 @@
    Only PROVEN faults. An :unknown subsumption is not reported: a checker that cries
    about what it could not work out is a checker people turn off — and a machine with no
    :final declared is not condemned for having no way to finish, see `finishable`."
-  {:malli/schema [:=> [:cat shape/Shape] [:vector :map]]}
+  {:malli/schema [:=> [:cat shape/Shape] [:vector :map]]
+   :knowledge
+   [{:id :the-structural-faults
+     :kind :decision
+     :says "STRUCTURAL faults, reported here and needing the built graph: :unreachable, :dead-end, :trap, :target-refuses, :view-unavailable, :reads-unavailable, :yield-unavailable, :seed-unavailable, :seed-refused. PUBLISHED AND NEVER FAULTED, being coverage rather than fault: subsumption, views, readings, yields, seeds, coverage, confluence, commuting, laws, driving."
+     :cites [:two-kinds-of-check-and-two-places-for-them :the-referential-faults :unknown-is-an-answer-and-not-a-failure]}
+    {:id :problems-takes-own-from-the-checks-that-recurse
+     :kind :decision
+     :says "`problems` recurses into nested children itself and takes only its OWN answers from the checks it derives faults from, or every nested fault would be reported twice — once from the child's verdict and once from this recursion. Asserted. The id-set checks cannot recurse, having nowhere to say which machine they meant, so the recursion here is what covers them."
+     :cites [:a-published-check-answers-about-the-machine]}]}
   [sh]
   (let [ends (dead-ends sh)]
     (vec (concat
@@ -923,7 +1158,27 @@
   "The shape with its attributes replaced by things a person can read. ubergraph's own
    :auto-label pprints the whole attribute map, which here is a COMPILED malli schema
    and a CLOSURE — neither of which is a label."
-  {:malli/schema [:=> [:cat shape/Shape] shape/Shape]}
+  {:malli/schema [:=> [:cat shape/Shape] shape/Shape]
+   :knowledge
+   [{:id :a-node-is-labelled-by-its-id
+     :kind :decision
+     :says "Labels are the name and the structural markers — ▸ initial, ◼ final, ⊞ n states for a nesting node, a guard on an arrow — and nothing else. The schema is not in the label, and it used to be."
+     :why "What a drawing is FOR is structure — an unreachable state is obvious in a picture and invisible in a map literal — and a schema is precisely the part of a shape a map literal DOES show. Measured on the first real consumer: twelve labels, the longest 1,183 characters, a dot source of 10,408, and dot -Tpng printed `graph is too large for cairo-renderer bitmaps`, scaled, and wrote a ZERO-BYTE FILE. After: 1,007 characters of dot and a 120KB PNG. All markers kept are STRUCTURAL, which is the test for anything wanting into a label."
+     :from "the author, 2026-09-02: `should not each state just be represented by the :id?`"
+     :when "2026-09-02"
+     :cites [:what-the-graph-buys]}
+    {:id :the-drawing-is-harels
+     :kind :decision
+     :says "An arrow reads EVENT [guard], Harel's own notation, with the guard read off the schema — verdict=:green where a key is pinned, verdict∈[...] for a small set, the :description where the author wrote one, truncated to fit. A completion is DASHED and unlabelled where unconditional, [<the child's final state>] where per-outcome: two dashed arrows leaving one node are two structural facts, and a picture that cannot tell them apart shows a machine that does not exist."
+     :cites [:a-node-is-labelled-by-its-id :done-may-say-where-each-outcome-goes]}
+    {:id :a-schema-back-in-the-label-was-not-built
+     :kind :rejected
+     :says "An option to put the schema back into the label was not built. Nobody has asked, the shape is right there to read, and `problems` answers what the schemas imply better than a picture of them ever did."
+     :cites [:a-node-is-labelled-by-its-id]}
+    {:id :graphviz-clusters-are-not-reachable-through-viz-graph
+     :kind :lesson
+     :says "ubergraph's viz-graph builds its own dorothy element list with no hook for a graphviz CLUSTER, so a nested child is not drawn inside its parent. The alternatives were copying ubergraph's private dotid and sanitize-attrs, or rewriting the child's dot to prefix every node id — a small and fragile compiler. Instead the parent MARKS the node and the child is asked for its own picture."
+     :cites [:a-node-is-labelled-by-its-id]}]}
   [sh]
   (reduce (fn [g e]
             (uber/set-attrs g e (cond-> {:label (edge-label sh e)}
@@ -949,7 +1204,16 @@
    clojure.java.io/writer on what it is handed, and that accepts a java.io.Writer — so a
    StringWriter catches the source in memory. Verified. It needs no `finally` either: spit
    closes the writer it made, and closing a StringWriter is a no-op that keeps the buffer."
-  {:malli/schema [:=> [:cat shape/Shape] :string]}
+  {:malli/schema [:=> [:cat shape/Shape] :string]
+   :knowledge
+   [{:id :dot-arrived-from-a-consumer
+     :kind :decision
+     :says "`dot` answers the drawing as DATA where `draw!` is the drawing as an effect, and it arrived from a consumer — the tutorial could not be written without it, and `draw!` alone cannot serve a renderer that is not graphviz. A consumer's need is the only good reason to widen a facade."
+     :why "It paid twice: the notebook's helper went from eleven lines to four, and the graphviz-source test stopped needing a file and left the integration suite for the fast loop."}
+    {:id :viz-graph-answers-nothing-useful
+     :kind :lesson
+     :says "viz-graph threads the dot string through a cond-> whose :dot branch is (#(spit filename %)), so its value is spit's nil and the source is only ever written OUT. The way to it as a value: `spit` calls clojure.java.io/writer on what it is handed and accepts any java.io.Writer, so a StringWriter catches the source in memory and needs no finally. Its :auto-label pprints the whole attribute map, which here holds a compiled schema and a closure."
+     :cites [:dot-arrived-from-a-consumer]}]}
   [sh]
   (let [w (java.io.StringWriter.)]
     (uber/viz-graph (labelled sh) {:save {:filename w :format :dot}})
@@ -966,6 +1230,19 @@
    IT ANSWERS NOTHING USEFUL, ubergraph's own return being spit's nil for :dot and a
    viewer's for the rest. Somebody who wants the source as a VALUE wants `dot`."
   {:malli/schema [:function [:=> [:cat shape/Shape] :any]
-                            [:=> [:cat shape/Shape :map] :any]]}
+                            [:=> [:cat shape/Shape :map] :any]]
+   :knowledge
+   [{:id :dot-can-write-a-zero-byte-file-and-exit-0
+     :kind :lesson
+     :says "`dot` can write a ZERO-BYTE FILE and exit 0 on an oversized graph, after a warning that looks survivable and is not. CHECK THE FILE AND NOT THE EXIT CODE. SVG rendered the same graph fine, which made it look like a graphviz quirk rather than a label problem."
+     :cites [:a-node-is-labelled-by-its-id]}
+    {:id :two-tests-two-requirements
+     :kind :lesson
+     :says ":format :dot is a spit and needs NOTHING installed; :format :png shells out, and that test is the only thing proving the RENDERING path — asserted on the PNG magic bytes, because a file existing proves only that something wrote one. Verified both ways: outside the devenv the render test errors and the source test passes; inside, both pass. graphviz is in the shared devenv because a drawing nobody can look at is not worth having."
+     :cites [:dot-can-write-a-zero-byte-file-and-exit-0]}
+    {:id :check-the-drawing-as-a-real-png
+     :kind :lesson
+     :says "Check a drawing as a real PNG and not as dot source. The completion transitions were checked that way — dashed unlabelled arrows beside a solid labelled `cancel` for the abort — which is the distinction visible at a glance and the argument for drawing at all. And assert that no $eval reached a label: a closure in a picture is the failure mode."
+     :cites [:the-drawing-is-harels]}]}
   ([sh] (draw! sh {}))
   ([sh opts] (uber/viz-graph (labelled sh) opts)))

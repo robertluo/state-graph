@@ -27,6 +27,30 @@
   AND `async/drive` IS NOT THIS. That one serialises ONE machine over a manifold
   stream and is the async layer's own; this one finds the events. They share a
   word because both mean `keep going`, and nothing else."
+  {:knowledge
+   [{:id :the-crank-is-the-door-report-was-missing
+     :kind :decision
+     :says "The third door: `drive` and one turn of it, `step`, with `awaits`, `awaiting`, `where` and `advance` beside them. Synchronous and one machine, which keeps the division the other two doors had — the compiler is the pure core, async is the concurrent default, and this is the one that FINDS events rather than being fed them."
+     :why "A declaration with nothing in the library consuming it is half a feature, and that was :report: the shape could say how an event is FOUND and nothing here ever went and found one, so every application wrote the same forty lines — what does this state await, which of those did the shape give a :report, what view does that report read, run it, put the event id on, apply it, go round. That loop is :report, :done, nesting and confluence, all of them this library's own, and the way we found out is that it got written twice."
+     :from "the author, 2026-09-04: `again, drive and step, if you have to live with them, add them to the state-graph api` and `park is a general ability, not something every workflow needs to implement by itself`"
+     :when "2026-09-04"
+     :cites [:an-event-may-say-how-it-is-reported :the-driver-world-distinction-is-data]}
+    {:id :a-declaration-nothing-consumes-is-half-a-feature
+     :kind :lesson
+     :says ":report was declared on 2026-09-04 and the argument for stopping there — `the shape telling a caller HOW an event would be found, and a caller choosing to ask` — was right about the SEMANTICS and wrong about the SURFACE. Measured twice before the loop was moved: the first consumer shrank by 160 lines and no longer required the facade at all."
+     :cites [:the-crank-is-the-door-report-was-missing]}
+    {:id :a-run-is-the-vector-of-events
+     :kind :decision
+     :says "A run is the vector of events that happened, in order, and that is the whole data model here. Where it got to is a reduction over it, so resuming is replaying, rewinding is a PREFIX, and a turn can be looked at, thrown away or taken again. Nothing mutates and nothing is stored; :on is how a caller writes down what happened."
+     :cites [:compilation-and-lifecycle]}
+    {:id :a-concurrent-crank-was-not-taken
+     :kind :rejected
+     :says "A concurrent crank was not built. :reports is an injection, so the library neither depends on manifold at this layer nor decides how many threads anybody has; a caller with a stream library hands one that runs the thunks at once. The concurrent door is still `run`."
+     :cites [:the-crank-is-the-door-report-was-missing :inject-a-function-and-never-thread-options]}
+    {:id :a-budget-in-drive-was-not-taken
+     :kind :rejected
+     :says "A budget, a retry limit or a give-up rule inside `drive` was not taken. Those are EDGES, where they can be drawn and checked; `drive` needs no counter because the stopping rule is in the shape, which is the only reason a loop belongs in a library at all."
+     :cites [:the-crank-is-the-door-report-was-missing :a-retry-budget-is-two-guarded-edges]}]}
   (:require [malli.core :as m]
             [malli.util :as mu]
             [robertluo.state-graph.check :as check]
@@ -39,7 +63,12 @@
   "A run: the events that happened, in the order they happened."
   [:sequential compile/Event])
 
-(def Turn
+(def ^{:knowledge
+       [{:id :the-two-parks-are-different
+         :kind :decision
+         :says "Two parks, told apart here. :from :world is the SHAPE'S — an event only a person can supply, the same on every run of that shape. :held is THIS RUN'S — the caller's :permitted said not yet — and it moves nothing in the graph, which is why supervising a run does not change its fingerprint: a workflow watched and a workflow left alone are the same machine."
+         :cites [:the-driver-world-distinction-is-data :the-fingerprint-carries-no-name]}]}
+  Turn
   "WHY A RUN IS NOT MOVING AND WHO CAN MOVE IT — what `awaiting` answers, and the
    whole driving rule as one value.
 
@@ -67,7 +96,12 @@
    [:events {:optional true} [:vector shape/Id]]
    [:held   {:optional true} :boolean]])
 
-(def Options
+(def ^{:knowledge
+       [{:id :everything-else-is-injected
+         :kind :decision
+         :says "Everything a driver is given is a function or a value and never a setting this library has to understand: :permitted (what this turn may report), :on (told each applied event, which is how a caller writes a transcript), :context (handed to the compiler), :reports (given the thunks, so a caller with a stream library pays for the slowest rather than the sum)."
+         :cites [:inject-a-function-and-never-thread-options :the-crank-is-the-door-report-was-missing]}]}
+  Options
   "WHAT A DRIVER IS GIVEN, and every one of them is a FUNCTION OR A VALUE rather
    than a setting this library then has to understand.
 
@@ -224,7 +258,19 @@
   running machine first, a child's own vocabulary deciding before its host's."
   {:malli/schema [:function
                   [:=> [:cat shape/Shape Run] Turn]
-                  [:=> [:cat shape/Shape Run Options] Turn]]}
+                  [:=> [:cat shape/Shape Run Options] Turn]]
+   :knowledge
+   [{:id :count-what-can-be-reported-not-what-is-awaited
+     :kind :decision
+     :says "The driving rule counts how many events CAN BE REPORTED, never how many are awaited, and `awaiting` is that rule as one value: :final, :from :world, :held, :from :driver with one event, or :from :driver with several a join proves."
+     :why "The first driver's rule — one out-edge and it drives, none and it is final, several and the world chooses — was wrong the moment a state offered a driver's event BESIDE a person's escape: an interruptible step awaits two, one of them reportable, and the run stopped dead on a shape whose `problems` was []."
+     :cites [:the-crank-is-the-door-report-was-missing :the-driver-world-distinction-is-data]
+     :see [:robertluo.state-graph.drive/awaits]}
+    {:id :discovery-recurses-into-a-live-child
+     :kind :decision
+     :says "The crank follows :sub as deep as it goes and asks the INNERMOST machine first, which is inner-first in the one place it had not yet been applied. :within on the answer is the path of hosts, and :on carries it too, so a history can say where inside a machine something happened."
+     :why "The asymmetry is surprising: the compiler handles a nested child completely — an event routes inward, the child's vocabulary decides, the completion fires and the yield is harvested in one step — but DISCOVERY did not. A nesting node has no edge for its child's events, so a driver reading the host's out-edges saw a state that awaits nothing and is not final, and parked for ever on a machine that was ready to go."
+     :cites [:inner-first :count-what-can-be-reported-not-what-is-awaited]}]}
   ([sh events] (awaiting sh events {}))
   ([sh events opts]
    (first (turn sh (where sh events opts) (or (:permitted opts) any?)))))
@@ -286,7 +332,13 @@
   you already have; this finds the event."
   {:malli/schema [:function
                   [:=> [:cat shape/Shape Run] Run]
-                  [:=> [:cat shape/Shape Run Options] Run]]}
+                  [:=> [:cat shape/Shape Run Options] Run]]
+   :knowledge
+   [{:id :a-proven-join-is-taken-whole
+     :kind :decision
+     :says "Two reportable events out of one state is a fork, and a driver that picked one would be inventing an order the shape never promised — unless every distinct pair among them is :yes in `confluence`, in which case all of them are found in one turn through :reports and applied in a fixed order the shape has said makes no difference. Anything else is :from :world and the caller settles it. A pair of the SAME event is not asked about: nothing is being chosen between."
+     :why "It is the second place a static check is load-bearing at runtime — the stream door taking the licence was the first — and it is the answer to whether two writers may start in parallel: the shape says whether they may, and :reports is where a caller puts the concurrency."
+     :cites [:a-join-is-the-product-and-the-licence :the-licence-is-one-machines :everything-else-is-injected]}]}
   ([sh events] (step sh events {}))
   ([sh events opts]
    (let [state (where sh events opts)
@@ -314,7 +366,12 @@
   already is."
   {:malli/schema [:function
                   [:=> [:cat shape/Shape Run] Run]
-                  [:=> [:cat shape/Shape Run Options] Run]]}
+                  [:=> [:cat shape/Shape Run Options] Run]]
+   :knowledge
+   [{:id :drive-needs-no-counter
+     :kind :decision
+     :says "`drive` needs no counter: the stopping rule is IN THE SHAPE — a final state, a park on the world, a hold this run declared — so the loop's whole job is noticing that `step` answered what it was given. Driving from [] runs the whole machine and driving from a run carries it on; there is no second code path for resuming."
+     :cites [:a-budget-in-drive-was-not-taken :a-run-is-the-vector-of-events]}]}
   ([sh events] (drive sh events {}))
   ([sh events opts]
    (loop [es (vec events)]

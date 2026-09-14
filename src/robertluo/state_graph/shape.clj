@@ -13,6 +13,50 @@
    nothing else, and says so by silently ignoring an assoc and discarding metadata.
 
    Requires ubergraph and malli, and nothing else — ever."
+  {:knowledge
+   [{:id :the-shape-is-a-graph
+     :kind :decision
+     :says "Three definitions and no more: a STATE is a node shaped by a malli schema and validated on enter; an EVENT is a value shaped by a schema; a TRANSITION is an edge keyed by event, carrying a function whose return value is applied to the state."
+     :why "Two events may join one pair of states, so the graph is a multi-digraph and a plain digraph would silently keep one. :initial is a node attribute, exactly one per shape, while the starting DATA stays an argument to the reduction: a node and its value are different things."
+     :see [:robertluo.state-graph.shape/state :robertluo.state-graph.shape/event
+           :robertluo.state-graph.shape/transition :robertluo.state-graph.shape/shape]}
+    {:id :ubergraph-is-a-closed-map-and-fails-silently
+     :kind :lesson
+     :says "An ubergraph is a closed map type that fails silently: (assoc g :junk 1) answers g unchanged, dissoc likewise, with-meta is discarded and meta is hardcoded nil. There is no slot for anything but nodes and edges."
+     :why "Verified 2026-09-01, and it is what forced the event catalogue onto the edges. add-attrs MERGES and set-attrs REPLACES; multidigraph is the constructor this library needs."
+     :when "2026-09-01"
+     :cites [:the-event-catalogue-is-denormalised]}
+    {:id :ubergraph-is-equal-and-edn-for-value-attributes
+     :kind :lesson
+     :says "An ubergraph IS = and IS EDN, contrary to what was assumed before reading it. The round trip cannot carry a handler fn or a compiled schema, which is a fact about OUR attributes and not about the graph."
+     :cites [:a-shape-is-code :hash-shape-is-not-an-id]}
+    {:id :ubergraph-out-edges-are-a-set
+     :kind :lesson
+     :says "Out-edges are stored in a SET — node-info is {:out-edges {dest-id #{edge}}} — so there is no edge order to recover. Anything that needs an order over a node's edges has to compute one."
+     :why "It is why document-order first-match guards are unrepresentable here and determinism has to be PROVEN rather than ordered, and why `canonical` and `continuations` sort by printed form."
+     :cites [:document-order-first-match-is-unrepresentable]
+     :see [:robertluo.state-graph.shape/canonical :robertluo.state-graph.shape/continuations]}
+    {:id :malli-maps-are-open-by-default
+     :kind :lesson
+     :says "Malli maps are OPEN by default and only {:closed true} refuses an extra key; [:map] normalises to :map."
+     :why "It is what makes `able to apply, but wrong` silent: a handler's answer merged into a state with no edge for that event would validate against that state's own schema while carrying keys it never declared. Verified before the design was settled, and it decided that a miss discards the data."}
+    {:id :never-reload-all
+     :kind :rule
+     :says "Never (require ... :reload-all) in a REPL with this library loaded. Reload per namespace, in dependency order — shape, compile, check, async, drive, explore, the facade."
+     :why "malli.core reloading redefines its protocols, so every compiled schema already in malli's function-schema registry satisfies neither m/schema? nor m/Schema and every instrument! afterwards is a StackOverflowError for every var. Recovery is (reset! @#'malli.core/-function-schemas* {}) and a :reload of each namespace; a plain :reload alone does not recover."}
+    {:id :what-is-checked-must-be-what-runs
+     :kind :rule
+     :says "A static check composes its schemas in exactly the order the runtime composes its values, or the check is about something that never runs. `produced`, `continued`, `accepted` and `yields` each pair with a step in the compiler, and every key the MACHINERY writes appears in both places."
+     :why "The subsumption check condemned every edge into a nested node as :target-refuses until it learned about :sub, one minute after nesting first worked. The referential nesting check `declare`s `enter-schema` and `initial-id` from the reading section rather than reimplementing them for the same reason."
+     :see [:robertluo.state-graph.shape/accepted :robertluo.state-graph.shape/enter-schema]}
+    {:id :dependency-ubergraph
+     :kind :decision
+     :says "ubergraph 0.9.0 is the shape: multigraph and digraph in one library, attributes on nodes and edges, viz-graph for drawing. Its traps are recorded on this namespace and on check's drawing."
+     :cites [:ubergraph-is-a-closed-map-and-fails-silently :ubergraph-out-edges-are-a-set]}
+    {:id :dependency-malli
+     :kind :decision
+     :says "malli 0.20.1 shapes every state, every event and every function signature here. It is the one dependency that punishes a careless REPL."
+     :cites [:never-reload-all]}]}
   (:require [malli.core :as m]
             [malli.util :as mu]
             [ubergraph.core :as uber]))
@@ -23,7 +67,18 @@
   "What names a state or an event."
   :keyword)
 
-(def Instance
+(def ^{:knowledge
+       [{:id :an-instance-has-an-identity
+         :kind :decision
+         :says "An instance is named by a fixed field, :instance, written by the constructors and never spelled by a caller. It is on the EVENT as well as the state, and the event is the load-bearing half: routing happens before any state is in hand."
+         :why "It is a THIRD identity and gets a third name — :id on a state is which node, :id on an event is its type. The word is the README's own, and a plain keyword because it is data a user reads and writes in their own maps. nil names nothing: `fan` keys an event with no :instance under nil, and the invariant worth having — no STATE carries a nil :instance — lives on the enter schema."
+         :see [:robertluo.state-graph.shape/enter-schema]}
+        {:id :an-instance-key-fn-was-turned-down
+         :kind :rejected
+         :says "A key-fn handed to the async layer, leaving the core ignorant that instances exist, was turned down."
+         :why "More decoupled, and not chosen: a fixed field the constructors own is simpler to document, and it makes a state self-describing with no second argument travelling beside it."
+         :cites [:an-instance-has-an-identity]}]}
+  Instance
   "What names a RUN of the machine — the third identity here, and it gets a third name.
    :id on a state says which NODE it is in and :id on an event says its TYPE; this says
    which machine either belongs to. See the README: `a lifecycle of an INSTANCE of the
@@ -34,7 +89,13 @@
    key that may be nil is a bug waiting for the second machine."
   some?)
 
-(def Schema
+(def ^{:knowledge
+       [{:id :malli-has-no-schema-predicate
+         :kind :lesson
+         :says "Malli has no `is this a schema` predicate for the thing people write: m/schema? is true only of a COMPILED schema and false for the form [:map [:n :int]]. So `Schema` and `MapSchema` are :fn predicates that call m/schema."
+         :why "It works because malli runs a :fn predicate through its own -safe-pred, so the throw comes back as false and the try/catch is malli's rather than ours, which is what lets this honour the no-bare-try-catch rule. (m/schema x) on an already-compiled x is identical? to x, so it costs nothing on the common path."
+         :see [:robertluo.state-graph.shape/MapSchema]}]}
+  Schema
   "Anything malli can make a schema of: a FORM like [:map [:n :int]], or one already
    compiled.
 
@@ -61,7 +122,19 @@
   "The graph. Its innards are ubergraph's business, so what is guarded is what goes in."
   [:fn uber/ubergraph?])
 
-(def StateDef
+(def ^{:knowledge
+       [{:id :a-state-has-an-id
+         :kind :decision
+         :says "A state is a MAP with :id, the same word in both places it is needed: the node in the graph and the runtime value saying which node it is in. A node's schema describes the REST of the map, and what is validated on enter is the derived merge, never written by hand."
+         :why "Forced as well as chosen: the compiled step is (fn [state event] state') and has to know whose out-edges to search, so the identity cannot live only in the graph. THE EDGE ALWAYS WINS — the compiler assocs the target's :id after the merge, so a handler cannot move the machine sideways past the edge that decides the target, and since 2026-09-03 a handler that tries is refused."
+         :cites [:an-event-is-the-only-way-a-transition-happens]
+         :see [:robertluo.state-graph.shape/enter-schema]}
+        {:id :the-schema-describes-the-map-without-the-machinery-keys
+         :kind :decision
+         :says ":id, :instance and :sub are the machinery's words. A state's schema describes the map without them, an event's schema describes its PAYLOAD without :id and :instance, and a part that redeclares one is refused as :reserved-declared."
+         :why "A state redeclaring :id would describe something written over it on every entry. An event's :id and :instance are ridden in rather than carried, which is why the step conforms an event against its schema with those keys taken off."
+         :see [:robertluo.state-graph.shape/problems :robertluo.state-graph.shape/patch-schema]}]}
+  StateDef
   "A node. :schema describes the map WITHOUT its :id — what a state is called is the
    shape's to say, not the user's.
 
@@ -107,7 +180,20 @@
                                                 [:yield {:optional true} MapSchema]]]]]
    [:yield {:optional true} MapSchema]])
 
-(def EventDef
+(def ^{:knowledge
+       [{:id :a-handler-belongs-to-the-event
+         :kind :decision
+         :says "A handler is chosen by the EVENT alone: (event id schema handler out) and (transition from event to). The target still comes from the graph, so A -submit-> B beside C -submit-> D stays expressible."
+         :why "The README's own reading recovered — the first implementation had keyed the handler on [state, event]. Two edges can no longer disagree about a handler, so a construction-time check is replaced by a shape in which the error cannot be written, and both halves of the handler's function schema come off the event definition and nothing off the graph."
+         :from "the author, 2026-08-31, from the README: `Each transitions (by event only, a function handle the event, return value will be applied to a state)`"
+         :when "2026-08-31"
+         :cites [:the-event-catalogue-is-denormalised]}
+        {:id :two-edges-share-one-out
+         :kind :decision
+         :says "The cost of the handler being the event's: A -submit-> B and C -submit-> D share one handler and one :out, so :out must satisfy B's schema AND D's. Where two edges genuinely need different data, that is two events — or, since guards, no :out at all and the runtime crossings enforcing it."
+         :why "A guard and a per-target payload pull against each other; the first consumer met exactly this and declared no :out on its guarded event."
+         :cites [:a-handler-belongs-to-the-event :a-guard-is-a-schema-over-the-event]}]}
+  EventDef
   "A catalogue entry, and WHERE A HANDLER LIVES. It is consumed at construction and not
    kept: its schema, its handler and its :out are written onto every edge that fires it.
 
@@ -122,7 +208,16 @@
    [:report {:optional true} fn?]
    [:reads {:optional true} MapSchema]])
 
-(def TransDef
+(def ^{:knowledge
+       [{:id :a-guard-describes-the-event-without-the-machinery-keys
+         :kind :decision
+         :says "A guard is checked against (dissoc event :id :instance), exactly as a state's schema describes the state without :id, :instance and :sub — and the event's own schema is conformed against the PAYLOAD too, or the two checks would be about different values."
+         :why "Without it a closed guard would fail on :id every time; with it a closed event schema is usable. What it broke is a correction: an event declaring :id or :instance in its own schema used to validate and now does not."
+         :from "the author's payload convention, 2026-09-03"
+         :when "2026-09-03"
+         :cites [:a-guard-is-a-schema-over-the-event :the-schema-describes-the-map-without-the-machinery-keys]
+         :see [:robertluo.state-graph.shape/accepted]}]}
+  TransDef
   "An edge: which event moves the machine from where to where. What handles the event is
    the EVENT's to say — see EventDef. The TARGET is still the graph's, because
    A -submit-> B beside C -submit-> D is what a multidigraph is for.
@@ -158,7 +253,71 @@
    A NESTING NODE MAY SAY WHAT ITS CHILD STARTS WITH, using {:seed <a map schema>} — the
    mirror of :yield, projected off this node's own value on the way in. See StateDef."
   {:malli/schema [:function [:=> [:cat Id MapSchema] StateDef]
-                  [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]}
+                  [:=> [:cat Id MapSchema [:maybe :map]] StateDef]]
+   :knowledge
+   [{:id :a-machine-can-nest-in-a-node
+     :kind :decision
+     :says "A node may carry {:machine <a shape>}, and while the parent sits there that child runs inside it. A child is an ordinary shape, so it is checked, compiled and drawn as one, and the checks recurse for free with faults carrying :within as a PATH."
+     :why "Nine states in one graph is about where one graph stops being readable; nesting keeps every machine the size a person can hold. It does not break :a-handler-never-sees-the-state, which constrains HANDLERS — a child's step belongs to the compiler, exactly as :id does. Nesting cannot be circular and needs no check to say so: a shape is an immutable value built out of already-built children."
+     :cites [:a-handler-never-sees-the-state]
+     :see [:robertluo.state-graph.shape/machines]}
+    {:id :an-escape-is-unconditional
+     :kind :decision
+     :says "A parent's own edges are the ESCAPE from a nesting node and fire whether or not the child is finished. Escaping is an abort and yields nothing; {:done} is the second way out, the one that WAITS."
+     :why "Nothing stops the parent leaving while the child is half done, and a guard would not change it — `the child has finished` is a fact about the STATE. Making the parent's edges wait for a final child was turned down because it would have made abort inexpressible, and abort is the commoner need."
+     :cites [:a-machine-can-nest-in-a-node :a-state-may-say-where-it-goes-when-it-completes]}
+    {:id :parent-edges-waiting-for-a-final-child-were-turned-down
+     :kind :rejected
+     :says "Making a nesting node's own edges wait until the child is in a final state was turned down."
+     :why "It would have made ABORT inexpressible, and abort is the commoner need. A parent that wants to wait declares {:done} instead."
+     :cites [:an-escape-is-unconditional]}
+    {:id :a-state-may-say-where-it-goes-when-it-completes
+     :kind :decision
+     :says "{:done <id>} on a state is a COMPLETION TRANSITION — where it goes when it completes, with no event, no handler and no patch. One rule, and it is UML's: a state completes when it has nothing left to do, so a plain state completes ON ENTRY and a nesting one when its child reaches a final state."
+     :why "Built 2026-09-03 out of a review of this architecture that named one thing genuinely missing and that this record had already named twice. The unification of a simple state and a composite one is why the feature is small: they are not two features. It is not a guard — one target, unconditional, so `compile` stays a lookup and nothing has to be proved disjoint — and a cycle among entry-completing states is then a PROVEN infinite loop, refused referentially as :done-cycle."
+     :when "2026-09-03"
+     :cites [:a-completion-is-an-edge-and-not-a-node-attribute :a-handler-causes-nothing]
+     :see [:robertluo.state-graph.shape/completions :robertluo.state-graph.shape/continuations]}
+    {:id :yield-is-harvested-at-completion-only
+     :kind :decision
+     :says "{:yield <a map schema>} is what a finished child hands up, and it is harvested at COMPLETION ONLY. Taken on an ordinary escape the child could be in any state, so the yield schema would be a hope; at completion it is a guarantee."
+     :why "It is what makes the `yields` check SOUND: completing is the only moment the child is guaranteed final. An escape is still an abort and still yields nothing."
+     :cites [:a-state-may-say-where-it-goes-when-it-completes :an-escape-is-unconditional]}
+    {:id :done-may-say-where-each-outcome-goes
+     :kind :decision
+     :says "Given a MAP FROM THE CHILD'S FINAL STATE, {:done {<outcome> {:to <id> :yield <schema>}}} is one target per outcome, each with a :yield of its own — one edge per outcome. The bare form is unchanged and fingerprints as before."
+     :why "It is still not a guard: it reads the structural fact :done already reads — which state the child is in — one notch finer, over a set finite and known at construction, dispatched by a map lookup on an id. It makes `yields` SHARPER, a per-outcome yield resting on its own final state and no other. What it unblocks is a parent that can tell `it worked` from `it gave up`: before it, both landed in one state and a consumer had to read a :fault key's presence as a tea leaf and copy good code aside under an invented key."
+     :when "2026-09-05"
+     :cites [:a-state-may-say-where-it-goes-when-it-completes :a-limit-was-read-as-a-principle]
+     :see [:robertluo.state-graph.shape/completions]}
+    {:id :a-completion-on-a-data-condition-is-refused
+     :kind :rejected
+     :says "A completion on a condition over the state's DATA — `all n reports are in`, `k branches have arrived` — is refused."
+     :why "Each is a relation between keys that no malli schema expresses, so it could only be a CLOSURE, and a closure may decide a VALUE but never where the machine goes. The line drawn is that the shape may read a STRUCTURAL fact to decide completion, never a data one to decide anything. The per-outcome :done is a structural fact and was not this refusal's subject."
+     :cites [:done-may-say-where-each-outcome-goes :a-guard-is-a-schema-over-the-event :a-combine-is-how-a-patch-lands]}
+    {:id :may-a-state-complete-on-a-condition-over-its-own-data
+     :kind :open
+     :says "May a state complete on a condition over its own data? Three wants knock on this door — `all n reports are in`, `k branches have arrived`, `still under budget` — and each is a count or a comparison over what the state holds."
+     :why "One of the three needed no door: a retry budget is a numeric bound on a count the DRIVER reports on the event, and two bounds that do not meet are provably disjoint, so it lives in the shape today. The obstruction for the rest is decidability. What would change it is a decidable spelling — a node holding a map keyed by item, the key set fixed on entry, completion as `every value is present`, which is `every sub is final` in different clothes. The useful question may be `which facts are structural`: a count of arrived branches is not one today because nothing in the shape names the arrivals."
+     :cites [:a-completion-on-a-data-condition-is-refused]}
+    {:id :a-node-may-sow-its-child
+     :kind :decision
+     :says "{:seed <a map schema>} on a nesting node is what the child is started with, projected off this node's own value on the way in — :yield's mirror. Without it a nested machine could only be told its job by the closure its shape was built from, so a host could not RE-ENTER it with a different job."
+     :why "Added 2026-09-05 for the first consumer that wanted to LOOP over a child machine. Sown off the PROJECTED value and not the merge in flight, which is what keeps the `seeds` check local and sound: a node holds exactly what it declares. The seed and the per-outcome completion are one feature in practice — one lets a host re-enter a child with a new job, the other lets it tell what the child made of the last one."
+     :when "2026-09-05"
+     :cites [:a-machine-can-nest-in-a-node :done-may-say-where-each-outcome-goes :a-limit-was-read-as-a-principle]
+     :see [:robertluo.state-graph.shape/seed]}
+    {:id :a-limit-was-read-as-a-principle
+     :kind :lesson
+     :says "`A nested child is entered with no data` and `a yield must hold at every final state` were read as facts about what nesting IS, and a whole alternative was designed around them. Both were absences — nothing had ever carried the other direction, and the single completion target was argued from decidability, which says nothing about a finite set of node ids."
+     :why "The test that separates an implementation limit from a principle limit is to find the sentence that REFUSED it. For a seed there was none, only a check recording the consequence. For a branching completion there was one, and reading it showed it was about data conditions."
+     :from "the author, 2026-09-05: these are implementation limits and not principle limits, and letting one pick the design is the expensive mistake"
+     :when "2026-09-05"}
+    {:id :orthogonal-regions-are-out
+     :kind :rejected
+     :says "Orthogonal regions — {:machines {...} :done :x}, several independent children in one node — are out. A node holds ONE child."
+     :why "Blocked on a question nesting has never had to answer: a child that finishes in :sub is left behind entirely when the parent escapes, because escape means ABORT and discarding is correct, while a join must COLLECT. :yield exists for one child and did not bring regions with it. A parent waiting on several children is still the regions question."
+     :cites [:a-machine-can-nest-in-a-node]}]}
   ([id schema] (state id schema nil))
   ([id schema opts] (into {::kind :state :id id :schema (m/schema schema)} opts)))
 
@@ -210,7 +369,96 @@
   {:malli/schema [:function [:=> [:cat Id MapSchema] EventDef]
                   [:=> [:cat Id MapSchema [:or fn? :map]] EventDef]
                   [:=> [:cat Id MapSchema fn? [:maybe MapSchema]] EventDef]
-                  [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]}
+                  [:=> [:cat Id MapSchema fn? [:maybe MapSchema] [:maybe :map]] EventDef]]
+   :knowledge
+   [{:id :a-handler-never-sees-the-state
+     :kind :decision
+     :says "A handler takes THE EVENT ALONE — (handler event) — or (handler event seen) where the event declares a {:sees} view. Never the state itself, and never what was not declared."
+     :why "The reason is decoupling: one handler serves many events and many source states. The bigger payoff is THE CHECK: a handler with no state in it is a complete malli function on its own — [:=> [:cat <the event's schema> <the view>] <the event's :out>] — every half off the event definition and nothing from the graph, so :out becomes a claim testable generatively. (handler state event) would have welded the handler to one node's schema. What it does not forbid: the STEP may depend on the state as much as it likes."
+     :from "the author, 2026-08-30"
+     :when "2026-08-30"}
+    {:id :a-handler-taking-the-state-was-turned-down
+     :kind :rejected
+     :says "(handler state event) was turned down."
+     :why "It would have needed the source node's schema in the handler's signature, welding the handler to one node and making :out a claim nothing could test without a machine around it."
+     :cites [:a-handler-never-sees-the-state]}
+    {:id :accumulation-policy-is-refused
+     :kind :rejected
+     :says "A combining key that only grows — `:messages by conj` — stays refused. A combine that only grows is a mechanism with no policy."
+     :why "What a task wants is the last n, or a summary, or one field from three steps back, and in the domain this library was built for THE PILE IS THE COST, context being metered. The accumulation question was the wrong question; who may SEE what is the right one, and a view answers it with the policy as ordinary code."
+     :cites [:a-handler-never-sees-the-state :internal-visibility-is-declared-and-not-automatic]}
+    {:id :internal-visibility-is-declared-and-not-automatic
+     :kind :decision
+     :says "It is the constructor of the machine who decides what is visible from inside, never the library automatically. The READ half is a view declared ON THE EVENT — {:sees <a map schema>} — so the handler names what it needs by SHAPE and stays reusable across every state that satisfies the view."
+     :why "Too broad a data visibility from the inside brings security problems easily. Declaring the view on the event and not on the node keeps the original reason intact and is STRONGER reuse than `sees nothing`. The HOLD half — a node holds exactly what it declares — lives in the compiler, and the view check is only sound because it does."
+     :from "the author, 2026-09-01: from OUTSIDE an observer sees every transition; from INSIDE, can a handler get at information? It is the constructor of the machine who decides"
+     :when "2026-09-01"
+     :cites [:a-handler-never-sees-the-state]}
+    {:id :is-the-node-side-exposure-needed
+     :kind :open
+     :says "Is node-side EXPOSURE needed, or is the event-side view enough? A view is least privilege by the handler's own word: a careless handler declares {:sees [:map [:token :string]]} and is handed the token. The remedy is a handshake — the node declares what it exposes, the event what it needs, the check verifies one is within the other — and it is additive."
+     :why "Not built because projection already bounds visibility by ABSENCE, which is the stronger guarantee and covers the case that matters most: a state that never held the secret cannot leak it. Exposure only helps where a state must HOLD something a handler in the same machine must not read. The bar is a real shape that has that."
+     :cites [:internal-visibility-is-declared-and-not-automatic]}
+    {:id :a-handler-answers-a-map-and-declares-it
+     :kind :decision
+     :says "A handler's return value is a MAP merged into the state, and the event DECLARES its schema as :out. Both halves are for the static check and no other reason: an opaque (fn [state] state') can never be checked, and merge(<from schema>, <declared out>) ⊆ <to schema> is decidable without running anything."
+     :why "The declaration is optional per event; absent, subsumption says :undeclared rather than faulting. The cost as first stated — a merge cannot REMOVE a key — was paid off by projection: dropping a field is declaring one fewer. What it costs instead is that carrying a key across several states is explicit, which for a join is not a cost but the whole mechanism."
+     :cites [:a-handler-never-sees-the-state]}
+    {:id :an-event-given-only-a-schema-is-a-pure-lift
+     :kind :decision
+     :says "(event :brief [:map [:brief Brief]]) is the whole declaration: the handler answers exactly the keys the schema declares and the :out is that schema. :id and :instance are not liftable and it falls out rather than being arranged — they are not in the declared schema, so mu/keys does not name them."
+     :why "The four-argument form said ONE FACT THREE TIMES — the schema, a (fn [e] {:k (:k e)}) per key, and an :out that is the schema again — and transcription is where a shape drifts from itself. The README's example lost four lines; the first consumer's events went from 13 lines to 5. A handler is a fn and options are a map, so the 3-arity takes either and says which by type, which is what let a report be declared without losing the short form."
+     :from "the author, 2026-09-03: `the event's 4-arg constructor looks very redandunt.`"
+     :when "2026-09-03"}
+    {:id :a-pure-lift-does-not-compose-with-a-tag
+     :kind :lesson
+     :says "A pure lift does not compose with a discriminating tag: a tag is ROUTING information the target does not hold, so a lifting handler answers it and the closed patch schema refuses it — correctly. A guarded event therefore usually spells its handler out."
+     :cites [:an-event-given-only-a-schema-is-a-pure-lift :an-event-is-the-only-way-a-transition-happens]}
+    {:id :a-consumers-lint-cache-has-to-be-refreshed
+     :kind :lesson
+     :says "After an arity changes here, a consumer's clj-kondo remembers the old arities of a :local/root dependency and reports errors for correct code. `rm -rf .clj-kondo/.cache` in the consumer. Seen twice."
+     :cites [:an-event-given-only-a-schema-is-a-pure-lift]}
+    {:id :an-event-may-say-how-it-is-reported
+     :kind :decision
+     :says "{:report <fn> :reads <a map schema>} on an event, and nothing else added. :report is the function that goes and finds the fact; :reads is the view of the state it needs, projected and validated exactly as :sees is. AN EVENT WITH NO :report COMES FROM THE WORLD — which is what a park is — so the declaration IS the driver/world distinction, in data."
+     :why "It arrived from a consumer: its driver carried a map of acts keyed by state, and the shape had no place to say it. This record had named the gap and dismissed it as `a label and not a feature, and nobody has asked for it`; what refuted the dismissal was every driver having to write that knowledge down a second time, somewhere the checker could not see. It is symmetric with what an event already had: :handler/:out/:sees say how an event LANDS, :report/:reads how it is FOUND, both halves off one declaration."
+     :from "the author, 2026-09-04, of a consumer's driver: `it collects otherwise independent steps into a global map, which is an anti pattern — the integration point should not be spread, the FSM shape already did it`"
+     :when "2026-09-04"
+     :cites [:a-handler-belongs-to-the-event]
+     :see [:robertluo.state-graph.shape/reports]}
+    {:id :a-report-is-not-an-internal-event
+     :kind :decision
+     :says "A report does not reopen :a-handler-causes-nothing. The machine does not move itself: this is the shape telling a CALLER how an event would be found, and a caller choosing to ask. No queue, no run-to-completion, and the reduction is untouched — a driver that ignores every report still works."
+     :cites [:an-event-may-say-how-it-is-reported :a-handler-causes-nothing]}
+    {:id :the-report-cannot-go-in-the-handler
+     :kind :rejected
+     :says "Doing the reporting work inside the handler — proposed first — cannot work, and is the thing to understand before proposing it again."
+     :why "A GUARD READS THE INCOMING EVENT: the compiler validates the guard against the payload and only then runs the handler, so a fact a branch depends on must be on the event when it ARRIVES. A handler computing a verdict computes it after the edge is chosen, and the only way back is two events for one observation — precisely the hidden transition guards removed. The producer has to be outside the machine; the only question was where it is DECLARED."
+     :cites [:an-event-may-say-how-it-is-reported :a-guard-is-a-schema-over-the-event]}
+    {:id :a-shape-is-a-function-of-its-env
+     :kind :decision
+     :says "A consumer writes (defn shape [env] ...) and the reports close over whatever they reach for — a model, a socket, a clock — as the shape is built, so nothing downstream carries an environment. The shape can still be built with NO env at all: (shape {}) checks, draws and fingerprints, because none of those runs a report."
+     :why "It is :a-shape-is-code one level out — a closure was already licensed in a shape. And it is what makes every branch reachable without paying for it: whatever a report reaches for arrived as a value, so an ordinary function goes in its place. See explore."
+     :from "the author, 2026-09-04"
+     :when "2026-09-04"
+     :cites [:a-shape-is-code :an-event-may-say-how-it-is-reported]}
+    {:id :a-handler-causes-nothing
+     :kind :decision
+     :says "A handler may not cause another event. It answers a data map and that is all it does; a cascade is spelled as the caller feeding the next event. With no emission there are no internal events, no queue to drain and no run-to-completion, and the core stays the reduction the README promises."
+     :why "A handler that raises is the classic source of self-inflicted disorder. It is a CONTRACT and not a guarantee: a handler doing I/O can publish to the very stream feeding this machine, and no schema catches it. An external event is the ultimate source of a transition — the world moves the machine. The lean `the STATE raises, a handler never does` was taken 2026-09-03 at the cheaper end, as a deterministic CONTINUATION rather than an event, so the cycle check exists and the queue still does not."
+     :from "the author, 2026-09-03: `An external event is the ultimate source of a transition`; and `An internal conditional should generate an event to the event queue. However, in our current design, the machine does not own the event queue.`"
+     :when "2026-09-03"
+     :cites [:a-state-may-say-where-it-goes-when-it-completes :one-ordered-stream-per-instance]}
+    {:id :a-handler-raising-events-was-turned-down
+     :kind :rejected
+     :says "A handler answering {:data {...} :raise [...]} — both a patch and events to raise — was turned down."
+     :why "It undoes :a-handler-answers-a-map-and-declares-it: the answer stops being a map merged into the state, so :out no longer describes it and the static check loses its subject. Reuse does not need it: the state can raise what the handler never mentioned."
+     :cites [:a-handler-causes-nothing :a-handler-answers-a-map-and-declares-it]}
+    {:id :are-internal-events-wanted-at-all
+     :kind :open
+     :says "Are internal events wanted at all? Nothing is blocked meanwhile: the motivation is HANDLER REUSE rather than cascades, and the commonest reason to want one — `move on now that this is finished` — is what a completion transition now is."
+     :why "Three things to settle before any of it: whether the machine may drive itself at all, since a caller triggering the next event by hand costs nothing and hides the flow from `check`, which is the whole trade; breadth-first or depth-first, which is observable in the history and cannot be left to whatever `into` happens to do; and how an audit trail tells what the world did from what the machine did. And an internal raise is a SECOND EVENT SOURCE where source-merging was pushed onto the caller precisely because the machine has no clock."
+     :cites [:a-handler-causes-nothing :one-ordered-stream-per-instance]}]}
   ([id schema] (event id schema (lifting (m/schema schema)) schema nil))
   ;; A PURE LIFT MAY STILL HAVE OPTIONS. A handler is a fn and options are a map, so the
   ;; third argument says which it is with no ceremony — and without this, declaring a
@@ -245,7 +493,58 @@
    out-edges are a SET. There is no :else — an event no guard admits fires no edge, which
    is `ignored`, and the reduction stays total."
   {:malli/schema [:function [:=> [:cat Id Id Id] TransDef]
-                  [:=> [:cat Id Id Id [:maybe :map]] TransDef]]}
+                  [:=> [:cat Id Id Id [:maybe :map]] TransDef]]
+   :knowledge
+   [{:id :a-guard-is-a-schema-over-the-event
+     :kind :decision
+     :says "{:when <a map schema>} on a transition, and nothing else added. :when is to a transition what :sees is to an event — an optional map schema, declared where the thing it constrains lives. It replaces the old no-guards rule; determinism is not what was given up, it stays the contract and is now PROVEN rather than had for free."
+     :why "What started it: a step of your own workflow that runs the code and then picks the edge with an `if` is a HIDDEN transition — the drawing shows both arrows with nothing saying which fires. With the target a function of [state, event-id] alone a data-dependent branch could not be in the shape at all. A schema and not a predicate because a schema is DATA — drawable, comparable, partially decidable — and an :fn carries a :description, so one expression is both the check and the label."
+     :from "the author, 2026-09-03: `a hidden transition is something we want to avoid`"
+     :when "2026-09-03"
+     :see [:robertluo.state-graph.shape/disjoint :robertluo.state-graph.shape/accepted]}
+    {:id :decidable-guards-branch-and-an-fn-guard-stands-alone
+     :kind :rule
+     :says "Three decidable levers separate two guards: a shared key whose value schemas are disjoint, a CLOSED schema not naming a key the other insists on, and numeric bounds that do not meet. Decidable guards branch; an :fn guard may only appear ALONE on its [from event], as a FILTER."
+     :why "Family A of the guard survey — ordered candidates and first-match — is the one this graph cannot have, out-edges being a set, so determinism has to be proven rather than ordered. A lone :fn cannot threaten the lookup, having nothing to be ambiguous with."
+     :cites [:a-guard-is-a-schema-over-the-event :ubergraph-out-edges-are-a-set :the-closed-lever-reaches-less-far-than-first-claimed]}
+    {:id :there-is-no-else
+     :kind :decision
+     :says "There is no :else. No guard matching means no edge admits the event, which is `ignored` — legal and first-class, so the reduction stays total and the stream says :fired false. Coverage is therefore PUBLISHED and never faulted."
+     :cites [:a-guard-is-a-schema-over-the-event]}
+    {:id :a-guard-map-with-three-meanings-was-turned-down
+     :kind :rejected
+     :says "A guard spelled as a map with a dispatch key beside case->target pairs beside an :else was turned down on sight."
+     :why "The tiers are not grammar, they are HOW MUCH THE CHECKER CAN PROVE, which is the same three answers `admits` already gives."
+     :from "the author, 2026-09-03"
+     :cites [:a-guard-is-a-schema-over-the-event]}
+    {:id :a-guard-over-the-state-is-refused
+     :kind :rejected
+     :says "A guard over the STATE is not taken. A guard is over the CAUSE, and the cause is the event: the driver reports a FACT and the shape decides what the fact MEANS."
+     :why "Turning `a fault string exists` into `go to :fault` inside a driver is precisely the hidden transition. A {:sees}-style guard over the state is a door, named and not designed."
+     :cites [:a-guard-is-a-schema-over-the-event :a-completion-on-a-data-condition-is-refused]}
+    {:id :the-guard-survey
+     :kind :lesson
+     :says "Surveyed 2026-09-03, three families of conditional transition. (A) ordered candidates and a predicate, first passing guard wins — UML, SCXML, XState, clj-statecharts, Spring. (B) pattern matching in host code, no graph to check — gen_statem, Akka, Rust statig. (C) determinize on the input value — Automat, table-driven lexers. This library is in C. Worth stealing from A is only that XState NAMES a guard so a visualizer draws EVENT [isGreen], Harel's own notation."
+     :when "2026-09-03"
+     :cites [:a-guard-is-a-schema-over-the-event]}
+    {:id :document-order-first-match-is-unrepresentable
+     :kind :lesson
+     :says "Document-order first-match guards are unrepresentable here: ubergraph keeps out-edges in a set, so there is no edge order to recover, and a priority number would be order smuggled back in as data."
+     :cites [:ubergraph-out-edges-are-a-set :a-guard-is-a-schema-over-the-event]}
+    {:id :the-closed-lever-reaches-less-far-than-first-claimed
+     :kind :lesson
+     :says "The closed lever reaches a key the event schema does not declare AT ALL, and no further. `green means no :fault key` does not work when :fault is a key the event's own schema declares as optional: `accepted` merges the guard over that schema and [:fault {:optional true}] survives as genuinely satisfiable, so :unknown is correct and the shape is rightly refused."
+     :why "Corrected by trying it in the first consumer, which needed a tag after all: its :judged carries {:verdict [:enum :green :red]}."
+     :cites [:decidable-guards-branch-and-an-fn-guard-stands-alone]
+     :see [:robertluo.state-graph.shape/accepted]}
+    {:id :a-retry-budget-is-two-guarded-edges
+     :kind :lesson
+     :says "A retry budget works today as two guarded edges on disjoint numeric bounds — [:int {:max 8}] and [:int {:min 9}] over a count the driver reports on the event — so the stopping rule is in the shape and no driving loop needs a counter."
+     :cites [:decidable-guards-branch-and-an-fn-guard-stands-alone]}
+    {:id :should-a-transition-declare-its-effects-and-idempotence
+     :kind :open
+     :says "Should a transition declare its :effects and :idempotence? The concurrency licence proves REORDERING is safe and says nothing about RE-EXECUTION. Harmless today, a speculative take never re-running a handler; retry and replay would both need it, and it is the same class of declared-law-plus-checker as :combine/commutes."
+     :cites [:a-combine-is-how-a-patch-lands]}]}
   ([from event to] (transition from event to nil))
   ([from event to opts]
    (cond-> {::kind :transition :from from :event event :to to}
@@ -253,7 +552,12 @@
 
 ;;; ------------------------------------------------------- schemas, compared
 
-(def primitive-types
+(def ^{:knowledge
+       [{:id :the-seven-primitive-types-are-pairwise-disjoint
+         :kind :lesson
+         :says "The seven primitive types are pairwise disjoint, checked and not assumed — every value of each validated against the other six, :int against :double included. That is what licenses `admits` to answer :no from a type difference alone, and `disjoint` inherited it."
+         :see [:robertluo.state-graph.shape/disjoint]}]}
+  primitive-types
   "Types no single value belongs to two of, so two schemas differing here are a PROOF and
    not a guess. Deliberately small: enough for the common mistake, and not a lattice of
    every type malli has. :double is in only because malli's :int rejects a double and its
@@ -293,7 +597,41 @@
 
    IT IS DECLARED ON THE NODE and never on an event, because the same key must combine the
    same way however it arrives. Per-edge algebra would prove nothing."
-  {:malli/schema [:=> [:cat MapSchema] :map]}
+  {:malli/schema [:=> [:cat MapSchema] :map]
+   :knowledge
+   [{:id :a-combine-is-how-a-patch-lands
+     :kind :decision
+     :says "{:combine f :combine/commutes true} on a map entry says how a patch lands on that key. A key with no combine REPLACES, which is what a merge always did, so nothing written before behaves differently."
+     :why "A naive merge was the whole limit on the concurrency licence: last-write-wins is the only non-commutative thing in the apply phase, so a concurrently incremented counter was inexpressible — a relative change needs {:sees} and is refused read-write, an absolute set is refused write-write. Both halves of Bernstein traced back to one operation. Two increments under a merge give :n 1 where the serial answer is 2; under + both orders give 2."
+     :from "the author, 2026-09-03: `in real life, merging is a domain/task related job.`"
+     :when "2026-09-03"}
+    {:id :a-combine-may-be-a-closure-where-a-guard-may-not
+     :kind :decision
+     :says "A combine is a CLOSURE where a guard must be a schema, and it is not a reversal: a guard decides WHERE THE MACHINE GOES, which is structural and must be decided from the guard's own shape, while a combine decides WHAT A VALUE IS, inside a state, exactly as a handler's body always has."
+     :cites [:a-combine-is-how-a-patch-lands :a-guard-is-a-schema-over-the-event :a-shape-is-code]}
+    {:id :a-fixed-combine-vocabulary-was-refused
+     :kind :rejected
+     :says "A small proven set of combines — :+ :max :min :union — whose algebra the library would know was the first proposal, and was refused by the author on exactly the right ground."
+     :why "It does not survive contact: :max does not express `keep the highest-scoring implementation with its provenance`, and a review-comment merge deduplicating by line is nobody's :union. A vocabulary that covers no real merge buys a checker nothing."
+     :cites [:a-combine-is-how-a-patch-lands]}
+    {:id :the-promise-is-data-and-checked-at-two-strengths
+     :kind :decision
+     :says "No function yields its own algebra, so the law is declared beside the combine as DATA — :combine/commutes — and it is the only thing the licence reads. It is checked at two strengths: check's `laws` REFUTES it by generation, and the compiler VERIFIES it on the concrete values whenever the licence is actually taken, before either patch lands."
+     :why "A declaration nothing checks is the repository's own named anti-pattern; a false promise is then a defect that stops the machine rather than an order-dependent flake."
+     :cites [:a-combine-is-how-a-patch-lands]}
+    {:id :three-nodes-declare-the-same-combine
+     :kind :decision
+     :says "Three nodes and not one decide whether a shared key may be written by both events of a pair: ta, tb and the join x, being every node a patch of the pair ever lands on. Each must declare the SAME combine and each must declare it commutative. It is declared on the NODE and never on an event, because the same key must combine the same way however it arrives."
+     :why "The fold applies the first patch at ta or tb and the second at x, so three different functions would compose into two different answers and prove nothing. For a self-loop, where combines pay, all three are one node."
+     :cites [:a-combine-is-how-a-patch-lands]}
+    {:id :most-domain-merges-are-not-commutative
+     :kind :lesson
+     :says "Most domain merges are NOT commutative, and the author will not notice. Ties, timestamps, last-writer and provenance all break the law invisibly, and both of the first two combines written here were refuted by generation. So the licence widens less than it sounds."
+     :cites [:the-promise-is-data-and-checked-at-two-strengths]}
+    {:id :malli-keeps-arbitrary-entry-properties
+     :kind :lesson
+     :says "Malli keeps arbitrary entry properties and mu/merge carries them through, so {:combine f} on a map entry survives into `enter-schema`. m/children hands back [k props child], which `entries-of` had already destructured and merely thrown the props away. Checked before designing anything on it."
+     :see [:robertluo.state-graph.shape/entries-of :robertluo.state-graph.shape/enter-schema]}]}
   [s]
   (into {} (for [[k props child] (m/children (m/schema s))
                  :when (or (contains? props :combine)
@@ -401,7 +739,17 @@
    :no means PROVEN OVERLAP and comes only from a finite domain, where the value that
    satisfies both is the proof. Two map schemas are never proven to overlap here — that
    needs a value, not an argument."
-  {:malli/schema [:=> [:cat Schema Schema] [:enum :yes :no :unknown]]}
+  {:malli/schema [:=> [:cat Schema Schema] [:enum :yes :no :unknown]]
+   :knowledge
+   [{:id :where-a-check-lives-is-decided-by-when-it-must-answer
+     :kind :decision
+     :says "Where a check lives is decided by WHEN it must answer, not by what it resembles. `disjoint` could not live beside `admits`: the ambiguity check is REFERENTIAL — a shape whose determinism cannot be proven must not be constructible, so it has to answer before the graph exists — and check sits above shape."
+     :why "So `primitive-types` and `entries-of` moved down into shape, and subsumption and disjointness are siblings a layer apart over one vocabulary."
+     :see [:robertluo.state-graph.shape/primitive-types :robertluo.state-graph.shape/entries-of :robertluo.state-graph.shape/problems]}
+    {:id :dis-map-never-answers-no
+     :kind :lesson
+     :says "Two MAP schemas are never proven to overlap here, so :ambiguous carries no witness. Proving overlap needs a VALUE that satisfies both, and one shared key agreeing is not one — another key may still refuse. The witness did land in check's `coverage`, where a probe constructs the value."
+     :cites [:where-a-check-lives-is-decided-by-when-it-must-answer]}]}
   [a b]
   (dis (m/schema a) (m/schema b)))
 
@@ -482,7 +830,37 @@
    The parts are [:* :any] and stay that way: this must ACCEPT a malformed part in
    order to report it, so a tighter argument schema would refuse the very input the
    function exists to answer about."
-  {:malli/schema [:=> [:cat [:* :any]] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:* :any]] [:vector :map]]
+   :knowledge
+   [{:id :the-referential-faults
+     :kind :decision
+     :says "A fault is a map carrying :problem, the id it is about, :within [<host node> ...] where nested, and a :witness where something could construct one. REFERENTIAL, refused by the constructor: the malformed-part and duplicate-id family, :unknown-state, :unknown-event, :ambiguous, :reads-without-report, :unused-event, :initial, :reserved-declared, :combine-not-a-function, :law-without-combine, :machine-cannot-start, :seed-without-machine, :outcome-without-machine, :unknown-outcome, :yield-with-outcomes, :done-and-final, :done-with-edges, :machine-cannot-finish, :done-cycle, :yield-without-machine, :yield-without-done."
+     :why "Every one is answerable from the parts alone, so it runs inside the constructor and a bad shape never exists. The structural faults need the built graph and are check's."
+     :cites [:where-a-check-lives-is-decided-by-when-it-must-answer]}
+    {:id :ambiguous-inverts-and-demands-proven-safety
+     :kind :decision
+     :says ":ambiguous is the one fault that demands PROVEN SAFETY rather than reporting a proven fault: two edges on one [from event] whose guards are not provably disjoint are refused. The asymmetry is principled — determinism is the CONTRACT, and a shape that cannot prove it is deterministic is not one."
+     :cites [:a-guard-is-a-schema-over-the-event]}
+    {:id :the-dead-event-check-became-a-construction-time-check
+     :kind :decision
+     :says ":unused-event is answered at construction, which is the only moment the catalogue is in hand. `An event no transition mentions is dead code` stopped being a graph query the day the catalogue was denormalised, there being no catalogue on the graph to be dead relative to."
+     :cites [:the-event-catalogue-is-denormalised]}
+    {:id :an-argument-that-must-accept-rubbish-keeps-any
+     :kind :lesson
+     :says "`problems` and `shape` take [:* :any] on purpose: they must ACCEPT a malformed part in order to REPORT it. A tighter schema would refuse it with ::m/invalid-input instead of the list of what is wrong, and only under instrumentation, so the diagnosis would be both worse and different between dev and production."
+     :see [:robertluo.state-graph.shape/shape]}
+    {:id :a-for-whose-body-is-a-cond-puts-nil-in-problems
+     :kind :lesson
+     :says "A `for` whose body is a `cond` puts nil in `problems`, and every shape with a combine was once refused with a vector of nils. This function is a concat of a dozen comprehensions, and the idiom is :when, never a cond body."}
+    {:id :unknown-outcome-could-not-report-a-misspelling
+     :kind :lesson
+     :says "The :unknown-outcome check asked (final? child outcome), and `final?` reads an attribute off a NODE — ubergraph throws on one it does not hold — so an outcome naming no state of the child at all escaped as an IllegalArgumentException instead of the fault. Fixed by asking membership first, the idiom :unknown-state three lines above already used."
+     :why "The suite missed it because a person writing a TEST writes a name they can see, and a person writing a SHAPE writes one they meant. The tutorial found it, 2026-09-05, because a tutorial writes the fault the way a reader would provoke it."
+     :when "2026-09-05"}
+    {:id :a-malformed-event-that-failed-every-guard-looked-like-a-miss
+     :kind :lesson
+     :says "Selection happens before conform!, so an event failing every guard looked like an ordinary miss, conflating a DEFECT with a legitimate one. A guard is a refinement of a schema the event must already satisfy, so where nothing matches the compiler conforms the event against the group's schema — a bad event throws and a well-formed one no guard wanted is still ignored."
+     :cites [:there-is-no-else]}]}
   [& parts]
   (let [{:keys [state event transition]} (group-by ::kind parts)
         state-ids (set (map :id state))
@@ -672,7 +1050,35 @@
    argument schema would refuse a malformed part with ::m/invalid-input instead of the
    list of what is wrong with it, and would do so ONLY under instrumentation — so the
    diagnosis would be worse and would differ between dev and production."
-  {:malli/schema [:=> [:cat [:* :any]] Shape]}
+  {:malli/schema [:=> [:cat [:* :any]] Shape]
+   :knowledge
+   [{:id :a-shape-is-code
+     :kind :decision
+     :says "A state machine shape is CODE. You WRITE it as data; it does not ROUND-TRIP as data. It is built at namespace load, its handlers are real closures, its schemas are compiled once."
+     :why "The README's `pure clojure data with convinient functions as constructors` means written as data, not stored as data. That kills every argument from EDN, from =, from storability — which were the only objections to the shape BEING an ubergraph, so it is one, with the checks and the drawing reading it directly and no parallel map to keep in sync. It settles persistence without a separate argument: what is stored is HISTORY, and it is what licenses a combine to be a closure."
+     :from "the author, 2026-08-30"
+     :when "2026-08-30"
+     :cites [:ubergraph-is-equal-and-edn-for-value-attributes]}
+    {:id :the-event-catalogue-is-denormalised
+     :kind :decision
+     :says "The event catalogue is an ARGUMENT to the constructor, which writes each event's schema, handler, :out, :sees, :report and :reads onto EVERY EDGE that fires it and refuses a shape whose edges disagree about one event. The graph remains the whole shape."
+     :why "Forced by ubergraph rather than chosen: a graph holds nodes and edges and nothing else, so the catalogue has nowhere on the graph to live."
+     :cites [:ubergraph-is-a-closed-map-and-fails-silently]
+     :see [:robertluo.state-graph.shape/transitions]}
+    {:id :a-bipartite-graph-was-killed
+     :kind :rejected
+     :says "Making the graph bipartite — state -> event -> state — was killed first, so nobody proposes it again. It is not merely awkward, it is WRONG: two transitions on :submit leaving different states would share one event node and FABRICATE paths the shape never declared, A -> submit -> D when only A -> submit -> B and C -> submit -> D were said."
+     :cites [:the-event-catalogue-is-denormalised]}
+    {:id :a-completion-is-an-edge-and-not-a-node-attribute
+     :kind :decision
+     :says "A completion transition is a real EDGE, marked {:done true}, carrying no :event, one edge per outcome, and nothing about it is left on the node. That absence of an :event is the whole distinction between an edge fired by an event and one fired by arriving."
+     :why "The edge-or-attribute question was the whole design, settled by counting what each way costs: as an edge, `reachable`, `dead-ends`, `finishable` and `traps` all walk the graph and needed NOT ONE LINE; as an attribute, each would have had to learn about it or condemn correct shapes. The cost of the edge was one :when in `transitions`. Two places saying one thing is how a shape drifts from itself."
+     :see [:robertluo.state-graph.shape/transitions :robertluo.state-graph.shape/continuations]}
+    {:id :a-shared-catalogue-must-be-selected-from
+     :kind :lesson
+     :says "Sharing parts is free and complete — a vector of states and events assembles into two different machines by concat plus different transitions, and one child shape nests into two unrelated parents with nothing to alias. But a shared catalogue must be SELECTED FROM and not splatted in: the first assembly using fewer events than the catalogue holds is refused with :unused-event, and the check is right. A parts library wants to be a MAP KEYED BY ID."
+     :why "Measured, checking the author's `most parts are shared, only the assembly differs` against the code. Whoever builds workflows out of parts should know it on day one rather than day three."
+     :cites [:the-dead-event-check-became-a-construction-time-check]}]}
   [& parts]
   (when-let [ps (seq (apply problems parts))]
     (throw (ex-info "The shape has problems" {:problems (vec ps)})))
@@ -756,7 +1162,12 @@
    every reader here is asking a question ABOUT EVENTS: what the index looks up, what
    `coverage` groups, what `commutes` reasons over. See `continuations`, which is where the
    other kind of edge is read."
-  {:malli/schema [:=> [:cat Shape] [:sequential :map]]}
+  {:malli/schema [:=> [:cat Shape] [:sequential :map]]
+   :knowledge
+   [{:id :a-reading-layer-keeps-a-structural-change-local
+     :kind :lesson
+     :says "A reading layer between the graph and its consumers is what lets a structural change stay local. Moving the handler onto the event changed shape.clj AND NOTHING ELSE, because everything above reads a shape through this function; adding a whole new KIND of edge, the completion, touched it and nothing above it. Twice now."
+     :cites [:a-handler-belongs-to-the-event :a-completion-is-an-edge-and-not-a-node-attribute]}]}
   [shape]
   (for [e (uber/edges shape)
         :when (uber/attr shape e :event)]
@@ -776,7 +1187,12 @@
    A REPORT IS NOT AN INTERNAL EVENT. The machine still does not move itself: this is the
    shape telling a caller HOW an event would be found, and a caller choosing to ask. The
    reduction is untouched and there is no queue."
-  {:malli/schema [:=> [:cat Shape] [:map-of Id :map]]}
+  {:malli/schema [:=> [:cat Shape] [:map-of Id :map]]
+   :knowledge
+   [{:id :the-driver-world-distinction-is-data
+     :kind :decision
+     :says "Whether an event comes from the DRIVER or from the WORLD is read off the shape: an event with a :report is the driver's, one without is the world's, and a state waiting only on the latter is PARKED. It had been drawn in prose and nowhere in data, so every driver had written it down a second time keyed by state."
+     :cites [:an-event-may-say-how-it-is-reported]}]}
   [shape]
   (into {} (for [t (transitions shape) :when (:report t)]
              [(:event t) (select-keys t [:report :reads])])))
@@ -819,7 +1235,13 @@
 
    ORDERED BY PRINTED FORM, because ubergraph keeps nodes and out-edges in SETS and a
    fingerprint that depended on iteration order would not be one."
-  {:malli/schema [:=> [:cat Shape] :map]}
+  {:malli/schema [:=> [:cat Shape] :map]
+   :knowledge
+   [{:id :closures-are-erased-and-not-rendered
+     :kind :decision
+     :says "Everything that is not a value becomes one marker, ::opaque, and a handler, a report and a combine are in only as their PRESENCE. It is the decision the fingerprint rests on."
+     :why "m/form happily renders a closure as #object[user$fn__44837 0x3442b587 ...] — measured, two builds of [:fn {...} (fn [v] ...)] have forms that are not = — and a hex address differs every process, so a fingerprint over the printed form would be worthless to a transcript written yesterday. The cost is real and is the same cost handlers have: a predicate's BODY is invisible, so changing what an :fn checks does not move the fingerprint."
+     :cites [:a-shape-has-a-derived-id]}]}
   [sh]
   {:states
    (vec (sort-by pr-str
@@ -868,7 +1290,36 @@
    THE GRAPH MATCHED — the same states, schemas, events, guards and targets. It does not prove
    the same CODE ran. Change what a handler returns without changing its :out, or change what
    an :fn predicate checks, and the fingerprint is unmoved. See `plain`."
-  {:malli/schema [:=> [:cat Shape] :string]}
+  {:malli/schema [:=> [:cat Shape] :string]
+   :knowledge
+   [{:id :a-shape-has-a-derived-id
+     :kind :decision
+     :says "A shape has a stable identity: `canonical` is the ordered, readable form and `fingerprint` is SHA-256 over its printed representation. Everything that is DATA goes in — node ids, schema forms, :initial and :final, every edge as [from event to] with its guard, :out, :sees and :reads, every completion edge with its :yield and :outcome — ordered by printed form because ubergraph keeps nodes and edges in sets. A nested machine is its child's fingerprint."
+     :why "A transcript row that cannot say which machine produced it is a row nobody can audit. It is DERIVED and not declared, which is the whole reason to have one rather than a version number: nobody can forget to bump it."
+     :from "the author, 2026-09-04: `to make sure the transcript log file correspond to a FSM, we may need a stable id for the FSM.`"
+     :when "2026-09-04"
+     :cites [:closures-are-erased-and-not-rendered :ubergraph-out-edges-are-a-set]
+     :see [:robertluo.state-graph.shape/canonical]}
+    {:id :hash-shape-is-not-an-id
+     :kind :rejected
+     :says "(hash shape) is not an identity, measured: two structurally identical shapes built separately in one process are neither = nor equal-hashed, their handlers being distinct closures and their schemas distinct compiled objects. It changes on every namespace load."
+     :cites [:a-shape-has-a-derived-id :a-shape-is-code]}
+    {:id :the-fingerprint-proves-the-graph-and-not-the-code
+     :kind :decision
+     :says "What a fingerprint proves is THE GRAPH MATCHED — the same states, schemas, events, guards and targets — and not that the same code ran. Change what a handler returns without changing its :out, or change what an :fn predicate checks, and it does not move. It has to be said wherever a fingerprint is used."
+     :cites [:a-shape-has-a-derived-id :closures-are-erased-and-not-rendered]}
+    {:id :the-env-does-not-move-the-fingerprint
+     :kind :lesson
+     :says "A shape built as a function of its env fingerprints the same in every env, the env being closed over in reports that are erased. Measured on the first consumer: (shape {}) and (shape {:writer ... :repl ...}) are one fingerprint. Right — it is the same machine — and it means the fingerprint does not say WHERE it ran; that belongs in the log's context beside the name."
+     :cites [:a-shape-is-a-function-of-its-env :the-fingerprint-proves-the-graph-and-not-the-code]}
+    {:id :the-fingerprint-carries-no-name
+     :kind :decision
+     :says "A fingerprint carries no NAME. What a machine is called is a fact about the JOB rather than about the graph, and belongs to whoever owns the job — so identity is two-part and only half of it is the library's."
+     :cites [:a-shape-has-a-derived-id]}
+    {:id :mid-flight-shape-versioning-stays-open
+     :kind :open
+     :says "A fingerprint on every transcript row answers `which shape produced this` for a FINISHED run, which is the audit case and the one asked for. An instance in flight across a shape change is still open, and is left open deliberately."
+     :cites [:a-shape-has-a-derived-id]}]}
   [sh]
   (let [bs (.digest (java.security.MessageDigest/getInstance "SHA-256")
                     (.getBytes (pr-str (canonical sh)) "UTF-8"))]
@@ -951,7 +1402,15 @@
    state does not declare, and this refuses it for the same reason it refuses a typo. An
    event is the only way a transition happens; a handler that names where it lands is
    asking for one it was not given."
-  {:malli/schema [:=> [:cat Shape Id] MapSchema]}
+  {:malli/schema [:=> [:cat Shape Id] MapSchema]
+   :knowledge
+   [{:id :an-event-is-the-only-way-a-transition-happens
+     :kind :decision
+     :says "A handler answers a PATCH, conformed against the target's own schema with every key optional and the map CLOSED. Optional because a handler says what changed; closed because a key the target does not declare EVAPORATES, and closing turns a shrug into a refusal. Identity then needs no special case: naming :id, :instance or :sub is answering an undeclared key, refused by the rule that refuses a typo."
+     :why "What was already true is that a handler could not move the machine, the step writing :id after the merge. What was wrong with it was SILENCE — a handler answering :id was overwritten without a word, a convention the code quietly repaired. Four tests had asserted the silence; each now asserts the refusal. The check sits after :out and before :enter: :out is what a handler PROMISES and is optional, :answer is what the target ADMITS and is not, :enter keeps the one thing only a whole state can be wrong about — a required key nobody supplied."
+     :from "the author, 2026-09-03: `In a FSM, a state can only transit by an event, so inside a machine, the only way of doing transition is to emit an event. And this hidden transition has to be illegal.` and `the event's returned data should match the state schema`"
+     :when "2026-09-03"
+     :cites [:a-state-has-an-id :the-schema-describes-the-map-without-the-machinery-keys]}]}
   [shape id]
   (-> (uber/attr shape id :schema)
       (mu/optional-keys)
@@ -970,7 +1429,12 @@
    from a key whose value is legitimately nil.
 
    Beware a schema holding a [:fn ...]: m/form emits the fn object."
-  {:malli/schema [:=> [:cat Schema :any] [:maybe [:vector :map]]]}
+  {:malli/schema [:=> [:cat Schema :any] [:maybe [:vector :map]]]
+   :knowledge
+   [{:id :malli-names-the-wrong-schema-for-a-missing-key
+     :kind :lesson
+     :says "(:schema error) is the WHOLE ENCLOSING MAP when a key is absent, and the offending child only when a present value is wrong. (mu/get-in root (:path error)) is right in both, which is why this keeps the root schema. :type :malli.core/missing-key is the only thing telling a missing key from one whose value is legitimately nil."
+     :why "Verified over a missing key, a wrong-typed key and a nested one; it cost a test before it was understood."}]}
   [schema value]
   (let [root (m/schema schema)]
     (some->> (:errors (m/explain root value))

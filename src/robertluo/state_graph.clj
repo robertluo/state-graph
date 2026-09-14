@@ -53,6 +53,121 @@
    Requires everything below it, which is what makes one require enough — including
    `check`, so an application loads the graph algorithms it may never run. That is what a
    facade costs; a user who minds requires robertluo.state-graph.compile directly."
+  {:knowledge
+   [{:id :knowledge-is-metadata
+     :kind :rule
+     :says "What this library knows about itself lives in metadata on the var or namespace it is about, under :knowledge — a vector of nodes — and never in a standalone file. The source is the source of facts, and a decision attached to the construct it decides is found by whoever finds the construct."
+     :why "The record was two markdown files, and a markdown file is a TREE: every decision got one place, one section and one reading order, its edges to code and to other decisions were prose pointers nothing could follow, and retrieval was loading 250KB or grepping a key the author chose. Knowledge is a graph — nodes with edges to code and to each other — and the author of a node supplies edges, never a path. Migrated 2026-09-14 from AGENTS.md and DESIGN.md, which are in git history."
+     :from "the author, 2026-09-14: `Knowledges (decisions/policies) should be encoded independently, and have edges to different entities (code, other knowledge), it is a multi-bigraph, the user can traverse by graph walking in different way. The author should never limit how to retrieve.` and `:doc is a perfect example of where we should put knowledge: after all, the source code is the source of facts`"
+     :when "2026-09-14"}
+    {:id :the-knowledge-vocabulary
+     :kind :rule
+     :says "A node is a map. :id is a keyword unique in the library, the name other nodes cite. :kind is one of :decision (what was decided), :rule (a standing policy for whoever changes this code), :rejected (an alternative turned down, and why), :lesson (what running it taught, in the past tense), :open (a question not settled). :says is the knowledge in a sentence or two; :why the reason; :from the author's own words that decided it; :when an ISO date. The edges: :see names code entities — a qualified keyword is a var, an unqualified one a namespace; :cites names the ids this rests on or refines; :supersedes names the ids this replaces, and the old node stays. Attachment itself is the edge `about`."
+     :cites [:knowledge-is-metadata]}
+    {:id :knowledge-edges-point-down
+     :kind :rule
+     :says "A node's :see and :cites point DOWN the arrow or sideways, never up: a namespace's knowledge may name what it requires and its siblings, and never a namespace that requires it. A decision that spans layers is attached at the highest one and looks down from there. Asserted by the suite, which also asserts that every id is unique, every :cites resolves and every :see names a var or namespace that exists."
+     :cites [:knowledge-is-metadata :dependencies-point-down-only]}
+    {:id :why-it-exists
+     :kind :decision
+     :says "This library exists for a sibling component's agent workflows: a different concrete workflow per scenario, where the two ways to write that in ordinary code are both bad — a lot of long, nearly identical code, or a configuration format pretending to unify them at the surface. A state machine is the third way. Four claims: complex is not difficult and what those workflows need is GLUE; machines COMPOSE, so an assembly is (apply shape (concat parts wiring)); a workflow mostly in data is storable and drawable, and a person has to be able to SEE what an agent is running; and auditability and static checking are the position — `what happened` and `could this ever have worked`."
+     :from "the author, 2026-09-01"
+     :when "2026-09-01"
+     :cites [:what-the-graph-buys :a-shared-catalogue-must-be-selected-from]}
+    {:id :say-the-parallelism-claim-carefully
+     :kind :rule
+     :says "`The first FSM that supports parallelism` is NOT the claim to make in public: Harel statecharts have had orthogonal regions since 1987, every workflow engine runs steps at once, and this design puts orthogonal regions deliberately out of scope, so it would argue against itself. What is defensible is narrower and stronger: one call runs THOUSANDS of instances at once with real backpressure; a handler may answer a deferred, so an instance waiting on a model call holds no thread; and CONCURRENCY CAN BE PROVEN statically, which no other FSM library appears to do."
+     :cites [:parallel-is-across-instances :a-handler-may-answer-later :two-events-in-flight-at-once]}
+    {:id :the-facade-is-a-vocabulary-and-two-doors
+     :kind :decision
+     :says "Twelve functions and three doors: state, event, transition, shape to build a machine; problems, draw! and dot to look at it; compile and initial for the reduction; run for the stream; step and drive for the crank. The author asked for the fewest, so each collapse was argued for rather than assumed, and the third door was added late because two applications had already written it."
+     :why "Nesting, the completion transition and the licence all added NO door, which is the check on the surface: a feature that needs no new door is a feature that fitted. The crank cost two, and the alternative was every consumer owning a copy of a loop that is about shapes."
+     :cites [:the-crank-is-the-door-report-was-missing :dot-arrived-from-a-consumer]}
+    {:id :a-fold-was-turned-down
+     :kind :rejected
+     :says "A `fold` doing the whole reduction in one call was turned down. It gives strictly LESS than `compile` — a step goes in a transducer and a fold does not — while hiding the thing the README names as a feature."
+     :cites [:the-facade-is-a-vocabulary-and-two-doors]}
+    {:id :problems-is-opt-in-and-shape-does-not-run-it
+     :kind :decision
+     :says "`problems` is opt-in and `shape` does not run it. Fewest-functions argued for a strict constructor and no `problems` at all, and it is wrong for one decisive reason: A SHAPE YOU CANNOT BUILD IS A SHAPE YOU CANNOT DRAW, and the whole argument for this library is that a half-finished machine is worth looking at."
+     :cites [:the-facade-is-a-vocabulary-and-two-doors :two-kinds-of-check-and-two-places-for-them]
+     :see [:robertluo.state-graph/problems :robertluo.state-graph/shape]}
+    {:id :re-exports-are-delegating-defns-and-never-def-aliases
+     :kind :rule
+     :says "Every re-export here is a delegating defn and never a def alias, and carries NO :malli/schema of its own: the contract belongs to the namespace that owns the function, one declaration and not two, and a copy here could only drift. `run` is the one function the facade really adds, so it is the one that carries a schema."
+     :cites [:a-def-alias-bypasses-instrumentation]}
+    {:id :a-def-alias-bypasses-instrumentation
+     :kind :lesson
+     :says "A def alias bypasses malli instrumentation: instrument! replaces the VAR'S root binding, so a value captured by (def state shape/state) is the raw function for ever — handed a bad argument it answers happily where the var throws. Measured both ways, 2026-09-01. And the near miss: the alias APPEARED guarded at its 2-arity, because a defn whose body calls itself goes through the var, so the delegation landed in the instrumented wrapper. Testing only the 2-arity would have licensed aliases everywhere."
+     :when "2026-09-01"}
+    {:id :the-facade-requires-check-knowingly
+     :kind :decision
+     :says "The facade requires `check`, breaking the property the layering once claimed for it, and loads manifold through `async` and test.check through `laws`. Taken knowingly: it is a load-time cost paid by a require and never by a step, the checks and the drawing are the reason the library exists, and a caller who minds requires robertluo.state-graph.compile directly. What the batteries rule protects survives one level down — compile requires no manifold and never will."
+     :cites [:the-defaults-are-batteries :dependency-test-check]}
+    {:id :nothing-is-persisted-here
+     :kind :decision
+     :says "This library stores nothing: it outputs what happened, and what becomes of that is the caller's. datahike left deps.edn, where it had been a dependency nothing used, and the store namespace left the layering, never having been built. What it cost is the one thing it broke: an audit trail must know which event produced which state, and a stream of bare states cannot say — which is what forced the output to be a transition."
+     :from "the author, 2026-09-01"
+     :when "2026-09-01"
+     :supersedes [:what-is-persisted]
+     :cites [:the-output-is-a-transition-and-not-a-state :a-run-is-the-vector-of-events]}
+    {:id :what-is-persisted
+     :kind :decision
+     :says "What a caller should keep is HISTORY and not the shape — a shape built at load time out of closures and compiled schemas is not something a database reloads a machine FROM. Shape versioning is out of v1 and stays out, with the question it drags behind it: which shape an instance mid-flight belongs to."
+     :why "Superseded by :nothing-is-persisted-here in the sense that nothing is persisted BY THIS LIBRARY; what survives is advice for whoever writes a store outside it."
+     :cites [:a-shape-is-code :mid-flight-shape-versioning-stays-open]}
+    {:id :dependencies-point-down-only
+     :kind :rule
+     :says "Dependencies point down only — a lower namespace never refers to a higher one, in code, in a docstring, in a comment or in a :see. A namespace NESTED under another is BELOW it: robertluo.state-graph.shape may not require robertluo.state-graph. Anything that must sit ABOVE the facade is a SIBLING and named accordingly — robertluo.state-graph-x, never robertluo.state-graph.x — so the name agrees with the direction of the arrow."}
+    {:id :malli-guards-every-crossing
+     :kind :rule
+     :says "Malli guards every crossing, data and functions both. A schema that is only written down is a comment: instrument in dev, and conform BY HAND at a seam that must hold in production."
+     :cites [:every-seam-is-conformed-in-the-code]}
+    {:id :errors-are-data
+     :kind :rule
+     :says "Errors are DATA — a plain map, m/explain's or our own, over malli.error/humanize prose. Prose reads well to a person and matches badly to a program."
+     :see [:robertluo.state-graph.shape/explain]}
+    {:id :only-assert-what-can-fail
+     :kind :rule
+     :says "Only assert what can fail. Do not re-test what a library promises — that ubergraph adds an edge, that malli validates, that manifold delivers what was put on a stream — and do not re-test our own code through a second door. A facade re-export IS that second door: the delegation is not worth a test, and what the facade adds is."
+     :cites [:re-exports-are-delegating-defns-and-never-def-aliases]}
+    {:id :a-generative-test-needs-an-independent-invariant
+     :kind :rule
+     :says "A property that recomputes the expected answer the way the implementation computes it agrees with every bug it contains: it catches a wrong implementation and never a wrong understanding. For an FSM the honest invariants are structural — a reduction over events lands only in states the graph admits, a state entered validates against its own schema, replaying a prefix and then the rest equals replaying the whole — and those hold whatever the handlers do."
+     :cites [:the-two-doors-agree :the-pass-through-property]}
+    {:id :what-the-review-scored
+     :kind :lesson
+     :says "Scored 2026-09-03 against the code, when the author brought a DECLARATIVE TRANSITION GRAPH proposal as a review — transition fragments with declared inputs, outputs and effects, a separate declarative assembly, and a TOKEN-FLOW runtime owning scheduling, persistence, replay and cancellation. Two thirds of what it asked for was already here. The one-line diagnosis: it is a DATAFLOW model and this is a CONTROL-FLOW model — there a transition fires when its inputs are available, here when an event arrives and the state admits it — and nearly every difference falls out of that substitution. `Park until a human approves` has no dataflow spelling."
+     :why "Reading the partial rows together was the finding: they were eleven ways of wanting one thing — a transition caused by the machine's own accumulated state rather than by the world — which this library had refused three times, each for a good and different reason, and each refusal left a named door. The review was the accumulated case for opening exactly one, which is what was built as the completion transition."
+     :when "2026-09-03"
+     :cites [:a-state-may-say-where-it-goes-when-it-completes :should-a-transition-declare-its-effects-and-idempotence]}
+    {:id :a-marking-relocates-the-explosion
+     :kind :rejected
+     :says "The state-explosion argument against the product construction is correct and was not news — a join IS 2^n states. The counter worth making: a MARKING does not remove the explosion, it RELOCATES it out of the shape, where it is drawable and checkable, into the runtime state, where it is neither. Every static check here rests on ONE STATE BEING ONE MAP WITH ONE SCHEMA; under a marked graph merge(from, out) ⊆ to loses its subject. It trades a decidable checker for a nicer picture."
+     :cites [:what-the-review-scored :a-join-is-the-product-and-the-licence]}
+    {:id :a-declaration-the-assembler-trusts-is-not-a-proof
+     :kind :lesson
+     :says "Where this library is ahead of the reviewed proposal: its `essential constraint` was {:purity :effects :idempotence}, a declaration the assembler TRUSTS, promising correct concurrency and naming no mechanism. Here :sees declares reads, :out declares writes, :combine declares how a value lands, and then `commuting` PROVES the reorder by Bernstein, `laws` refutes a false combine by generation, and :agree re-verifies on the concrete values. A rule that lives only in a declaration is the repository's own named anti-pattern."
+     :cites [:what-the-review-scored :the-promise-is-data-and-checked-at-two-strengths]}
+    {:id :a-runtime-owning-persistence-is-a-framework
+     :kind :rejected
+     :says "`The runtime owns persistence, replay, observability` is a FRAMEWORK, and a runtime owning persistence has to own shape identity and versioning, which is the question v1 pushed out. Not adopted. The ergonomic complaint — that a named join-all reads better than 8 states and 12 edges — is legitimate and belongs in the consumer."
+     :cites [:what-the-review-scored :nothing-is-persisted-here]}
+    {:id :can-the-shape-answer-what-a-run-will-cost-at-worst
+     :kind :open
+     :says "Can the shape answer what a run will cost at worst? A consumer keeps a hand-written formula — laps times lenses times a fan bound times rounds — that is right today and is a second source of truth about a graph this library owns. Three real questions: an event would have to DECLARE that it spends, since the library never knows what a report does, which makes it an annotation on `event`, the one form every consumer writes; the number is a longest path over a cyclic graph, finite only because every cycle is bounded by a guard over a counter, so the bound is inside the guard schema and would have to be read back out of it, and a shape bounded by data has to be able to answer `unbounded, as far as the shape can see`; and a nested machine multiplies, once per entry, which is where a hand formula stops being maintainable. The answer cannot be a scalar: it is keyed by event and the consumer prices it, as `covering` reports per transition and has no opinion about what the report means."
+     :why "What says wait: one consumer, one formula, currently right. Do not build it without the human — it changes the one form every consumer writes."
+     :from "the author, 2026-09-09, from ../coder: `the ceiling is not an estimate, it is the number calculated from the shape: how many LLM calls will we do in maximum — because it is costly, we always want to know beforehand — it is the whole budget.`"
+     :when "2026-09-09"
+     :cites [:a-handler-belongs-to-the-event :a-guard-is-a-schema-over-the-event :cover-the-graph-by-running-it]}
+    {:id :is-dynamic-fan-out-wanted
+     :kind :open
+     :says "Is dynamic fan-out wanted — one child per element of a list discovered at runtime, joined when all are done? Mostly answered 2026-09-03 by trying it: the ACCUMULATION was already expressible and the CONCURRENCY needed one character, so what is left is only the completion test. The two structural answers stay refused: a lattice generated per run makes a shape per run and breaks `a shape is code`; a marking relocates the explosion. The width being the driver's is not a gap — a graph shows structure and a count is data — and fan-out ACROSS instances is what `run` already does, nothing joining those back."
+     :cites [:may-a-state-complete-on-a-condition-over-its-own-data :the-diagonal-is-the-fan-out :a-marking-relocates-the-explosion :a-shape-is-code]}
+    {:id :from-the-sibling-project
+     :kind :lesson
+     :says "The house rules came from smart-boundary/AGENTS.md, the same author's larger project, in git history since 2026-09-02. What transfers is METHOD and not fact: schemas at every crossing, seams checked in the code and not merely declared, only assert what can fail, and knowledge written in the past tense about things actually observed. Its content was about Anthropic's API, Datalevin and nREPL and applies to nothing here."
+     :when "2026-09-02"}]}
   (:refer-clojure :exclude [compile])
   (:require [robertluo.state-graph.async :as async]
             [robertluo.state-graph.check :as check]
@@ -76,7 +191,13 @@
   "An event as it arrives: a map saying its own type, and which run it is for."
   compile/Event)
 
-(def Transition
+(def ^{:knowledge
+       [{:id :the-output-is-a-transition-and-not-a-state
+         :kind :decision
+         :says "`run` puts a RESULT on :states and not a bare state: the :event, the :state it produced, whether it :fired, and :instance where there is one. The argument is that the caller stores now: a state does not say what caused it, and an event nobody handled produces a state EQUAL to the one before, so from a stream of states alone no consumer can build the history this library has declined to keep. A result reads back down with (map :state); the other direction does not exist."
+         :why "It does not contradict the step refusing a richer return: that refused an outcome value because the reduction must answer STATES, and A STREAM IS NOT AN ACCUMULATOR — the pump holds the state itself and what it puts is free to be richer. :fired needs a lookup and not a comparison, hence `admits?`; :instance is derived from the state so there is one source for it. The cost is paid by the consumer who needs less."
+         :cites [:nothing-is-persisted-here :a-richer-step-return-was-turned-down :fired-needs-a-lookup-and-not-a-comparison]}]}
+  Transition
   "WHAT `run` PUTS ON :states — a transition result and not a bare state.
 
    The reason is that this library stores nothing and the caller does. A state does not
@@ -315,7 +436,28 @@
 
    Handlers may answer deferreds here, which is the point of the door: a machine waiting on
    I/O holds no thread, and a slow handler slows only its own machine."
-  {:malli/schema [:=> [:cat shape/Shape :map async/Source] async/Machine]}
+  {:malli/schema [:=> [:cat shape/Shape :map async/Source] async/Machine]
+   :knowledge
+   [{:id :the-caller-owns-the-lifecycle
+     :kind :decision
+     :says "The author asked who owns an instance — the caller reducing over a seq, or a reactive machine over a stream — and the question DISSOLVED: they are the same ownership. The state lives in a d/loop accumulator exactly as it lives in reduce's; there is no cell holding it and no object, and the atom `fan` keeps holds per-instance streams and never a state. The reactive machine is the same reduction with the loop shipped, and `run` is A CALLER THIS LIBRARY SHIPS. The facade names both doors and chooses neither."
+     :cites [:compilation-and-lifecycle :the-defaults-are-batteries]}
+    {:id :reactive-only-was-turned-down
+     :kind :rejected
+     :says "Reactive-only — the stream as the only door — was the tempting answer and was turned down: manifold would then be on the ONLY path there is, and the one rule the batteries have is that it must not be. The reduction is the README's own headline sentence, and the step is what a caller with core.async, a transducer or a plain fold needs."
+     :cites [:the-caller-owns-the-lifecycle]}
+    {:id :the-two-doors-agree
+     :kind :lesson
+     :says "It is a property and not a speech: for a generated shape and a generated event sequence, (map :state) off the stream equals the states the reduction passes through. Worth more than any number of examples, and the only thing that can refute :the-caller-owns-the-lifecycle."
+     :cites [:the-caller-owns-the-lifecycle]}
+    {:id :one-stream-door-and-not-two
+     :kind :decision
+     :says "One stream door and not two: `fan` already subsumes `async/drive` — one partition IS one machine — so `run` builds the initial-of function out of the shape and a caller never spells :instance. `async/drive` stays public for somebody who has already partitioned. This is the only layer that knows the shape, so it is the one that computes the licence and hands it down."
+     :cites [:the-facade-is-a-vocabulary-and-two-doors :the-runtime-takes-the-licence :done-is-a-map-keyed-by-instance]}
+    {:id :run-gives-every-machine-the-same-starting-data
+     :kind :open
+     :says "`run` gives every machine the same starting data, which `async/fan` does not — fan takes a function of the instance. Found writing a pipeline whose initial state carried a per-manuscript title, and worked around by moving the title onto the event that STARTS the machine, which is better modelling anyway. Whether `run` should accept a function is the author's call."
+     :cites [:one-stream-door-and-not-two]}]}
   [sh data events]
   (let [idx (compile/index sh)
         ph  (compile/phases sh async/context)]

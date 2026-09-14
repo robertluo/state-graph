@@ -51,11 +51,57 @@
   :a-state-may-say-where-it-goes-when-it-completes says an auditor holding the shape
   can do: a row says where the whole machine ended up, so a host it is no longer
   sitting in has completed, by the branch that child's own final state names."
+  {:knowledge
+   [{:id :cover-the-graph-by-running-it
+     :kind :decision
+     :says "Cover the graph by actually running it — the runtime counterpart of `check`. A shape is a function of its env, so whatever a report reaches for arrived as a value and an ordinary function goes in its place; give one constructor a set of alternative envs and every branch is reachable on purpose. `covering` drives one run per combination and answers which transitions were taken."
+     :why "The technique was already possible; what was missing was the ACCOUNTING for having done it. Measured on the first consumer's machine: fourteen states, twenty-two transitions, three agents and a REPL replaced by constants — 19 of 22 covered, 24 runs, gaps empty, and the three uncovered exactly one of each kind. The first attempt covered 14 with three gaps, all the way back from a failure; the fix was to vary :rounds, a plain number in the env and not a function — a budget that is an edge is covered by substituting a constant."
+     :from "the author of ../coder, 2026-09-05: `the ability of fully cover the graph using this technique is very important and general, I think maybe it worth a seat in src` and `we can substitute not only LLM functions, but any functions in system ... our check does its work statically, while this can check in the runtime` — runtime meaning by actual executing"
+     :when "2026-09-05"
+     :cites [:a-shape-is-a-function-of-its-env :what-the-graph-buys]}
+    {:id :one-fixed-env-per-run
+     :kind :decision
+     :says "ONE FIXED ENV PER RUN. To take an edge you need an env that produces its payload, not a particular history, so TRANSITION coverage does not need a fake that answers differently on its third call. Reach for a stateful fake when the thing under test is a SEQUENCE; reach for this when it is a GRAPH."
+     :cites [:cover-the-graph-by-running-it]}
+    {:id :a-stateful-fake-was-turned-down-as-the-default
+     :kind :rejected
+     :says "A fake that answers differently on its third call — a recovery, tests failing and then passing — reaches paths a fixed one cannot, and was turned down as the default: it makes the run count unpredictable and the failure hard to read."
+     :cites [:one-fixed-env-per-run]}
+    {:id :a-throw-propagates-and-is-not-collected
+     :kind :decision
+     :says "A throw propagates and is not collected. Driving already enforces the event's schema, the guards, the target's schema and a loud miss, so anything that goes wrong is a defect in the machine, and stopping on it with the exception intact beats a tally. There is no try in this library's src and this did not become the first one. Bisect by passing fewer alternatives."
+     :cites [:cover-the-graph-by-running-it]}
+    {:id :covering-is-a-sibling-of-drive-and-not-on-the-facade
+     :kind :decision
+     :says "A sibling of drive, above it in the arrow, requiring it and check and shape. It is NOT in `check`, which never touches the runtime path — this one runs the machine — and it is NOT on the facade, for the reason coverage, confluence, commuting, subsumption and views are not."
+     :cites [:cover-the-graph-by-running-it :two-kinds-of-check-and-two-places-for-them]}
+    {:id :one-machine-the-outermost
+     :kind :decision
+     :says "One machine, the outermost, for the reason the id-set checks stay with one graph: two machines may name a state :done, and a report keyed by state id has nowhere to say which it meant. A child's transitions are counted under :nested by :within and are not scored."
+     :cites [:a-published-check-answers-about-the-machine]}
+    {:id :a-completion-transition-is-scored-too
+     :kind :decision
+     :says "A completion transition is scored too, and it had to be once one could BRANCH: while a :done was a single unconditional target there was nothing to cover, but a :done keyed by the child's final state is a fork, and a fork no run took is precisely what this exists to name. It fires no event, so it is RECONSTRUCTED — a row says where the whole machine ended up, so a host it is no longer sitting in has completed, and which branch is read off the target. Exact wherever the branches go different places; two outcomes completing to one target are a merge this counts both of."
+     :when "2026-09-05"
+     :cites [:done-may-say-where-each-outcome-goes :cover-the-graph-by-running-it]}
+    {:id :covering-had-a-hole-the-outcomes-opened
+     :kind :lesson
+     :says "Found by writing a consumer test that asserted a branch the tool could not see: a completion fires no event, so it was never scored — invisible while unconditional, a silent gap once it could fork. And an edge into a state that completes on entry had scored as uncovered, a LATENT inaccuracy no fixture had. The temptation is the thing to note: the fix nearly made was to weaken the assertion. A tool blind to a branch tempts you to weaken the test until it matches the tool."
+     :cites [:a-completion-transition-is-scored-too]}
+    {:id :a-completion-is-never-no-report
+     :kind :decision
+     :says "A completion is never :no-report, and the ordering of `why` says so: that reason is about an event only the WORLD can supply, and ARRIVING is not something anybody supplies. Asked as membership in the completion set rather than by the source state, a nesting node's own edges being its escape and perfectly ordinary events."
+     :cites [:a-completion-transition-is-scored-too]}]}
   (:require [robertluo.state-graph.check :as check]
             [robertluo.state-graph.drive :as drive]
             [robertluo.state-graph.shape :as shape]))
 
-(def default-steps
+(def ^{:knowledge
+       [{:id :a-step-cap-where-drive-has-none
+         :kind :decision
+         :says "A step cap where `drive` has none. `drive` needs no counter because the stopping rule is an edge — but exploration is exactly where you find out that yours is not, and hanging the suite is a poor way to report an infinite loop."
+         :cites [:drive-needs-no-counter]}]}
+  default-steps
   "How many turns one run may take before this stops asking.
 
   A SHAPE WHOSE STOPPING RULE IS AN EDGE NEEDS NO CAP — `drive` has none for exactly
@@ -188,7 +234,13 @@
   {:malli/schema [:function
                   [:=> [:cat ifn? :map Alternatives] Covering]
                   [:=> [:cat ifn? :map Alternatives [:map [:steps {:optional true} :int]]]
-                   Covering]]}
+                   Covering]]
+   :knowledge
+   [{:id :three-kinds-of-transition-no-driver-can-take
+     :kind :decision
+     :says "Three kinds of transition cannot be taken by any driver however you fake the world, and calling them failures would cry wolf on every real machine: :no-report, the event is the world's; :join-order, the state is a proven join, so the crank takes its events at once in ONE order and the other orderings' halfway states are never entered; :unvisited-state, the reason is upstream. Subtract those and the residue is :gaps — an edge a driver COULD have taken and your alternatives never produced a payload for — the only number that means you missed something."
+     :why "The :join-order row is the one worth the entry: exactly the property that makes a join safe is what makes half its diamond undrivable. Confluence proves the order cannot be observed, so the crank picks one; a report that let you fix it would be inviting you to depend on which order it picked, the one thing the library promises you may not observe. The explore test asserts that one of the two orderings is skipped and never which."
+     :cites [:cover-the-graph-by-running-it :a-proven-join-is-taken-whole :the-driver-world-distinction-is-data]}]}
   ([constructor env alternatives] (covering constructor env alternatives {}))
   ([constructor env alternatives {:keys [steps] :or {steps default-steps}}]
    (let [taken  (atom #{})

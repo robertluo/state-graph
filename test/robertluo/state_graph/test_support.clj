@@ -2,6 +2,51 @@
   "What every suite needs and no source namespace should have to know.
 
    Not named <ns>-test, so kaocha does not load it as a suite."
+  {:knowledge
+   [{:id :tests-live-in-test-and-not-in-the-source
+     :kind :rule
+     :says "Tests live in test/, one <ns>_test.clj per source namespace, ordinary clojure.test run by kaocha in two suites over one tree — unit, and ^:integration for anything that opens a file, a socket or a real clock. Generative tests ARE the unit suite here, which is why test.check is in :deps and not :dev."
+     :cites [:a-generative-test-needs-an-independent-invariant :dependency-test-check]}
+    {:id :everything-a-test-opens-is-released-in-a-finally
+     :kind :rule
+     :says "Everything a test opens is released in a `finally`. `finally` is release and is NOT the forbidden try/catch. Nothing here opens a database any more, so what this governs is files and streams."}
+    {:id :every-deref-in-a-stream-test-is-bounded
+     :kind :rule
+     :says "Every deref of a machine in a stream test is BOUNDED, or a hang becomes a hung suite — a bounded deref is the only honest one, so a machine that hangs FAILS. And a test that derefs :done before draining :states hangs, backpressure being real."
+     :cites [:consume-states-or-done-may-never-resolve]}
+    {:id :kaocha-ignores-a-focus-meta-nobody-carries
+     :kind :lesson
+     :says "With no ^:integration test in the tree, the gate silently RUNS THE UNIT TESTS and a bare run does everything twice. Resolved once there was one; kaocha is in :dev, so the runner is clojure -M:dev:test and never clojure -M:test."}
+    {:id :gen-let-does-not-support-let-bindings
+     :kind :lesson
+     :says "gen/let in test.check 1.1.1 does not support :let bindings — the symbol does not resolve, and the failure arrives as `Unable to resolve symbol` from inside the generator. Use gen/bind and gen/fmap. And mg/sample takes {:size n} as the COUNT, not as test.check's generator size, which matters in a property looking for a counterexample."}
+    {:id :the-instrument-count-caught-a-stale-repl
+     :kind :lesson
+     :says "The instrument count still said 14 after `check` was written, because `namespaces` here had been edited on disk and not reloaded, so nine new fns were never collected. The number is a smoke alarm for the fixture AND for the REPL: two ways of counting that agree — (count (mi/instrument!)) against an ns-publics count of fns carrying a :malli/schema — is what says no public function was added without a schema, and a disagreement has twice meant a stale REPL."}
+    {:id :the-count-is-a-repl-habit-and-not-an-assertion
+     :kind :open
+     :says "`instrumented` collects and instruments and returns nothing, and no test counts anything. Making the instrument count an assertion is three lines and nobody has; until somebody does, any count written down is a measurement and not a guarantee."
+     :cites [:the-instrument-count-caught-a-stale-repl]}
+    {:id :the-generative-property-extended-without-an-argument
+     :kind :lesson
+     :says "Nesting extended the generative property without an argument: nest one generated shape into a node of another and assert the parent lands in one of ITS nodes and the child in one of the CHILD'S. The two share an event vocabulary, so the child shadows the parent constantly — the interesting half rather than an accident."
+     :cites [:a-machine-can-nest-in-a-node]}
+    {:id :the-pass-through-property
+     :kind :lesson
+     :says "The pass-through property is the one worth having for completions, and it is genuinely independent rather than the implementation restated: split one generated edge a -e-> b into a -e-> mid {:done b}, and the reduction must end EXACTLY where it ended before. It compares two machines and recomputes nothing."
+     :cites [:a-state-may-say-where-it-goes-when-it-completes]}
+    {:id :a-shape-written-to-be-a-parent-is-usually-not-startable-as-a-child
+     :kind :lesson
+     :says "A shape written to be a parent is usually not startable as a child: `shipping`'s own first state insists on a :total, and entering a child with no :seed hands it NO DATA, so nesting it is :machine-cannot-start."
+     :cites [:a-node-may-sow-its-child]}
+    {:id :only-one-test-needs-a-clock
+     :kind :lesson
+     :says "Only one test needs a clock — serialisation asserted with a handler that really is slower, and it is ^:integration. Everything else uses immediate deferreds, or a deferred the test resolves by hand, and is deterministic."
+     :cites [:completion-order-is-testable-without-a-clock]}
+    {:id :the-licence-guard-is-implied-and-was-kept
+     :kind :lesson
+     :says "The licence's refusal around a completion is implied by the constructor and was asserted anyway, a deliberate exception to only-assert-what-can-fail: the argument spans two namespaces and the licence is load-bearing, so the condition is stated where it is relied on and the test asserts the fault that implies it."
+     :cites [:a-completion-refuses-the-licence-around-it :only-assert-what-can-fail]}]}
   (:require [clojure.test.check.generators :as gen]
             [malli.instrument :as mi]
             [robertluo.state-graph.shape :as shape]))
