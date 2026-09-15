@@ -55,7 +55,8 @@
             [malli.util :as mu]
             [robertluo.state-graph.check :as check]
             [robertluo.state-graph.compile :as compile]
-            [robertluo.state-graph.shape :as shape]))
+            [robertluo.state-graph.shape :as shape]
+            [malli.generator :as mg]))
 
 ;;; ------------------------------------------------------------------ the shapes
 
@@ -289,6 +290,80 @@
     {:a-then-b a-then-b
      :b-then-a b-then-a
      :agree (= a-then-b b-then-a)}))
+
+(defn- owning-shape
+  "The shape (this one or one of its nested machines, recursively) that actually
+  declares `state-id` as one of its own states."
+  [shape state-id]
+  (or (when (some #{state-id} (shape/states shape)) shape)
+      (some #(owning-shape % state-id) (vals (shape/machines shape)))))
+
+(defn- gen-event-for
+  "Generate one event map for `event-id` firing from `state-id` in `shape` (or one
+  of its nested machines)."
+  [top-shape state-id event-id]
+  (let [shape (owning-shape top-shape state-id)
+        trans (first (filter #(and (= (:from %) state-id) (= (:event %) event-id))
+                              (shape/transitions shape)))
+        schema (shape/accepted trans)]
+    (assoc (mg/generate schema) :id event-id)))
+
+(defn- gen-state-for
+  "Generate one state map for `state-id` in `shape` (or one of its nested machines)."
+  [top-shape state-id]
+  (let [shape (owning-shape top-shape state-id)
+        schema (shape/enter-schema shape state-id)]
+    (assoc (mg/generate schema) :id state-id)))
+
+(defn- pair-events
+  "The two event ids a commuting pair names — the same one twice where the pair
+  is a self-pair (one event proven to commute with itself), since a set of one
+  collapses the duplicate."
+  [pair]
+  (let [es (vec pair)]
+    (if (= 1 (count es))
+      [(first es) (first es)]
+      es)))
+
+(defn licence-agrees
+  "Whether the concurrency licence is SOUND for a shape, by running it: for every state
+  `check/commuting` names and every pair of events it licenses there, a state generated
+  from that state's schema and one event generated from each of the pair's event schemas
+  are applied both ways through `drive/reorder-agrees`, `samples` times each, and every
+  disagreement is answered — the state id, the pair, and the two landings. Answers how
+  many pairs were licensed in all and the disagreements found; {:licensed n :disagreeing []}
+  is a sound licence, and :licensed 0 is a shape the licence names no pair in. It RUNS
+  the machine and recomputes nothing the checker computes, so a :yes whose two orders
+  differ is caught here and nowhere else."
+  {:malli/schema [:=> [:cat :any [:int {:min 1}]] [:map [:licensed [:int {:min 0}]] [:disagreeing [:vector :map]]]] :knowledge [{:id :the-licence-held-on-forty-generated-shapes
+     :kind :lesson
+     :says "`licence-agrees` runs every pair `commuting` licenses, in every state it names, both ways through `reorder-agrees` over a generated state and two generated events, and answers the disagreements; `licence-agrees-never-disagrees` asks it of forty shapes from `ts/gen-shape` and none disagreed, 2026-09-15 — the first time the licence, unsound three times before and each time found by asking, was held to a property. And a licence that names `add` with itself is right: two events whose combine commutes commute."
+     :why "Written by robertluo.coder's authoring machine in state-graph's own JVM, the only one that sees this test tree. Its first run was abandoned on an example of the author's that said the summing shape licenses nothing; the machine answered one, and the example was the one that was wrong."
+     :cites [:the-witness-runs-the-machine-and-recomputes-nothing :the-licence-was-unsound-and-nothing-had-noticed]}]}
+  [shape samples]
+  (let [commute-map (check/commuting shape)]
+    (reduce
+     (fn [acc [state-id pairs]]
+       (reduce
+        (fn [acc pair]
+          (let [[e1 e2] (pair-events pair)
+                disagreements
+                (keep
+                 (fn [_]
+                   (let [st (gen-state-for shape state-id)
+                         ea (gen-event-for shape state-id e1)
+                         eb (gen-event-for shape state-id e2)
+                         {:keys [agree a-then-b b-then-a]} (reorder-agrees shape st ea eb)]
+                     (when-not agree
+                       {:state state-id :pair pair :a-then-b a-then-b :b-then-a b-then-a})))
+                 (range samples))]
+            (-> acc
+                (update :licensed inc)
+                (update :disagreeing into disagreements))))
+        acc
+        pairs))
+     {:licensed 0 :disagreeing []}
+     commute-map)))
 
 (defn advance
   "One event applied to a run: the run it grows into, and `:on` told what happened.
