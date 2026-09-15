@@ -349,6 +349,24 @@
   ([sh] (check/draw! sh))
   ([sh opts] (check/draw! sh opts)))
 
+(defn fingerprint
+  "A stable id for the SHAPE of this machine: SHA-256 over its canonical ordered form, as hex.
+
+   Two structurally identical shapes built separately answer one string, and the env a shape
+   was built as a function of does not move it, its reports being closures and closures being
+   erased.
+
+   WHAT IT PROVES IS THAT THE GRAPH MATCHED — the same states, schemas, events, guards,
+   targets, completions and nested children — and NOT that the same code ran: change what a
+   handler returns without changing its :out, or change what an :fn predicate checks, and the
+   fingerprint does not move.
+
+   It carries no NAME: what a machine is called is a fact about the job and belongs to
+   whoever owns the job. This library stores nothing, so writing it beside a transcript row
+   is the caller's — and it is what lets that row say which machine produced it."
+  [sh]
+  (shape/fingerprint sh))
+
 (defn dot
   "The same drawing as GRAPHVIZ SOURCE, as a string — for anything that renders a diagram
    itself rather than shelling out to graphviz: a notebook, a web page, a docs build. Needs

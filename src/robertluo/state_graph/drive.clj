@@ -275,6 +275,17 @@
   ([sh events opts]
    (first (turn sh (where sh events opts) (or (:permitted opts) any?)))))
 
+(defn reorder-agrees
+  "Run two events out of ONE state BOTH WAYS through the compiled machine and answer where each order landed and whether the two landings are identical. It is the independent witness the concurrency licence has never had: it recomputes nothing `confluence` computes — it holds the two concrete events, applies a then b, applies b then a, and compares the resulting states — so a pair the checker calls :yes whose two orders differ is an unsound licence and this says so. A pair called :no or :unknown is merely never taken and may disagree freely. It RUNS the machine, so like `laws` it is not part of `problems`; it is what the generative soundness property over `confluence` and the `commuting` licence is written on."
+  {:malli/schema [:=> {:registry {"Shape" :any, "State" [:map [:id :keyword]], "Event" [:map [:id :keyword]], "Agreement" [:map [:a-then-b [:schema [:ref "State"]]] [:b-then-a [:schema [:ref "State"]]] [:agree :boolean]]}} [:cat [:schema [:ref "Shape"]] [:schema [:ref "State"]] [:schema [:ref "Event"]] [:schema [:ref "Event"]]] [:schema [:ref "Agreement"]]]}
+  [shape state a b]
+  (let [step (compile/compile shape)
+        a-then-b (step (step state a) b)
+        b-then-a (step (step state b) a)]
+    {:a-then-b a-then-b
+     :b-then-a b-then-a
+     :agree (= a-then-b b-then-a)}))
+
 (defn advance
   "One event applied to a run: the run it grows into, and `:on` told what happened.
 
