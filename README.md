@@ -144,7 +144,7 @@ And the same question by the means a person is better at:
 (sg/draw! signup {:save {:filename "signup.png" :format :png}})
 
 (sg/dot signup)                                              ; the same drawing as DATA
-;=> "digraph {\ngraph [layout=dot];\nnew [label=\"new ▸\"];\n..."
+;=> "digraph {\n  \"new\" [label=\"▸ new\"];\n..."
 ```
 
 The drawing marks the initial state, gives a final state a double circle, marks a nesting
@@ -555,7 +555,7 @@ A transcript row that cannot say which machine produced it is a row nobody can a
 shape has a **derived** id:
 
 ```clojure
-(shape/fingerprint sh)   ;=> "5375cc61b250cc5b…"   64 hex chars, SHA-256
+(sg/fingerprint sh)      ;=> "5375cc61b250cc5b…"   64 hex chars, SHA-256 — on the facade since 2026-09-15
 (shape/canonical sh)     ;=> the ordered data it is taken over
 ```
 

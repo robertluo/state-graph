@@ -10,8 +10,7 @@
             [robertluo.state-graph.check :as check]
             [robertluo.state-graph.compile :as c]
             [robertluo.state-graph.shape :as shape]
-            [robertluo.state-graph.test-support :as ts]
-            [ubergraph.core :as uber])
+            [robertluo.state-graph.test-support :as ts])
   (:import (java.io File)
            (java.nio.file Files)
            (java.nio.file.attribute FileAttribute)))
@@ -242,27 +241,6 @@
 
 ;;; ---------------------------------------------------------------------- drawing
 
-(deftest labelled-replaces-what-nobody-can-read
-  (let [g (check/labelled (ts/counter))]
-    ;; The NAME and the markers, and no schema: a drawing is for the structure, and
-    ;; the schema is the part of a shape a map literal already shows. It also did not
-    ;; scale — see `node-label`.
-    (is (= "idle ▸" (uber/attr g :idle :label)))
-    (is (every? #(contains? (uber/attrs g %) :label)
-                (concat (shape/states g) (uber/edges g))))))
-
-(deftest dot-answers-graphviz-source
-  ;; IN THE FAST LOOP, and it used to be ^:integration: `dot` catches the source in a
-  ;; StringWriter, so there is no file, nothing to release and no graphviz — where the same
-  ;; assertions through `draw!` needed a temp file and a `finally`. The rendering path is
-  ;; what still needs both, and it is the test below.
-  (let [src (check/dot (ts/counter))]
-    (is (str/starts-with? src "digraph"))
-    (doseq [n ["idle" "running" "done" "start" "set" "stop"]]
-      (is (str/includes? src n) (str "the drawing names " n)))
-    (is (str/includes? src "doublecircle") ":done is final and the picture says so")
-    (is (not (str/includes? src "$eval")) "no closure reached the label")))
-
 (deftest ^:integration draw-renders-a-picture
   ;; The only test of the RENDERING path, as opposed to the source: it shells out to
   ;; `dot`, which is why graphviz is in devenv.nix. A machine without it fails here and
@@ -299,17 +277,6 @@
             {:problem :trap :id :retrying :within [:p]}]
            (check/problems g))
         "and a child's own faults are reported under the node that hosts it")))
-
-(deftest a-node-that-nests-a-machine-says-so-in-the-picture
-  ;; It does not DRAW the child: viz-graph builds its own element list and cannot be handed
-  ;; a graphviz cluster, so the parent marks the node and the child is asked for its own
-  ;; picture. The marker is what stops a nested machine being invisible.
-  (let [g (shape/shape
-           (shape/state :p [:map] {:initial true :machine (ts/counter)})
-           (shape/state :q [:map] {:final true})
-           (shape/event :e [:map] (constantly {}) [:map])
-           (shape/transition :p :e :q))]
-    (is (str/includes? (check/dot g) "⊞ 3 states"))))
 
 ;;; ---------------------------------------------------------- declared views
 

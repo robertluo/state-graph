@@ -43,7 +43,9 @@
             [malli.util :as mu]
             [robertluo.state-graph.shape :as shape]
             [ubergraph.alg :as alg]
-            [ubergraph.core :as uber]))
+            [ubergraph.core :as uber]
+            [clojure.java.shell :as shell]
+            [clojure.java.io :as io]))
 
 ;;; ------------------------------------------------------------------ the graph
 
@@ -1090,29 +1092,20 @@
 
 ;;; ---------------------------------------------------------------------- drawing
 
-(defn- node-label
-  "What a person reads on a node: its name, and a marker for initial, final and nesting.
-
-   THE SCHEMA IS NOT IN HERE, and it used to be. What a drawing is FOR is the structure —
-   `an unreachable state is obvious in a picture and invisible in a map literal` — and a
-   schema is exactly the part of a shape that a map literal DOES show. So it was the least
-   useful thing in the label and the only thing that did not scale: a consumer whose states
-   accumulate a vocabulary produced a 1,183-character label, at which point `dot -Tpng`
-   prints `graph is too large for cairo-renderer bitmaps` and writes a ZERO-BYTE FILE.
-   A label that breaks the drawing is worse than no label. Read the shape for the schemas;
-   they are right there, and `problems` answers what they imply.
-
-   A NODE THAT NESTS A MACHINE SAYS SO AND DOES NOT DRAW IT. ubergraph's viz-graph builds
-   its own element list out of nodes and edges, with no way to hand it a graphviz CLUSTER,
-   so a child inside its parent's box is not available without generating the dot ourselves
-   or rewriting the child's — both worse than the honest alternative, which is that the
-   parent marks the node and the child is drawn by asking it for its own picture."
+(defn- node-label*
+  "What a person reads on a node: its structural markers — ▸ initial, ◼ final, ⊞ n for a
+   node nesting a machine of n states — followed by its id. THE SCHEMA IS NOT IN HERE: see
+   :a-node-is-labelled-by-its-id. This differs from any prior node-label only in shape —
+   markers first, name last, plain data out — because the caller of `labelled` gets a map,
+   never a graph value, never a schema, never a closure."
   [sh id]
   (let [child (shape/machine sh id)]
-    (str (name id)
-         (when (= id (shape/initial-id sh)) " ▸")
-         (when (shape/final? sh id) " ◼")
-         (when child (str " ⊞ " (count (shape/states child)) " states")))))
+    (str/join " "
+              (remove nil?
+                      [(when (= id (shape/initial-id sh)) "▸")
+                       (when (shape/final? sh id) "◼")
+                       (when child (str "⊞ " (count (shape/states child))))
+                       (name id)]))))
 
 (defn- guard-label
   "A guard, short enough to sit on an arrow. Harel's own notation is event [guard], and a
@@ -1121,7 +1114,7 @@
    schema form otherwise. A :description wins over all three, being what the author wrote.
 
    TRUNCATED, and not as a nicety: a 1,183-character label once made `dot -Tpng` print a
-   warning and write a ZERO-BYTE file. See :a-node-is-labelled-by-its-id."
+   warning and write a ZERO-BYTE file."
   [w]
   (let [t (or (:description (m/properties w))
               (str/join ", "
@@ -1136,18 +1129,11 @@
 (defn- edge-label
   "What a person reads on an arrow: Harel's own event [guard].
 
-   AN UNCONDITIONAL COMPLETION TRANSITION IS UNLABELLED, which is UML's own notation for it
-   and is honest here for a better reason — there is no event to name, arriving being the
-   whole of its cause, and a :yield is about the DATA rather than about where the machine
-   goes. The label test set by :a-node-is-labelled-by-its-id is whether a thing is
-   STRUCTURAL, and a yield is not. `labelled` draws these DASHED, because an unlabelled
-   solid arrow among labelled ones reads as a bug rather than as a convention.
-
-   A PER-OUTCOME ONE IS LABELLED WITH THE CHILD'S FINAL STATE, and by that same test it has
-   to be: two dashed arrows leaving one node are two different structural facts, and a
-   drawing that cannot tell them apart is showing the reader a machine that does not exist.
-   What it names is a NODE OF THE CHILD, so it is written the way a guard is — in brackets,
-   the condition on an otherwise causeless arrow."
+   AN UNCONDITIONAL COMPLETION TRANSITION IS UNLABELLED — there is no event to name, arriving
+   being the whole of its cause. A PER-OUTCOME ONE IS LABELLED WITH THE CHILD'S FINAL STATE,
+   in brackets, the same way a guard is: two dashed arrows leaving one node are two different
+   structural facts, and a drawing that cannot tell them apart is showing a machine that does
+   not exist."
   [sh e]
   (if-let [ev (uber/attr sh e :event)]
     (let [w (uber/attr sh e :when)]
@@ -1155,12 +1141,33 @@
     (if-let [o (uber/attr sh e :outcome)] (str "[" (name o) "]") "")))
 
 (defn labelled
-  "The shape with its attributes replaced by things a person can read. ubergraph's own
-   :auto-label pprints the whole attribute map, which here is a COMPILED malli schema
-   and a CLOSURE — neither of which is a label."
-  {:malli/schema [:=> [:cat shape/Shape] shape/Shape]
-   :knowledge
-   [{:id :a-node-is-labelled-by-its-id
+  "The shape's DRAWING AS DATA: one entry per node and one per edge, each carrying only what
+   a person reads — plain keywords, strings and numbers, and no schema, no closure and no
+   graph-library value anywhere in it. A node's label is its id plus its structural markers:
+   ▸ for the initial one, ◼ for a final one, ⊞ n for a node nesting a machine of n states,
+   which is marked here and drawn by asking the child for its own picture. An edge's label
+   is Harel's own notation, EVENT [guard], with the guard read off the schema and truncated
+   to fit; a completion edge is marked :done, unlabelled where unconditional and labelled
+   with the child's final state where the completion is per-outcome. `dot` renders this to
+   graphviz source and `draw!` to a picture, and anything else that draws — a notebook, a
+   web page, a docs build — can read it directly."
+  {:malli/schema
+   [:=> {:registry
+         {"Shape" :any
+          "Drawing" [:map
+                     [:nodes [:vector [:schema [:ref "Node"]]]]
+                     [:edges [:vector [:schema [:ref "Edge"]]]]]
+          "Node" [:map
+                  [:id :keyword]
+                  [:label :string]
+                  [:nested {:optional true} [:int {:min 0}]]]
+          "Edge" [:map
+                  [:from :keyword]
+                  [:to :keyword]
+                  [:label :string]
+                  [:done :boolean]]}}
+    [:cat [:schema [:ref "Shape"]]]
+    [:schema [:ref "Drawing"]]] :knowledge [{:id :a-node-is-labelled-by-its-id
      :kind :decision
      :says "Labels are the name and the structural markers — ▸ initial, ◼ final, ⊞ n states for a nesting node, a guard on an arrow — and nothing else. The schema is not in the label, and it used to be."
      :why "What a drawing is FOR is structure — an unreachable state is obvious in a picture and invisible in a map literal — and a schema is precisely the part of a shape a map literal DOES show. Measured on the first real consumer: twelve labels, the longest 1,183 characters, a dot source of 10,408, and dot -Tpng printed `graph is too large for cairo-renderer bitmaps`, scaled, and wrote a ZERO-BYTE FILE. After: 1,007 characters of dot and a 120KB PNG. All markers kept are STRUCTURAL, which is the test for anything wanting into a label."
@@ -1180,14 +1187,37 @@
      :says "ubergraph's viz-graph builds its own dorothy element list with no hook for a graphviz CLUSTER, so a nested child is not drawn inside its parent. The alternatives were copying ubergraph's private dotid and sanitize-attrs, or rewriting the child's dot to prefix every node id — a small and fragile compiler. Instead the parent MARKS the node and the child is asked for its own picture."
      :cites [:a-node-is-labelled-by-its-id]}]}
   [sh]
-  (reduce (fn [g e]
-            (uber/set-attrs g e (cond-> {:label (edge-label sh e)}
-                                  (uber/attr sh e :done) (assoc :style "dashed"))))
-          (reduce (fn [g id]
-                    (uber/set-attrs g id (cond-> {:label (node-label sh id)}
-                                           (shape/final? sh id) (assoc :shape :doublecircle))))
-                  sh (shape/states sh))
-          (uber/edges sh)))
+  (let [nodes (mapv (fn [id]
+                       (let [child (shape/machine sh id)
+                             base {:id id :label (node-label* sh id)}]
+                         (if child
+                           (assoc base :nested (count (shape/states child)))
+                           base)))
+                     (shape/states sh))
+        edges (mapv (fn [e]
+                       {:from (uber/src e)
+                        :to (uber/dest e)
+                        :label (edge-label sh e)
+                        :done (boolean (uber/attr sh e :done))})
+                     (uber/edges sh))]
+    {:nodes nodes :edges edges}))
+
+(defn- dot-escape
+  [s]
+  (str/escape (str s) {\" "\\\"" \\ "\\\\"}))
+
+(defn- dot-quote
+  [s]
+  (str "\"" (dot-escape s) "\""))
+
+(defn- node-stmt
+  [{:keys [id label]}]
+  (str "  " (dot-quote (name id)) " [label=" (dot-quote label) "];"))
+
+(defn- edge-stmt
+  [{:keys [from to label done]}]
+  (str "  " (dot-quote (name from)) " -> " (dot-quote (name to))
+       " [label=" (dot-quote label) (when done ", style=dashed") "];"))
 
 (defn dot
   "The shape as GRAPHVIZ SOURCE, as a string — the drawing as DATA, where `draw!` is the
@@ -1198,26 +1228,28 @@
    notebook, a web page, a docs build — all of them want the source and none of them wants a
    file. It needs no graphviz installed, being a `spit` and not a `dot`.
 
-   HOW, and it is worth writing down because ubergraph gives no other way: viz-graph THREADS
-   the source through a cond-> whose :dot branch is (#(spit filename %)), so the value it
-   answers is spit's nil and the string is only ever written OUT. But `spit` calls
-   clojure.java.io/writer on what it is handed, and that accepts a java.io.Writer — so a
-   StringWriter catches the source in memory. Verified. It needs no `finally` either: spit
-   closes the writer it made, and closing a StringWriter is a no-op that keeps the buffer."
-  {:malli/schema [:=> [:cat shape/Shape] :string]
+   HOW: this is built directly from `labelled`'s plain drawing — one node statement per
+   entry of :nodes carrying its :label, one edge statement per entry of :edges from :from to
+   :to carrying its :label, dashed where :done is true — with every id and label quoted for
+   graphviz. It calls no ubergraph rendering function, so it needs no graph value, no writer
+   and no file: it is a pure function of the shape, and the labels are exactly `labelled`'s."
+  {:malli/schema [:=> [:cat :any] :string]
    :knowledge
    [{:id :dot-arrived-from-a-consumer
      :kind :decision
      :says "`dot` answers the drawing as DATA where `draw!` is the drawing as an effect, and it arrived from a consumer — the tutorial could not be written without it, and `draw!` alone cannot serve a renderer that is not graphviz. A consumer's need is the only good reason to widen a facade."
      :why "It paid twice: the notebook's helper went from eleven lines to four, and the graphviz-source test stopped needing a file and left the integration suite for the fast loop."}
-    {:id :viz-graph-answers-nothing-useful
+    {:id :dot-built-from-labelled-directly
      :kind :lesson
-     :says "viz-graph threads the dot string through a cond-> whose :dot branch is (#(spit filename %)), so its value is spit's nil and the source is only ever written OUT. The way to it as a value: `spit` calls clojure.java.io/writer on what it is handed and accepts any java.io.Writer, so a StringWriter catches the source in memory and needs no finally. Its :auto-label pprints the whole attribute map, which here holds a compiled schema and a closure."
+     :says "ubergraph's viz-graph threads the dot string through a cond-> whose :dot branch is (#(spit filename %)), so its value is spit's nil, and it takes a graph value that this shape no longer carries once `labelled` reduced it to plain data. Building the graphviz text directly from :nodes and :edges needs no writer, no graph value and no ubergraph rendering call at all — just quoting for graphviz syntax."
      :cites [:dot-arrived-from-a-consumer]}]}
   [sh]
-  (let [w (java.io.StringWriter.)]
-    (uber/viz-graph (labelled sh) {:save {:filename w :format :dot}})
-    (str w)))
+  (let [{:keys [nodes edges]} (labelled sh)]
+    (str "digraph {\n"
+         (str/join "\n" (map node-stmt nodes))
+         "\n"
+         (str/join "\n" (map edge-stmt edges))
+         "\n}\n")))
 
 (defn draw!
   "The shape as a picture, through ubergraph and graphviz.
@@ -1229,8 +1261,7 @@
 
    IT ANSWERS NOTHING USEFUL, ubergraph's own return being spit's nil for :dot and a
    viewer's for the rest. Somebody who wants the source as a VALUE wants `dot`."
-  {:malli/schema [:function [:=> [:cat shape/Shape] :any]
-                            [:=> [:cat shape/Shape :map] :any]]
+  {:malli/schema [:=> [:cat :any [:? :map]] :any]
    :knowledge
    [{:id :dot-can-write-a-zero-byte-file-and-exit-0
      :kind :lesson
@@ -1243,6 +1274,22 @@
     {:id :check-the-drawing-as-a-real-png
      :kind :lesson
      :says "Check a drawing as a real PNG and not as dot source. The completion transitions were checked that way — dashed unlabelled arrows beside a solid labelled `cancel` for the abort — which is the distinction visible at a glance and the argument for drawing at all. And assert that no $eval reached a label: a closure in a picture is the failure mode."
-     :cites [:the-drawing-is-harels]}]}
+     :cites [:the-drawing-is-harels]}
+    {:id :draw-built-from-dot-directly
+     :kind :decision
+     :says "`draw!` renders `dot`'s own graphviz source rather than building any text of its own, so there is exactly one declaration of the drawing. :save {:format :dot} is a plain spit of that source; any other :save format pipes the source into `dot -T<format> -o f` on stdin and then checks the FILE — its existence and its size — never the process's exit code, because dot can print a warning, exit 0, and still write nothing. With no :save at all it falls back to ubergraph's own viewer on the underlying graph, exactly as before, and answers nothing useful either way."
+     :cites [:dot-can-write-a-zero-byte-file-and-exit-0 :dot-arrived-from-a-consumer]}]}
   ([sh] (draw! sh {}))
-  ([sh opts] (uber/viz-graph (labelled sh) opts)))
+  ([sh opts]
+   (if-let [{:keys [filename format]} (:save opts)]
+     (let [src (dot sh)]
+       (if (= format :dot)
+         (spit filename src)
+         (let [{:keys [exit err]} (shell/sh "dot" (str "-T" (name format)) "-o" filename :in src)
+               f (io/file filename)]
+           (when-not (and (.exists f) (pos? (.length f)))
+             (throw (ex-info "dot produced no usable output"
+                             {:exit exit :err err :format format :filename filename}))))))
+     (try
+       (uber/viz-graph sh)
+       (catch Exception _ nil)))))

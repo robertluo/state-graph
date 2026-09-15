@@ -103,6 +103,15 @@ Each will bite on first use:
 - tests.edn is two suites over one tree, split by skip-meta and focus-meta on :integration. The
   default ns-patterns IS the `<ns>_test.clj` convention, so it is not configured.
 - CLOSED, kept so nobody re-reports them: manifold IS a dependency now; datahike is NOT.
+- FIVE VARS WERE WRITTEN BY A MACHINE, 2026-09-15 morning, and landed from
+  ../coder/notebook/candidates.clj through this suite as the gate: `fingerprint` on the facade,
+  `drive/reorder-agrees`, and `check/labelled`, `dot` and `draw!` rewritten — the drawing is plain
+  data now, `dot` renders it and `draw!` renders `dot`. Their `:knowledge` says why, on the vars.
+  Two things they leave: `draw!` with no `:save` shells `dot -Txlib`, a viewer Linux has and macOS
+  does not, and swallows the exception; and the PROPERTY over generated shapes that `reorder-agrees`
+  is the witness for is still owed — `ts/gen-shape` exists, and the machine's trial JVM cannot see
+  this test tree. Three tests of the old drawing were retired with it; three suites landed beside
+  the answers as `<name>_test.clj`.
 
 # The workflow
 
