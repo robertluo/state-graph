@@ -18,3 +18,6 @@
 # three quarters of a megabyte of HTML with its JavaScript bundled in — derived from
 # notebook/tutorial.clj, which does travel. Delete this line to publish the page.
 docs/
+
+# The jar that `clojure -T:build ci` builds is derived.
+target/

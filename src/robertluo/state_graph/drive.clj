@@ -126,20 +126,6 @@
    [:on        {:optional true} ifn?]
    [:reports   {:optional true} ifn?]])
 
-(def Applied
-  "WHAT `:on` IS TOLD: one event, applied, and where it took the machine.
-
-   IT IS EVERYTHING AND ONLY WHAT A ROW NEEDS — which machine is the caller's to
-   know, but what happened is not recoverable from the run alone once a state has
-   been projected. :within is the path of hosts where the event landed inside a
-   nested machine."
-  [:map
-   [:event compile/Event]
-   [:from shape/Id]
-   [:to shape/Id]
-   [:state compile/State]
-   [:within {:optional true} [:vector shape/Id]]])
-
 ;;; ------------------------------------------------------------------ asking the shape
 
 (defn awaits
@@ -278,7 +264,7 @@
 
 (defn reorder-agrees
   "Run two events out of ONE state BOTH WAYS through the compiled machine and answer where each order landed and whether the two landings are identical. It is the independent witness the concurrency licence has never had: it recomputes nothing `confluence` computes — it holds the two concrete events, applies a then b, applies b then a, and compares the resulting states — so a pair the checker calls :yes whose two orders differ is an unsound licence and this says so. A pair called :no or :unknown is merely never taken and may disagree freely. It RUNS the machine, so like `laws` it is not part of `problems`; it is what the generative soundness property over `confluence` and the `commuting` licence is written on."
-  {:malli/schema [:=> {:registry {"Shape" :any, "State" [:map [:id :keyword]], "Event" [:map [:id :keyword]], "Agreement" [:map [:a-then-b [:schema [:ref "State"]]] [:b-then-a [:schema [:ref "State"]]] [:agree :boolean]]}} [:cat [:schema [:ref "Shape"]] [:schema [:ref "State"]] [:schema [:ref "Event"]] [:schema [:ref "Event"]]] [:schema [:ref "Agreement"]]] :knowledge [{:id :the-witness-runs-the-machine-and-recomputes-nothing
+  {:malli/schema [:=> {:registry {"Shape" shape/Shape, "State" [:map [:id :keyword]], "Event" [:map [:id :keyword]], "Agreement" [:map [:a-then-b [:schema [:ref "State"]]] [:b-then-a [:schema [:ref "State"]]] [:agree :boolean]]}} [:cat [:schema [:ref "Shape"]] [:schema [:ref "State"]] [:schema [:ref "Event"]] [:schema [:ref "Event"]]] [:schema [:ref "Agreement"]]] :knowledge [{:id :the-witness-runs-the-machine-and-recomputes-nothing
      :kind :decision
      :says "`reorder-agrees` is the independent witness the concurrency licence never had: it compiles the machine and steps a pair of events out of one state both ways, comparing where each order landed, and recomputes nothing `confluence` computes — so a pair the checker calls :yes whose two orders differ is an unsound licence caught by RUNNING rather than by asking. It lives here and not beside `confluence` because drive is the lowest namespace that sees `compile`; a witness placed in check rebuilt stepping from the edges, without guards or handlers, and passed its examples."
      :why "Written 2026-09-15 by robertluo.coder's authoring machine from a brief its candidate machine wrote off this record's own three confessions that the licence had been unsound and nothing had noticed; the property over generated shapes it is written for is still owed."
@@ -335,7 +321,7 @@
   is a sound licence, and :licensed 0 is a shape the licence names no pair in. It RUNS
   the machine and recomputes nothing the checker computes, so a :yes whose two orders
   differ is caught here and nowhere else."
-  {:malli/schema [:=> [:cat :any [:int {:min 1}]] [:map [:licensed [:int {:min 0}]] [:disagreeing [:vector :map]]]] :knowledge [{:id :the-licence-held-on-forty-generated-shapes
+  {:malli/schema [:=> [:cat shape/Shape [:int {:min 1}]] [:map [:licensed [:int {:min 0}]] [:disagreeing [:vector :map]]]] :knowledge [{:id :the-licence-held-on-forty-generated-shapes
      :kind :lesson
      :says "`licence-agrees` runs every pair `commuting` licenses, in every state it names, both ways through `reorder-agrees` over a generated state and two generated events, and answers the disagreements; `licence-agrees-never-disagrees` asks it of forty shapes from `ts/gen-shape` and none disagreed, 2026-09-15 — the first time the licence, unsound three times before and each time found by asking, was held to a property. And a licence that names `add` with itself is right: two events whose combine commutes commute."
      :why "Written by robertluo.coder's authoring machine in state-graph's own JVM, the only one that sees this test tree. Its first run was abandoned on an example of the author's that said the summing shape licenses nothing; the machine answered one, and the example was the one that was wrong."

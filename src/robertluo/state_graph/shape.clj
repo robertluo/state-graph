@@ -572,7 +572,7 @@
   (into {} (for [[k props child] (m/children (m/schema s))]
              [k {:optional? (boolean (:optional props)) :schema child}])))
 
-(defn combines-of
+(defn- combines-of
   "{k {:combine f :commutes? bool :schema S}} for a :map schema — how each key that
    declares one is APPLIED when a patch lands on it, and what it promises about that.
 
@@ -597,8 +597,7 @@
 
    IT IS DECLARED ON THE NODE and never on an event, because the same key must combine the
    same way however it arrives. Per-edge algebra would prove nothing."
-  {:malli/schema [:=> [:cat MapSchema] :map]
-   :knowledge
+  {:knowledge
    [{:id :a-combine-is-how-a-patch-lands
      :kind :decision
      :says "{:combine f :combine/commutes true} on a map entry says how a patch lands on that key. A key with no combine REPLACES, which is what a merge always did, so nothing written before behaves differently."
@@ -785,7 +784,7 @@
   [t]
   [(:from t) (:event t) (:to t)])
 
-(defn completions
+(defn- completions
   "The COMPLETION TRANSITIONS a state definition declares, as a seq of
    {:outcome <the child's final state, or nil for any> :to <id> :yield <schema or nil>}.
 
@@ -796,7 +795,6 @@
 
    IT TAKES A PART AND NOT A BUILT SHAPE, because `problems` has to answer about parts that
    may never become one. `continuations` is the same reading off the graph."
-  {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [s]
   (let [done (:done s)]
     (cond

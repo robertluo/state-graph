@@ -239,7 +239,7 @@
   [target produced]
   (sub (m/schema target) (m/schema produced)))
 
-(defn produced
+(defn- produced
   "The schema of what a transition actually hands its target: the source state's own
    schema, the handler's DECLARED answer merged over it, then the machinery's own keys —
    the target's :id, and :sub where the target nests a machine — written in last, which is
@@ -252,8 +252,7 @@
 
    nil where the edge declared no :out. That declaration is what this check is FOR:
    without it there is nothing to say about a closure."
-  {:malli/schema [:=> [:cat shape/Shape :map] [:maybe shape/MapSchema]]
-   :knowledge
+  {:knowledge
    [{:id :the-subsumption-check-had-to-learn-about-sub
      :kind :lesson
      :says "Until this composed :sub the way the compiler does, nesting was broken in a way only the check could see: a nesting target's enter-schema REQUIRES :sub, no handler may write it, and the step assocs the child's first state on entry, so every edge into a nested node was condemned :target-refuses. Found one minute after nesting first worked."
@@ -264,7 +263,7 @@
                 (mu/assoc :id [:= to]))
       (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
 
-(defn continued
+(defn- continued
   "The schema of what a COMPLETION TRANSITION hands its target: the source state's own
    schema, the :yield merged over it, and the machinery's own keys written in last — the
    same order and for the same reason as `produced`, which is its sibling.
@@ -277,8 +276,7 @@
    :sub IS NOT CARRIED. A child left behind would ride into a state that never declared it,
    so `arrive` drops it and re-seeds — and this starts from the node's OWN schema, which
    never held it, so the two agree without either mentioning the other."
-  {:malli/schema [:=> [:cat shape/Shape shape/Id :map] shape/MapSchema]
-   :knowledge
+  {:knowledge
    [{:id :a-completion-is-never-undeclared
      :kind :decision
      :says "A completion transition is checked HARDER than an event edge and is never :undeclared: it carries no closure, so what arrives is the state itself and its schema is known exactly. :sub is not carried, `arrive` dropping and re-seeding it, and this starts from the node's own schema, which never held it — so the two agree without either mentioning the other."
@@ -1153,7 +1151,7 @@
    web page, a docs build — can read it directly."
   {:malli/schema
    [:=> {:registry
-         {"Shape" :any
+         {"Shape" shape/Shape
           "Drawing" [:map
                      [:nodes [:vector [:schema [:ref "Node"]]]]
                      [:edges [:vector [:schema [:ref "Edge"]]]]]
@@ -1233,16 +1231,21 @@
    :to carrying its :label, dashed where :done is true — with every id and label quoted for
    graphviz. It calls no ubergraph rendering function, so it needs no graph value, no writer
    and no file: it is a pure function of the shape, and the labels are exactly `labelled`'s."
-  {:malli/schema [:=> [:cat :any] :string]
+  {:malli/schema [:=> [:cat shape/Shape] :string]
    :knowledge
    [{:id :dot-arrived-from-a-consumer
      :kind :decision
      :says "`dot` answers the drawing as DATA where `draw!` is the drawing as an effect, and it arrived from a consumer — the tutorial could not be written without it, and `draw!` alone cannot serve a renderer that is not graphviz. A consumer's need is the only good reason to widen a facade."
      :why "It paid twice: the notebook's helper went from eleven lines to four, and the graphviz-source test stopped needing a file and left the integration suite for the fast loop."}
+    {:id :viz-graph-answers-nothing-useful
+     :kind :lesson
+     :says "viz-graph threads the dot string through a cond-> whose :dot branch is (#(spit filename %)), so its value is spit's nil and the source is only ever written OUT. The way to it as a value: `spit` calls clojure.java.io/writer on what it is handed and accepts any java.io.Writer, so a StringWriter catches the source in memory and needs no finally. Its :auto-label pprints the whole attribute map, which here holds a compiled schema and a closure."
+     :cites [:dot-arrived-from-a-consumer]}
     {:id :dot-built-from-labelled-directly
      :kind :lesson
      :says "ubergraph's viz-graph threads the dot string through a cond-> whose :dot branch is (#(spit filename %)), so its value is spit's nil, and it takes a graph value that this shape no longer carries once `labelled` reduced it to plain data. Building the graphviz text directly from :nodes and :edges needs no writer, no graph value and no ubergraph rendering call at all — just quoting for graphviz syntax."
-     :cites [:dot-arrived-from-a-consumer]}]}
+     :cites [:dot-arrived-from-a-consumer]
+     :supersedes [:viz-graph-answers-nothing-useful]}]}
   [sh]
   (let [{:keys [nodes edges]} (labelled sh)]
     (str "digraph {\n"
@@ -1252,18 +1255,17 @@
          "\n}\n")))
 
 (defn draw!
-  "The shape as a picture, through ubergraph and graphviz.
+  "The shape as a picture, through graphviz — an EFFECT and never a test: what a drawing is for is a
+   person looking at it, and it answers nothing useful. :save {:filename f :format :dot} writes the
+   graphviz source `dot` answers and needs nothing installed — it is a spit. Any other :format shells
+   out to `dot -T<format> -o f` with the source on stdin and writes f. No :save at all renders a PNG
+   into a temporary file and opens it through java.awt.Desktop, where the JVM has one.
 
-   :save {:filename f :format :dot} writes the GRAPHVIZ SOURCE and needs no graphviz
-   installed — it is a spit. Every other format shells out to `dot`, and no :save at
-   all opens a viewer. This is an effect and never a test: what a drawing is for is a
-   person looking at it.
-
-   IT ANSWERS NOTHING USEFUL, ubergraph's own return being spit's nil for :dot and a
-   viewer's for the rest. Somebody who wants the source as a VALUE wants `dot`."
-  {:malli/schema [:=> [:cat :any [:? :map]] :any]
-   :knowledge
-   [{:id :dot-can-write-a-zero-byte-file-and-exit-0
+   NOTHING IS SWALLOWED: where graphviz leaves no usable file — it can write a zero-byte file and
+   exit 0 — or where no desktop can open one, it throws an ex-info carrying the file, the format and
+   graphviz's stderr, and what `dot` refuses it refuses too, because a drawing that silently did not
+   appear is the one failure a person cannot see."
+  {:malli/schema [:=> {:registry {"Shape" shape/Shape}} [:cat [:schema [:ref "Shape"]] [:? :map]] :any] :knowledge [{:id :dot-can-write-a-zero-byte-file-and-exit-0
      :kind :lesson
      :says "`dot` can write a ZERO-BYTE FILE and exit 0 on an oversized graph, after a warning that looks survivable and is not. CHECK THE FILE AND NOT THE EXIT CODE. SVG rendered the same graph fine, which made it look like a graphviz quirk rather than a label problem."
      :cites [:a-node-is-labelled-by-its-id]}
@@ -1278,7 +1280,19 @@
     {:id :draw-built-from-dot-directly
      :kind :decision
      :says "`draw!` renders `dot`'s own graphviz source rather than building any text of its own, so there is exactly one declaration of the drawing. :save {:format :dot} is a plain spit of that source; any other :save format pipes the source into `dot -T<format> -o f` on stdin and then checks the FILE — its existence and its size — never the process's exit code, because dot can print a warning, exit 0, and still write nothing. With no :save at all it falls back to ubergraph's own viewer on the underlying graph, exactly as before, and answers nothing useful either way."
-     :cites [:dot-can-write-a-zero-byte-file-and-exit-0 :dot-arrived-from-a-consumer]}]}
+     :cites [:dot-can-write-a-zero-byte-file-and-exit-0 :dot-arrived-from-a-consumer]}
+    {:id :draw-swallows-nothing
+     :kind :decision
+     :says "`draw!` with no :save renders a PNG into a temporary file and opens it through java.awt.Desktop, and throws where the JVM has no desktop; every other path throws where graphviz left no usable file. Nothing is caught anywhere in it. The old no-:save arity called ubergraph's viewer inside a try that swallowed every exception into nil — the one bare try/catch in this library, against its own rule — and on macOS, which has no xlib viewer, it did nothing and said nothing."
+     :why "A drawing that silently did not appear is the one failure a person cannot see, and this function exists for a person to look at. Found by review rule (2) on 2026-09-15 after the landing's gate — suite and lint — had passed it: a gate checks what a test can see, and a swallowed exception is what no test sees."
+     :from "the author, 2026-09-15, agreeing the review's recommendation that the four defects the landing left come first"
+     :when "2026-09-15"
+     :cites [:draw-built-from-dot-directly :dot-can-write-a-zero-byte-file-and-exit-0]}
+    {:id :a-goal-s-sentence-held-nothing-and-an-example-did
+     :kind :lesson
+     :says "Rewritten by robertluo.coder's authoring machine from a brief whose :goal said `no try/catch anywhere: what fails, throws`. Its first answer wrapped `dot` in a try that swallowed every exception into nil — the defect the brief existed to remove, back in a different place — and passed its suite, because no test fed it a value `dot` refuses. The second brief carried one more example: a non-shape thrown out of `draw!` as it is thrown out of `dot`. The second answer holds no try. A sentence in a goal is words the writer may not weigh; an example is what the machine holds an answer to."
+     :when "2026-09-15"
+     :cites [:draw-swallows-nothing]}]}
   ([sh] (draw! sh {}))
   ([sh opts]
    (if-let [{:keys [filename format]} (:save opts)]
@@ -1290,6 +1304,14 @@
            (when-not (and (.exists f) (pos? (.length f)))
              (throw (ex-info "dot produced no usable output"
                              {:exit exit :err err :format format :filename filename}))))))
-     (try
-       (uber/viz-graph sh)
-       (catch Exception _ nil)))))
+     (let [src (dot sh)
+           tmp (java.io.File/createTempFile "draw" ".png")
+           filename (.getAbsolutePath tmp)
+           {:keys [exit err]} (shell/sh "dot" "-Tpng" "-o" filename :in src)
+           f (io/file filename)]
+       (when-not (and (.exists f) (pos? (.length f)))
+         (throw (ex-info "dot produced no usable output"
+                         {:exit exit :err err :format :png :filename filename})))
+       (if (java.awt.Desktop/isDesktopSupported)
+         (.open (java.awt.Desktop/getDesktop) f)
+         (throw (ex-info "no desktop available to open drawing" {:filename filename})))))))

@@ -27,7 +27,13 @@
     {:id :dependency-manifold
      :kind :decision
      :says "manifold 0.4.3 is the async default, and nothing below this layer requires it. Its Deferred is a clojure.lang.IDeref, which is what lets the pure core deref one without depending on manifold; d/chain takes a plain value as happily as a deferred and FLATTENS; s/connect is ASYNCHRONOUS, which cost a lost state once."
-     :cites [:the-defaults-are-batteries :s-connect-is-asynchronous]}]}
+     :cites [:the-defaults-are-batteries :s-connect-is-asynchronous]}
+    {:id :manifold-is-pinned-at-what-its-consumers-resolve
+     :kind :decision
+     :says "manifold is pinned at 0.5.0 since 2026-09-15, for the release: 0.4.3 had been the pin since the library began, every consumer in the repository it grew up in pinned 0.5.0, and one classpath keeps one version — so the library's pin was the only thing in the repository still saying otherwise. The whole suite had passed on 0.5.0 with an override on 2026-09-02 and passes on it now; only long-stable API is used."
+     :when "2026-09-15"
+     :supersedes [:dependency-manifold]
+     :cites [:dependency-manifold]}]}
   (:require [manifold.deferred :as d]
             [manifold.stream :as s]))
 
@@ -102,7 +108,7 @@
   "WHAT A PROVEN PAIR NEEDS IN ORDER TO RUN AT ONCE, and the answer to the one thing this
    layer could not do: the step IN ITS TWO HALVES, plus the pairs themselves.
 
-     :patch  (fn [state event] -> a deferred Patch)         the handler, run
+     :patch  (fn [state event] -> a deferred patch, see compile/phases)         the handler, run
      :apply  (fn [state event patch] -> a deferred State)   the patch, landed
      :agree  (fn [state ea pa eb pb])                       throws if the two disagree
      :pairs  {state-id #{#{event-a event-b}}}               check/commuting, verbatim

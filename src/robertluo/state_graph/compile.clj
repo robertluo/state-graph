@@ -53,7 +53,18 @@
     {:id :arrive-is-one-definition-of-entering
      :kind :decision
      :says "What arriving at a node MEANS is said in one place, called from the three places a machine ever enters a state: the first state of a run, the far end of a transition, and the far end of a completion. Those differ in what they hand over, never in what arriving means, and three copies is exactly how what the check composes and what the compiler composes come to disagree."
-     :cites [:what-is-checked-must-be-what-runs :a-node-holds-what-it-declares]}]}
+     :cites [:what-is-checked-must-be-what-runs :a-node-holds-what-it-declares]}
+    {:id :a-patch-has-to-say-whose-it-is
+     :kind :decision
+     :says "A patch carries :depth, and the two halves of the step compare it against their own lookup — a child's patch may only be applied to that child, and this machine's only to this machine. One comparison per level checks the whole descent."
+     :why "The bug the seam caught was one layer up: the async layer handed `apply` the patch DEFERRED rather than the patch, and the seam failed loudly at :depth instead of merging nonsense. Nine errors, all one cause."
+     :see [:robertluo.state-graph.compile/phases]
+     :cites [:the-split-is-decided-by-what-each-crossing-depends-on]}
+    {:id :the-patch-is-never-stale-only-the-admission-is
+     :kind :decision
+     :says "A handler answers from the event alone, so what it computed while the machine was in S is still exactly right in T; only whether T admits the event can have changed, and that is looked up again at application time. The exception is a handler that READS a view, which is why the concurrency condition includes reads."
+     :see [:robertluo.state-graph.compile/phases]
+     :cites [:a-handler-belongs-to-the-event :a-handler-never-sees-the-state]}]}
   (:refer-clojure :exclude [compile])
   (:require [malli.core :as m]
             [malli.util :as mu]
@@ -418,33 +429,6 @@
                       (shape/enter-schema sh id)
                       {}))))
 
-(def ^{:knowledge
-       [{:id :a-patch-has-to-say-whose-it-is
-         :kind :decision
-         :says "A patch carries :depth, and the two halves of the step compare it against their own lookup — a child's patch may only be applied to that child, and this machine's only to this machine. One comparison per level checks the whole descent."
-         :why "The bug the seam caught was one layer up: the async layer handed `apply` the patch DEFERRED rather than the patch, and the seam failed loudly at :depth instead of merging nonsense. Nine errors, all one cause."
-         :cites [:the-split-is-decided-by-what-each-crossing-depends-on]}
-        {:id :the-patch-is-never-stale-only-the-admission-is
-         :kind :decision
-         :says "A handler answers from the event alone, so what it computed while the machine was in S is still exactly right in T; only whether T admits the event can have changed, and that is looked up again at application time. The exception is a handler that READS a view, which is why the concurrency condition includes reads."
-         :cites [:a-handler-belongs-to-the-event :a-handler-never-sees-the-state]}]}
-  Patch
-  "WHAT A HANDLER ANSWERED, before any state has taken it — and whose machine it belongs
-   to, a nested machine's handler answering one too.
-
-   ::missed IS NOT A PATCH AND SAYS SO: no edge admitted the event, so no handler ran and
-   there is nothing to apply. A legal outcome, not an error, and the reduction stays total.
-
-   :depth IS THE ONE THING A PATCH MUST CARRY. A patch is computed against the state a
-   machine was in and may be applied to a LATER one — that is the whole point of having two
-   phases — and the patch itself is never stale for it: a handler answers FROM THE EVENT
-   ALONE, so what it computed in S is still exactly right in T. What CAN have changed is
-   WHICH MACHINE admits the event, and applying a child's patch to its parent would be
-   silent nonsense. So the depth is recorded here and REFUSED on disagreement at the other
-   end, which is the seam this whole split rests on."
-  [:or [:= ::missed]
-       [:map [:answer :map] [:depth [:int {:min 0}]]]])
-
 (def Phases
   "The step in its two halves, the step itself, and the one check only the runtime can
    make. See `phases`."
@@ -454,7 +438,7 @@
   "THE STEP IN TWO HALVES — {:patch :apply :step} — and the step BUILT OUT OF THE OTHER
    TWO, so that what runs in one call and what runs in two cannot come to disagree.
 
-   :patch  (fn [state event] -> Patch)         runs the handler
+   :patch  (fn [state event] -> {:answer m :depth n}, or ::missed)   runs the handler
    :apply  (fn [state event patch] -> State)   lands it
    :step   (fn [state event] -> State)         both, which is `compile`
 

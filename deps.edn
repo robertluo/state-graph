@@ -1,8 +1,8 @@
 {:deps
  {ubergraph/ubergraph {:mvn/version "0.9.0"}
-  manifold/manifold {:mvn/version "0.4.3"}
+  manifold/manifold {:mvn/version "0.5.0"}
   metosin/malli {:mvn/version "0.20.1"}
-  org.clojure/test.check {:mvn/version "1.1.1"}}
+  org.clojure/test.check {:mvn/version "1.1.3"}}
  :aliases
  {:dev {:extra-paths ["test"]
         :extra-deps {nrepl/nrepl {:mvn/version "1.3.0"}
@@ -17,4 +17,8 @@
              :exec-fn scicloj.clay.v2.api/make!
              :exec-args {:source-path "notebook/tutorial.clj" :render true}}
   :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "RELEASE"}}
-         :main-opts ["-m" "clj-kondo.main"]}}}
+         :main-opts ["-m" "clj-kondo.main"]}
+  ;; clojure -T:build ci | deploy — see build.clj. The author's other libraries build the
+  ;; same way, on the same fork of build-clj.
+  :build {:deps {io.github.robertluo/build-clj {:git/sha "5d45f58cc20747c136bb320c9b13d65d2bf4cf58"}}
+          :ns-default build}}}

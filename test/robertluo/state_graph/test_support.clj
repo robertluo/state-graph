@@ -46,7 +46,14 @@
     {:id :the-licence-guard-is-implied-and-was-kept
      :kind :lesson
      :says "The licence's refusal around a completion is implied by the constructor and was asserted anyway, a deliberate exception to only-assert-what-can-fail: the argument spans two namespaces and the licence is load-bearing, so the condition is stated where it is relied on and the test asserts the fault that implies it."
-     :cites [:a-completion-refuses-the-licence-around-it :only-assert-what-can-fail]}]}
+     :cites [:a-completion-refuses-the-licence-around-it :only-assert-what-can-fail]}
+    {:id :the-instrument-count-is-never-asserted
+     :kind :decision
+     :says "The instrument count is never asserted, and the fixture stays as it is: collects, instruments, returns nothing. A count over what the fixture happens to gather is a total that moves with every var added and says nothing about what broke — the anti-pattern this repository names for tests. What the count is FOR, catching a stale REPL, is a measurement a person makes at the REPL and reads against the last one, and it stays that."
+     :from "the author, 2026-09-16, of a suite asserting edge and coverage totals over a fixture: `these tests are very frigile, a classic anti-pattern.`"
+     :when "2026-09-16"
+     :supersedes [:the-count-is-a-repl-habit-and-not-an-assertion]
+     :cites [:the-instrument-count-caught-a-stale-repl]}]}
   (:require [clojure.test.check.generators :as gen]
             [malli.instrument :as mi]
             [robertluo.state-graph.shape :as shape]))

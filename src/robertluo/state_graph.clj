@@ -167,7 +167,55 @@
     {:id :from-the-sibling-project
      :kind :lesson
      :says "The house rules came from smart-boundary/AGENTS.md, the same author's larger project, in git history since 2026-09-02. What transfers is METHOD and not fact: schemas at every crossing, seams checked in the code and not merely declared, only assert what can fail, and knowledge written in the past tense about things actually observed. Its content was about Anthropic's API, Datalevin and nREPL and applies to nothing here."
-     :when "2026-09-02"}]}
+     :when "2026-09-02"}
+    {:id :a-machine-s-signature-is-bound-to-the-library-s-schemas-at-landing
+     :kind :decision
+     :says "Six vars here were written by robertluo.coder's authoring machine from briefs, and a brief's signature is self-contained — the trial evaluates it with no library in hand — so a shape in one is `\"Shape\" :any` in a registry, or a bare :any, and the landed code kept that: five vars typed a shape as :any where `check/problems` types it `shape/Shape`. The landing page puts the library's own schema where the placeholder was, by PATH inside the :malli/schema value, as data beside the file and the neighbour. A gate of suite and lint cannot see a schema that is too wide; review rule (3) can."
+     :when "2026-09-15"
+     :see [:robertluo.state-graph.check/labelled :robertluo.state-graph.check/dot :robertluo.state-graph.check/draw! :robertluo.state-graph.drive/reorder-agrees :robertluo.state-graph.drive/licence-agrees]
+     :cites [:re-exports-are-delegating-defns-and-never-def-aliases]}
+    {:id :patch-and-applied-were-documentation-types-and-went
+     :kind :decision
+     :says "`compile/Patch` and `drive/Applied` were public schemas nothing validated with: Patch named what a phase's :patch answers and Applied what a driver's :on is told, and both were reached only by docstrings. Dropped 2026-09-16 for the release — a public var is API surface, and a schema nothing checks with is a comment. What they said is in the docstrings of `phases` and `Options`: a patch is {:answer m :depth n} or ::missed, and :on is told a Transition. Patch's two decisions moved to the compile namespace, where the depth check they are about lives."
+     :from "the author, 2026-09-16: `drop`"
+     :when "2026-09-16"
+     :see [:robertluo.state-graph.compile/phases :robertluo.state-graph.drive/Options]}
+    {:id :a-building-namespace-publishes-what-another-reaches-for
+     :kind :rule
+     :says "A var in a building namespace is public when another namespace or a test reaches for it, and private when only its own file does. `check/produced`, `check/continued`, `shape/combines-of` and `shape/completions` became private 2026-09-16 on that test — no caller outside their file, no test — and their :malli/schema went with the `-`, private helpers carrying none here because instrumentation collects ns-publics. The API a user is promised is the facade's and what the README names; the building namespaces are directly usable and publish no more than that."
+     :from "the author, 2026-09-16: `Keep the public api minimum while complete.`"
+     :when "2026-09-16"
+     :see [:robertluo.state-graph.check/produced :robertluo.state-graph.check/continued :robertluo.state-graph.shape/combines-of :robertluo.state-graph.shape/completions]}
+    {:id :what-a-consumer-models-is-not-the-library-s-question
+     :kind :decision
+     :says "This library provides a state machine whose shape is a graph, and decides nothing about what a consumer models with it. Seven questions this record held open since the library was built are not its to answer, and close together: what a run costs at worst, which is what a consumer's reports spend and the library never knows; whether dynamic fan-out is wanted, whether a state may complete on a condition over its own data, whether node-side exposure is needed, whether internal events are wanted, and whether a transition should declare its effects for retry and replay — each a want a consumer would arrive with as a real shape, and none has; and what becomes of an instance in flight across a shape change, which is the consumer's because this library stores nothing. The refusals that stand under them stand: a completion on a data condition is undecidable, a handler causes nothing, a shape is code. A consumer that needs one of these asks with the shape that needs it."
+     :why "Every one of the seven was asked from the other side of the arrow, by the application this library was built beside, about what that application wanted. From here there is no application. A library that holds its consumer's wants as open questions is designing the consumer, and the arrow points the other way — what the README says v1 does not do is the whole of the library's position, and it is a specification and not a backlog."
+     :from "the author, 2026-09-16, closing the release's last blocker: `From the state-graph's perspective: there is no machine, all its goal is to provide a state machine using graph. So anything related to it is not a decision should be made by the library.`"
+     :when "2026-09-16"
+     :supersedes [:can-the-shape-answer-what-a-run-will-cost-at-worst :is-dynamic-fan-out-wanted :may-a-state-complete-on-a-condition-over-its-own-data :is-the-node-side-exposure-needed :are-internal-events-wanted-at-all :should-a-transition-declare-its-effects-and-idempotence :mid-flight-shape-versioning-stays-open]
+     :cites [:why-it-exists :nothing-is-persisted-here :a-shape-is-code :a-completion-on-a-data-condition-is-refused :a-handler-causes-nothing]}
+    {:id :run-seeds-every-instance-alike-and-fan-seeds-each
+     :kind :decision
+     :says "`run` gives every instance the same starting data and `async/fan` takes a function of the instance, and the asymmetry stands. `fan` fans ACROSS instances, so a function of the instance is the only way each can be seeded; `run` reduces one stream of events over whatever instances they name, and what differs per instance arrives on the event that STARTS it — where the one pipeline that met this put it, and called it better modelling. The second door's shape is not a fault in the first, and `run`'s signature does not change for the release."
+     :when "2026-09-16"
+     :see [:robertluo.state-graph/run :robertluo.state-graph.async/fan]
+     :supersedes [:run-gives-every-machine-the-same-starting-data]
+     :cites [:one-stream-door-and-not-two]}
+    {:id :ignored-earns-its-place-and-covering-is-the-second-reader
+     :kind :decision
+     :says "`Context`'s `:ignored` earns its place, and the second reader the question waited for is this library's own: `explore/covering` drives a shape over the events the shape itself reported and hands `compile` an `:ignored` that is LOUD, because there a miss is not somebody else's stream but a gap between guards arriving late. That is exactly the caller the key was kept for — one who folds by hand and wants to hear about a miss — and it is in the tree. Three lines of surface, read twice."
+     :when "2026-09-16"
+     :see [:robertluo.state-graph.compile/Context :robertluo.state-graph.explore/covering]
+     :supersedes [:is-the-contexts-ignored-still-earning-its-place]
+     :cites [:how-the-step-says-a-thing-was-ignored :cover-the-graph-by-running-it]}
+    {:id :the-limit-on-handlers-raising-predated-the-crank
+     :kind :lesson
+     :says "The README's limits said a handler may not raise an event because `there is no queue to drain and no run-to-completion to implement; a cascade is the caller feeding the next event` — and said so for twelve days after `drive` had made run-to-completion a caller this library ships. The sentence was written 2026-09-03 against a machine that could not move itself; the crank landed 2026-09-04; nobody read the limits again. The refusal had itself been conditional — the author's `in our current design, the machine does not own the event queue` — and the condition lapsed the next day. What survives is narrower and was the reason all along: a HANDLER answers a patch, a complete function the check proves and generates over, and the next event comes from a `:report` the shape declares. Three passages said the stale thing and were rewritten 2026-09-16; the decision itself stands."
+     :why "A limit written the day before the feature that lifts half of it is the record lying by omission, in the one file this library calls its specification. The check is to read the limits against the API table whenever the table gains a mechanism: a limit that names what the table now has is a limit to reread."
+     :from "the author, 2026-09-16: `There is one limitation I think is relevent: no events produced by a handler. I think it should be legit.` — and, offered the machine-may-move-itself reading against the handler-may-emit one, `1`."
+     :when "2026-09-16"
+     :see [:robertluo.state-graph/drive :robertluo.state-graph.shape/reports]
+     :cites [:a-handler-causes-nothing :an-event-may-say-how-it-is-reported :cover-the-graph-by-running-it]}]}
   (:refer-clojure :exclude [compile])
   (:require [robertluo.state-graph.async :as async]
             [robertluo.state-graph.check :as check]

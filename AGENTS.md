@@ -63,6 +63,7 @@ suite.
 | `:test-cmd-fast` | clojure -M:dev:test unit |
 | `:test-cmd-gate` | clojure -M:dev:test integration — needs graphviz, so run it inside the devenv |
 | `:lint-cmd` | clojure -M:lint --lint src test notebook — an ALIAS, not a binary on the path |
+| `:release-cmd` | clojure -T:build ci — clean, both suites, the jar in target/; clojure -T:build deploy — to Clojars as io.github.robertluo/state-graph, version 0.1.<commit count>. LICENSE is EPL-1.0 and CHANGELOG.md is the list of facts per version |
 | `:eval-mechanism` | :nrepl-exclusive |
 | `:malli-shapes-all-data` | true |
 | `:malli-function-schemas` | true |
@@ -71,7 +72,7 @@ suite.
 | `:repl-discover-cmd` | clj-nrepl-eval --discover-ports |
 | `:repl-eval-cmd` | clj-nrepl-eval -p `<port>` |
 | `:repl-eval-reload` | :per-namespace-in-dependency-order — shape, compile, check, async, drive, explore, the facade. NEVER :reload-all; see the shape namespace's `:never-reload-all` |
-| `:deps` | {:ubergraph "0.9.0", :malli "0.20.1", :manifold "0.4.3", :test.check "1.1.1", :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}} |
+| `:deps` | {:ubergraph "0.9.0", :malli "0.20.1", :manifold "0.5.0" — 0.4.3 until 2026-09-15, see the async namespace's `:manifold-is-pinned-at-what-its-consumers-resolve`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
 
 ## Working here
 
@@ -104,11 +105,39 @@ Each will bite on first use:
   default ns-patterns IS the `<ns>_test.clj` convention, so it is not configured.
 - CLOSED, kept so nobody re-reports them: manifold IS a dependency now; datahike is NOT.
 - FIVE VARS WERE WRITTEN BY A MACHINE, 2026-09-15 morning, and landed from
-  ../coder/notebook/candidates.clj through this suite as the gate: `fingerprint` on the facade,
+  robertluo.coder's candidates page — coder/notebook/candidates.clj in the parent repository — through this suite as the gate: `fingerprint` on the facade,
   `drive/reorder-agrees`, and `check/labelled`, `dot` and `draw!` rewritten — the drawing is plain
   data now, `dot` renders it and `draw!` renders `dot`. Their `:knowledge` says why, on the vars.
-  One thing they leave: `draw!` with no `:save` shells `dot -Txlib`, a viewer Linux has and macOS
-  does not, and swallows the exception. The PROPERTY over generated shapes that `reorder-agrees` is
+  One thing they left — `draw!` with no `:save` shelled `dot -Txlib`, a viewer Linux has and macOS
+  does not, and swallowed the exception in the one bare catch this library had — was CLOSED the same
+  afternoon by the same machine on a REVIEW brief: it renders a PNG and opens it through java.awt.Desktop,
+  and throws where graphviz left no usable file or no desktop can open one. Three drives and twelve calls,
+  and two of the three answers were refused by a person reading them: the first swallowed `dot` in a try
+  the goal had forbidden in words, the second was refused by the machine's own differential for NOT
+  swallowing where the original did — the brief's examples arbitrate, and an example the original
+  contradicts is what silences it. See the var's `:draw-swallows-nothing` and
+  `:a-goal-s-sentence-held-nothing-and-an-example-did`. AND THE FIVE MACHINE-WRITTEN SIGNATURES that typed a
+  shape as `:any` name `shape/Shape` since that landing — see the facade namespace's
+  `:a-machine-s-signature-is-bound-to-the-library-s-schemas-at-landing`. The retired lesson
+  `:viz-graph-answers-nothing-useful` is back on `dot`, superseded and not deleted, by the author's agreement.
+  The machine's draw suites shell out to graphviz from the UNIT suite — `draw_test.clj`, `dot_test.clj` —
+  where this file's own rule puts a rendering in the integration suite. RULED 2026-09-16: they stay where
+  the machine put them and the README says what the environment needs — a JDK, the Clojure CLI and
+  graphviz on the PATH — so a contributor without `dot` is told before the fast loop tells them.
+  AND THE SURFACE SHRANK THE SAME DAY: `compile/Patch` and `drive/Applied` are gone, and `check/produced`,
+  `check/continued`, `shape/combines-of` and `shape/completions` are private — see the facade namespace's
+  `:patch-and-applied-were-documentation-types-and-went` and
+  `:a-building-namespace-publishes-what-another-reaches-for`.
+- NO `:open` NODE IS UNANSWERED since 2026-09-16, and the ten that were closed on one sentence of the
+  author's: `there is no machine, all its goal is to provide a state machine using graph. So anything
+  related to it is not a decision should be made by the library.` Seven were a CONSUMER's wants held
+  open as if they were the library's — cost at worst, dynamic fan-out, completion on data, node-side
+  exposure, internal events, effects for replay, mid-flight versioning — and one decision on the facade
+  namespace supersedes all seven: `:what-a-consumer-models-is-not-the-library-s-question`. Three were the
+  library's own and closed on evidence: `run` and `fan` seed differently because one door is per stream
+  and the other per instance; `:ignored` has its second reader, `explore/covering`; the instrument count
+  is never asserted. The open nodes STAY, as the vocabulary says — `(-> (the-ns 'robertluo.state-graph)
+  meta :knowledge)` and follow `:supersedes`. Nothing stands between the tree and a release now. The PROPERTY over generated shapes that `reorder-agrees` is
   the witness for landed an hour later as `drive/licence-agrees` and `licence_agrees_test.clj`,
   written in THIS component's JVM — `clojure -M:dev` here, where `ts/gen-shape` is — and the
   licence held on forty generated shapes. Three tests of the old drawing were retired with it; four

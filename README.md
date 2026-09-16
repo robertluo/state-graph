@@ -4,7 +4,12 @@ A finite state machine whose **shape is a graph** — so a graph library can dra
 check it, and a compiler can turn it into an ordinary Clojure function.
 
 ```clojure
-robertluo/state-graph {:local/root "../state-graph"}
+;; from Clojars, once `clojure -T:build deploy` has run
+io.github.robertluo/state-graph {:mvn/version "0.1.<n>"}
+
+;; or as a git dependency from the repository it lives in — the library is its state-graph/ directory
+io.github.robertluo/smart-boundary {:git/url "https://github.com/robertluo/smart-boundary"
+                                    :git/sha "<a commit>" :deps/root "state-graph"}
 ```
 
 ## Tutorial
@@ -140,21 +145,25 @@ looking at.
 And the same question by the means a person is better at:
 
 ```clojure
-(sg/draw! signup)                                            ; opens a viewer
+(sg/draw! signup)                                            ; renders a PNG and opens it
 (sg/draw! signup {:save {:filename "signup.png" :format :png}})
 
 (sg/dot signup)                                              ; the same drawing as DATA
 ;=> "digraph {\n  \"new\" [label=\"▸ new\"];\n..."
 ```
 
-The drawing marks the initial state, gives a final state a double circle, marks a nesting
-node `⊞`, and draws a completion transition **dashed and unlabelled**. **It does not label a
+The drawing marks the initial state `▸`, a final state `◼`, and a nesting node `⊞ n` with the
+number of states in the machine it nests; a guarded edge carries its guard after the event,
+`guarded [n [:> 3]]`; and a completion transition is **dashed** — unlabelled where `:done`
+names one state, `[ok]` and `[bad]` where it names one per outcome. **It does not label a
 node with its schema**, deliberately: a drawing is
 for the *structure* — that is the whole of what a map literal hides — and a schema is
 exactly what a map literal shows. It also did not scale; a machine whose states accumulate a
 vocabulary produced a 1,183-character label, and `dot -Tpng` answers that with a warning and
-a zero-byte file. `draw!` is the drawing as an *effect* — it shells out to graphviz and
-answers nothing useful; `dot` is the same drawing as *data*, for anything that renders
+a zero-byte file. `draw!` is the drawing as an *effect* — with `:save` it shells out to
+graphviz and writes the file, with no `:save` it renders a PNG and opens it, and either way
+it answers nothing useful and **swallows nothing**: where graphviz left no usable file, or
+nothing here can open one, it throws. `dot` is the same drawing as *data*, for anything that renders
 diagrams itself. A notebook, a web page, a docs build: none of them wants a file, and `dot`
 needs no graphviz installed.
 
@@ -536,9 +545,12 @@ unreported one is *parked* until somebody outside says what happened. `shape/rep
 which are which, so a driver reads the machine instead of being handed the same knowledge a
 second time — and **the driver is `sg/drive`**, below.
 
-**It is not an internal event.** The machine still does not move itself — there is no queue,
-no run-to-completion, and the reduction is untouched. This is the shape telling a caller
-*how* an event would be found, and a caller choosing to ask.
+**It is not an internal event.** The reduction is untouched — `compile`'s step still answers
+one state from one event and never loops — and there is no queue a handler can put anything
+on. This is the shape telling a caller *how* an event would be found, and a caller choosing to
+ask. `drive`, below, is the caller this library ships, and it asks until the run is over or
+parked: that loop is the machine finding its own events, from declarations in the shape and
+never from a handler.
 
 And it is **provable**, the same way a view is. `problems` reports `:reads-unavailable` when
 the state a report would run in cannot guarantee what it reads, and refuses a `:reads` with
@@ -938,8 +950,9 @@ Said plainly, because each is a design decision and not an oversight.
   else: it may not name `:id`, `:instance` or `:sub`, and it is refused if it tries — not by a
   special case but by the patch check, since no state schema declares any of the three.
   Identity is the shape's to say, and a handler naming where it lands is asking for a
-  transition it was not given. A handler may not raise an event either; a cascade is spelled
-  as the caller feeding the next one.
+  transition it was not given. A handler may not raise an event either: the next event is
+  found by a `:report` the shape declares and a driver runs, never by the handler that landed
+  the last one.
 - **A guard reads the event, never the state.** Branching on what the state already holds
   is not expressible: the guard is over the *cause*, and the cause is the event. Where a
   decision depends on the state, whoever produces the event reports it as a fact the guard
@@ -961,9 +974,13 @@ Said plainly, because each is a design decision and not an oversight.
 - **A state cannot hand a key onward silently.** Since a node holds only what it declares,
   data that should survive several states must be declared by each of them. Dropping a field
   is free — declare one fewer — but carrying one is explicit.
-- **A handler may not raise another event.** With no internal events there is no queue to
-  drain and no run-to-completion to implement; a cascade is the caller feeding the next
-  event.
+- **A handler may not raise another event — and the machine finds its own events anyway.**
+  `drive` runs every `:report` the shape declares until the run is over or parked, which is
+  run-to-completion from declarations a checker can read: `check/driving` says which states a
+  driver can advance and `explore/covering` says which it did. What stays refused is the
+  *handler* raising. It answers a patch, a complete function the check proves and generates
+  over, and an event in its return would be a second event source that nothing in the shape
+  names.
 - **A completion branches on the child's final state and on nothing else, and a node has one
   child.** "Complete to `:a` or `:b` depending on where the child stopped" is a map keyed by
   that state; "depending on whether the total is over 100" is a condition over the data and is
@@ -998,7 +1015,7 @@ Said plainly, because each is a design decision and not an oversight.
 | | |
 |---|---|
 | `state` `event` `transition` `shape` | build a machine, nesting and guarding where it helps |
-| `problems` `draw!` `dot` | look at it |
+| `problems` `draw!` `dot` `fingerprint` | look at it, and name what you looked at |
 | `compile` `initial` | the reduction |
 | `run` | the stream |
 | `step` `drive` | the crank — one turn, and the loop |
@@ -1012,7 +1029,9 @@ Underneath, and directly usable — the facade is the convenience, these are the
 it), `.async` (manifold streams: `drive` for one machine, `fan` for many). Nothing below
 `.async` requires manifold, `.drive` included.
 
-Dependencies: ubergraph, malli, manifold, test.check. Drawing needs graphviz installed.
+Dependencies: ubergraph, malli, manifold, test.check — the last at runtime and on purpose, since
+`check/laws` generates through malli.generator. Drawing needs graphviz installed, and so does
+running the suites: the drawing tests shell out to `dot`.
 
 ## Development
 
@@ -1026,6 +1045,8 @@ Dependencies: ubergraph, malli, manifold, test.check. Drawing needs graphviz ins
   `clj-nrepl-eval --discover-ports`, launch with `clojure -M:dev:nrepl`, eval with
   `clj-nrepl-eval -p <port>`. Use `:reload` per namespace in dependency order — never
   `:reload-all`, which redefines malli's own protocols and breaks every instrumented var.
-- A JVM inherits its `PATH` at launch, so start the REPL from inside the devenv or it will
-  not find `dot`: `devenv shell -- sh -c 'cd state-graph && clojure -M:dev:nrepl'`.
-- Do not manually repair parenthesis errors — run `clj-paren-repair`.
+- Drawing shells out to `dot`, and a JVM inherits its `PATH` at launch: a REPL started before
+  graphviz was installed cannot draw. The environment the suites need is a JDK, the Clojure CLI
+  and graphviz on the `PATH` — `draw_test` and `dot_test` render for real, in the unit suite.
+- `clojure -T:build ci` cleans, runs both suites and builds the jar; `clojure -T:build deploy`
+  publishes it to Clojars as `io.github.robertluo/state-graph`. Licence: EPL-1.0, in LICENSE.
