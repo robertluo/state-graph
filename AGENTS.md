@@ -97,6 +97,15 @@ suite.
 
 Each will bite on first use:
 
+- ITS OWN REPOSITORY SINCE 2026-09-16, at the author's instruction: `git subtree split` out of
+  robertluo/smart-boundary, so the history here is every commit that touched state-graph/ there —
+  42 the day it moved — and nothing else. What it left behind stays there: coder, its first
+  consumer, names it as `io.github.robertluo/state-graph` by `:git/sha` now instead of a sibling
+  `:local/root`, and the coder pages that read this tree as a sibling directory are a record in
+  that repository. THE TOOLCHAIN CAME WITH IT: devenv.nix here holds a JDK, the Clojure CLI, graphviz
+  and git, and `devenv test` is `clojure -T:build ci`, as the author's other libraries spell it. Any
+  `:knowledge` node that says `../coder` or `smart-boundary/AGENTS.md` is quoting where a decision
+  came from, and stands as written — a node is added to and never edited.
 - `clojure -M:dev` DOES NOT START A REPL — :dev has no :main-opts. It is `clojure -M:dev:nrepl`,
   and :dev is wanted or the test path and kaocha are not on the classpath. The README is right.
 - kaocha is in :dev, so the runner is `clojure -M:dev:test`, never `clojure -M:test`. clj-kondo is
@@ -105,7 +114,7 @@ Each will bite on first use:
   default ns-patterns IS the `<ns>_test.clj` convention, so it is not configured.
 - CLOSED, kept so nobody re-reports them: manifold IS a dependency now; datahike is NOT.
 - FIVE VARS WERE WRITTEN BY A MACHINE, 2026-09-15 morning, and landed from
-  robertluo.coder's candidates page — coder/notebook/candidates.clj in the parent repository — through this suite as the gate: `fingerprint` on the facade,
+  robertluo.coder's candidates page — coder/notebook/candidates.clj in smart-boundary, the repository this one was split from — through this suite as the gate: `fingerprint` on the facade,
   `drive/reorder-agrees`, and `check/labelled`, `dot` and `draw!` rewritten — the drawing is plain
   data now, `dot` renders it and `draw!` renders `dot`. Their `:knowledge` says why, on the vars.
   One thing they left — `draw!` with no `:save` shelled `dot -Txlib`, a viewer Linux has and macOS

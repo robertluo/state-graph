@@ -28,5 +28,8 @@ The first version meant to be used from outside the repository it was built in.
 - No question about the library is left open. Ten `:open` knowledge nodes are superseded by
   decisions; seven of them were a consumer's wants, and the library decides nothing about what a
   consumer models with it — what v1 does not do is a specification, not a backlog.
+- Its own repository, `github.com/robertluo/state-graph`, split out of `smart-boundary` on
+  2026-09-16 with its history. Until it is on Clojars the coordinate is
+  `io.github.robertluo/state-graph {:git/url "https://github.com/robertluo/state-graph" :git/sha "<a commit>"}`.
 - Licence: EPL-1.0. Coordinates: `io.github.robertluo/state-graph`; `clojure -T:build ci`
   builds the jar and `clojure -T:build deploy` publishes it.

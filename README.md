@@ -7,9 +7,9 @@ check it, and a compiler can turn it into an ordinary Clojure function.
 ;; from Clojars, once `clojure -T:build deploy` has run
 io.github.robertluo/state-graph {:mvn/version "0.1.<n>"}
 
-;; or as a git dependency from the repository it lives in — the library is its state-graph/ directory
-io.github.robertluo/smart-boundary {:git/url "https://github.com/robertluo/smart-boundary"
-                                    :git/sha "<a commit>" :deps/root "state-graph"}
+;; or as a git dependency, straight from this repository
+io.github.robertluo/state-graph {:git/url "https://github.com/robertluo/state-graph"
+                                 :git/sha "<a commit>"}
 ```
 
 ## Tutorial

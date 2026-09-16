@@ -21,3 +21,6 @@ docs/
 
 # The jar that `clojure -T:build ci` builds is derived.
 target/
+
+# devenv's own state. devenv.nix, devenv.yaml and devenv.lock travel; this does not.
+.devenv/
