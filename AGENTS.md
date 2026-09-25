@@ -73,7 +73,7 @@ suite.
 | `:repl-discover-cmd` | clj-nrepl-eval --discover-ports |
 | `:repl-eval-cmd` | clj-nrepl-eval -p `<port>` |
 | `:repl-eval-reload` | :per-namespace-in-dependency-order — graph, shape, compile, check, async, drive, explore, the facade. NEVER :reload-all; see the shape namespace's `:never-reload-all` |
-| `:deps` | {:malli "0.20.1", :manifold "0.5.0" — 0.4.3 until 2026-09-15, see the async namespace's `:manifold-is-pinned-at-what-its-consumers-resolve`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
+| `:deps` | {:malli "0.20.1", :core.async "1.9.865" — manifold until 2026-09-25, see the async namespace's `:core-async-is-the-async-default`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
 
 ## Working here
 
@@ -109,6 +109,8 @@ Each will bite on first use:
   came from, and stands as written — a node is added to and never edited.
 - `clojure -M:dev` DOES NOT START A REPL — :dev has no :main-opts. It is `clojure -M:dev:nrepl`,
   and :dev is wanted or the test path and kaocha are not on the classpath. The README is right.
+- CLAUDE.md IS A SYMLINK to AGENTS.md. `perl -i` and `sed -i` replace a link with a regular file,
+  so edit AGENTS.md itself.
 - kaocha is in :dev, so the runner is `clojure -M:dev:test`, never `clojure -M:test`. clj-kondo is
   an ALIAS and not a binary: `clojure -M:lint --lint src test notebook`.
 - tests.edn is two suites over one tree, split by skip-meta and focus-meta on :integration. The

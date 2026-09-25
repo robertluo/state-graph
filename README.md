@@ -791,32 +791,45 @@ transducer, core.async, a test.
 ### The stream
 
 ```clojure
-(require '[manifold.stream :as s])
+(require '[clojure.core.async :as a])
 
-(def events (s/stream))
-(def machine (sg/run signup {} events))     ;=> {:states <source> :done <deferred>}
+(def events (a/chan))
+(def machine (sg/run signup {} events))     ;=> {:states <channel> :done <promise-chan>}
 
-(s/put! events {:id :invite :email "ada@example.com" :instance "u-1"})
+(a/put! events {:id :invite :email "ada@example.com" :instance "u-1"})
 
-@(s/take! (:states machine))
+(a/<!! (:states machine))
 ;=> {:event    {:id :invite :email "ada@example.com" :instance "u-1"}
 ;    :state    {:id :invited :instance "u-1" :email "ada@example.com"}
 ;    :fired    true
 ;    :instance "u-1"}
+
+(a/close! events)
+(a/<!! (:done machine))
+;=> {"u-1" {:id :invited :instance "u-1" :email "ada@example.com"}}
 ```
 
 - `:states` carries one **transition result** per event — what the machine was told, the
   state it produced, and whether it fired at all. `(map :state ...)` if states are all you
-  want. Consume it, or `:done` may never resolve: backpressure is real.
-- `:done` is a deferred `{instance -> final state}`, or an error carrying whatever the step
-  threw. A caller who names nothing finds their machine under `nil`.
+  want. Consume it, or `:done` may never deliver: backpressure is real.
+- `:done` is a promise-chan delivering `{instance -> final state}` — or, where the step
+  threw, **the exception itself**, the same object with its message, `ex-data`, cause and
+  trace. A channel has no error of its own, so an exception is handed on as a value and
+  never swallowed; `:states` closes either way. A caller who names nothing finds their
+  machine under `nil`.
 - **One function for one machine and for many.** The stream is partitioned on `:instance`;
   one partition is one machine, all of them at once — that is where the parallelism is.
   *Within* one machine an event is applied to what the last one produced, except for a pair
   proven not to care which finished first: see below.
-- A handler may answer a **manifold deferred**, so a machine waiting on I/O holds no thread
-  and a slow handler slows only its own machine. Under `sg/compile`'s synchronous default a
-  derefable answer is simply dereferenced, so the same shape works in both doors.
+- A handler may answer a **channel** — `(a/go ...)`, `(a/thread ...)`, a promise-chan —
+  delivering its map, or delivering an exception to fail with. A machine waiting on I/O then
+  holds no thread and a slow handler slows only its own machine. A handler that *blocks*
+  should answer `(a/thread ...)`: a go block's pool is small.
+- **Such a shape runs synchronously on the JVM only**, through `async/blocking`:
+  `(sg/compile sh async/blocking)`, or `{:context async/blocking}` to the crank. A channel is
+  not derefable, so `sg/compile`'s synchronous default does not take from one (it still
+  dereferences a delay, a promise or a future). A JavaScript host cannot block at all, so
+  on ClojureScript a handler that answers a channel runs through `sg/run` and nowhere else.
 
 ### An event the state cannot handle
 
@@ -840,7 +853,7 @@ no clock and no way to know two events were concurrent.
 
 ### Two events at once, where it is proven
 
-A handler may answer a deferred, so a second event can arrive while the first is still in
+A handler may answer a channel, so a second event can arrive while the first is still in
 flight — and a machine is in one state at a time. `sg/run` runs both handlers **only where
 the order they finish in cannot be observed**, and serialises everywhere else.
 
@@ -1107,10 +1120,10 @@ labelled multigraph — `.cljc`, and knowing nothing of machines), `.shape` (the
 referential checks), `.compile` (shape → function), `.check`
 (the static checks and the drawing), `.drive` (the crank: `awaits`, `awaiting`, `where`,
 `advance`, `step`, `drive`), `.explore` (`covering`: the same questions asked by *running*
-it), `.async` (manifold streams: `drive` for one machine, `fan` for many). Nothing below
-`.async` requires manifold, `.drive` included.
+it), `.async` (core.async channels, `.cljc`: `drive` for one machine, `fan` for many, `context`
+and, on the JVM, `blocking`). Nothing below `.async` requires core.async, `.drive` included.
 
-Dependencies: malli, manifold, test.check — no graph library, the graph being a plain map the
+Dependencies: malli, core.async, test.check — no graph library, the graph being a plain map the
 library owns; test.check at runtime and on purpose, since `check/laws` generates through
 malli.generator. Drawing needs graphviz installed, and so does
 running the suites: the drawing tests shell out to `dot`.

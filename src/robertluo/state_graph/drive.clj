@@ -24,8 +24,8 @@
   a turn can be looked at, thrown away or taken again. Nothing mutates and nothing
   is stored — `:on` is how a caller writes down what happened.
 
-  AND `async/drive` IS NOT THIS. That one serialises ONE machine over a manifold
-  stream and is the async layer's own; this one finds the events. They share a
+  AND `async/drive` IS NOT THIS. That one serialises ONE machine over a channel
+  of events and is the async layer's own; this one finds the events. They share a
   word because both mean `keep going`, and nothing else."
   {:knowledge
    [{:id :the-crank-is-the-door-report-was-missing

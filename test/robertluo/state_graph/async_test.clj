@@ -1,7 +1,7 @@
 (ns robertluo.state-graph.async-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [manifold.deferred :as d]
-            [manifold.stream :as s]
+  (:require [clojure.core.async :as ca]
+            [clojure.core.async.impl.protocols :as p]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [robertluo.state-graph.async :as a]
             [robertluo.state-graph.check :as check]
             [robertluo.state-graph.compile :as c]
@@ -12,22 +12,42 @@
 
 (def ^:private patience 5000)
 
+(defn- wait
+  "What `ch` delivers, or ::timeout. BOUNDED, so a machine that hangs fails a test instead of
+   hanging the suite — which matters more here than anywhere else in this project, channels
+   being the one thing that can wait for ever."
+  [ch]
+  (let [[v port] (ca/alts!! [ch (ca/timeout patience)])]
+    (if (= port ch) v ::timeout)))
+
 (defn- collect
-  "Every state a machine produced, and its final answer. BOTH DEREFS ARE BOUNDED, so a
-   machine that hangs fails a test instead of hanging the suite — which matters more here
-   than anywhere else in this project, streams being the one thing that can wait for ever."
+  "Every state a machine produced, and what its :done delivered. :states first, because
+   backpressure is real."
   [{:keys [states done]}]
-  {:states (deref (s/reduce conj [] states) patience ::timeout)
-   :done   (deref done patience ::timeout)})
+  {:states (wait (ca/into [] states))
+   :done   (wait done)})
 
 (defn- fed
-  "A source carrying exactly these events, then closed. BUFFERED, so the puts resolve with
-   nobody consuming yet and a test can arrange everything before it starts reading."
+  "A channel carrying exactly these events, then closed. BUFFERED, so the puts complete
+   with nobody consuming yet and a test can arrange everything before it starts reading."
   [events]
-  (let [in (s/stream (max 1 (count events)))]
-    (s/put-all! in events)
-    (s/close! in)
+  (let [in (ca/chan (max 1 (count events)))]
+    (ca/onto-chan!! in events)
     in))
+
+(defn- hand!
+  "Put `event` on an UNBUFFERED channel and answer only once the machine has TAKEN it —
+   true, or false where it did not within the patience. What makes a race decided by the
+   test and not by a clock: once the second event of a pair is taken, the machine has
+   already chosen."
+  [in event]
+  (let [[v port] (ca/alts!! [[in event] (ca/timeout patience)])]
+    (and (= port in) v)))
+
+(defn- now
+  "A value already available, as a handler under a/context may answer one."
+  [x]
+  (doto (ca/promise-chan) (ca/put! x)))
 
 ;;; --------------------------------------------------------------------- drive
 
@@ -39,21 +59,37 @@
     (is (= {:id :done :n 7} (:done got)) ":done carries the last state, not merely nil")))
 
 (deftest a-handler-may-answer-later
-  ;; What a/context is FOR: the handler answers a deferred, so the step answers one, and the
-  ;; reduction is unbothered. compile/synchronous handles the same shape by DEREFERENCING —
-  ;; two Contexts, one step, and the core knowing nothing of either.
+  ;; What a/context is FOR: the handler answers a channel, so the step answers one, and the
+  ;; reduction is unbothered. a/blocking runs the same shape SYNCHRONOUSLY by taking from
+  ;; it — two Contexts, one step, and the core knowing nothing of either.
   (let [sh (shape/shape
             (shape/state :a [:map] {:initial true})
             (shape/state :b [:map [:n :int]] {:final true})
-            (shape/event :go [:map] (fn [_] (d/success-deferred {:n 7})) [:map [:n :int]])
+            (shape/event :go [:map] (fn [_] (now {:n 7})) [:map [:n :int]])
             (shape/transition :a :go :b))
         step (c/compile sh a/context)]
-    (testing "under this Context the step itself answers a deferred"
-      (is (d/deferred? (step (c/initial sh {}) {:id :go}))))
-    (testing "and the same shape run synchronously derefs it instead"
-      (is (= {:id :b :n 7} ((c/compile sh) (c/initial sh {}) {:id :go}))))
+    (testing "under this Context the step itself answers a channel"
+      (is (satisfies? p/ReadPort (step (c/initial sh {}) {:id :go}))))
+    (testing "and the same shape run synchronously through a/blocking takes from it instead"
+      (is (= {:id :b :n 7} ((c/compile sh a/blocking) (c/initial sh {}) {:id :go}))))
     (is (= {:states [{:id :b :n 7}] :done {:id :b :n 7}}
            (collect (a/drive step (c/initial sh {}) (fed [{:id :go}])))))))
+
+(deftest a-handler-may-fail-by-delivering-an-exception
+  ;; A channel carries no error of its own, so a handler that fails LATER delivers the
+  ;; exception, and it reaches :done as the same object — under the stream door and under
+  ;; a/blocking alike, where it is thrown.
+  (let [boom (ex-info "the model refused" {:reason :quota})
+        sh (shape/shape
+            (shape/state :a [:map] {:initial true})
+            (shape/state :b [:map [:n :int]] {:final true})
+            (shape/event :go [:map] (fn [_] (now boom)) [:map [:n :int]])
+            (shape/transition :a :go :b))]
+    (is (identical? boom (:done (collect (a/drive (c/compile sh a/context) (c/initial sh {})
+                                                  (fed [{:id :go}])))))
+        "the SAME exception, so nothing it carried was lost on the way")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"the model refused"
+                          ((c/compile sh a/blocking) (c/initial sh {}) {:id :go})))))
 
 (deftest an-event-nobody-handled-still-answers-a-state
   ;; The reduction stays total, so there is one state per event and a consumer counting
@@ -65,19 +101,21 @@
         ":stop from :idle changed nothing, and said so by answering the state unchanged")))
 
 (deftest a-defect-reaches-done-and-closes-the-states
-  ;; A crossing that does not hold is a DEFECT, so it belongs on :done. And :states MUST
-  ;; close, or a consumer waits for ever on a machine that has already stopped — which is
-  ;; the worst failure a stream layer has available to it.
+  ;; A crossing that does not hold is a DEFECT, so it belongs on :done — as the exception
+  ;; compile threw, with everything it said. And :states MUST close, or a consumer waits
+  ;; for ever on a machine that has already stopped — which is the worst failure a stream
+  ;; layer has available to it.
   (let [sh (shape/shape
             (shape/state :a [:map] {:initial true})
             (shape/state :b [:map [:n :int]] {:final true})
             (shape/event :go [:map] (constantly {:n "seven"}) [:map [:n :int]])
             (shape/transition :a :go :b))
-        {:keys [states done]} (a/drive (c/compile sh a/context) (c/initial sh {})
-                                       (fed [{:id :go}]))]
-    (is (= [] (deref (s/reduce conj [] states) patience ::timeout))
-        "closed, and closed EMPTY — the bad state was never a state")
-    (is (thrown? clojure.lang.ExceptionInfo (deref done patience ::timeout)))))
+        got (collect (a/drive (c/compile sh a/context) (c/initial sh {}) (fed [{:id :go}])))]
+    (is (= [] (:states got)) "closed, and closed EMPTY — the bad state was never a state")
+    (is (instance? clojure.lang.ExceptionInfo (:done got)))
+    (is (= {:from :a :event :go :to :b :crossing :out} (select-keys (ex-data (:done got))
+                                                                    [:from :event :to :crossing]))
+        "and nothing compile said about it was thrown away")))
 
 ;;; ----------------------------------------------------------------------- fan
 
@@ -121,6 +159,22 @@
     (is (= [{:id :running :n 2} {:id :done :n 2}] (:states got))
         "and no :instance key appears, because nobody supplied one")))
 
+(deftest a-stopped-machine-stops-the-fan
+  ;; An event routed to a machine that has already stopped on a defect is not waited on for
+  ;; ever: the fan delivers that machine's exception and closes the results.
+  (let [sh (shape/shape
+            (shape/state :a [:map] {:initial true})
+            (shape/state :b [:map [:n :int]] {:final true})
+            (shape/event :go [:map] (constantly {:n "seven"}) [:map [:n :int]])
+            (shape/transition :a :go :b)
+            (shape/transition :b :go :b))
+        got (collect (a/fan (c/compile sh a/context) (fn [k] (c/initial sh k {}))
+                            (fed [{:id :go :instance "x"} {:id :go :instance "x"}
+                                  {:id :go :instance "x"}])))]
+    (is (vector? (:states got)) "the results closed")
+    (is (= :out (:crossing (ex-data (:done got))))
+        "and :done is the defect that stopped the machine, as compile threw it")))
+
 ;;; -------------------------------------------------------------------- result
 
 (deftest what-goes-on-the-output-is-the-callers-to-decide
@@ -148,7 +202,7 @@
             ;; mark. Under a bare [:map] the projection on entry would drop it — which is the
             ;; whole point of projecting, and this fixture was simply under-declared before.
             (shape/state :s [:map [:mark {:optional true} :keyword]] {:initial true})
-            (shape/event :slow [:map] (fn [_] (d/future (Thread/sleep 150) {:mark :slow}))
+            (shape/event :slow [:map] (fn [_] (ca/thread (Thread/sleep 150) {:mark :slow}))
                          [:map [:mark :keyword]])
             (shape/event :fast [:map] (constantly {:mark :fast}) [:map [:mark :keyword]])
             (shape/transition :s :slow :s)
@@ -160,17 +214,16 @@
 
 ;;; -------------------------------------------------------------- the licence
 
-(defn- gated-join
-  "A join whose :eval handler PARKS on a deferred the test resolves by hand, so completion
-   order is decided by the test and not by a clock. :test answers at once, so it can only
-   land first — which is the whole assertion, since :eval is fed first."
-  [gate]
+(defn- join
+  "Two branches and a join. :eval is fed first, and the test decides which of the two
+   patches the machine sees land first — see `cranked`."
+  []
   (shape/shape
    (shape/state :verifying [:map] {:initial true})
    (shape/state :evaled    [:map [:eval :int]])
    (shape/state :tested    [:map [:test :int]])
    (shape/state :complete  [:map [:eval :int] [:test :int]] {:final true})
-   (shape/event :eval [:map] (fn [_] gate)          [:map [:eval :int]])
+   (shape/event :eval [:map] (constantly {:eval 1}) [:map [:eval :int]])
    (shape/event :test [:map] (constantly {:test 2}) [:map [:test :int]])
    (shape/transition :verifying :eval :evaled)
    (shape/transition :verifying :test :tested)
@@ -184,55 +237,61 @@
   {:patch (:patch ph) :apply (:apply ph) :agree (:agree ph)
    :pairs (check/commuting sh)})
 
+(defn- cranked
+  "Drive `events` through a licensed machine whose handlers finish WHEN THE TEST SAYS, and
+   collect. `order` is the indices of the events whose patches land, first to last.
+
+   THE LICENCE'S :patch ANSWERS AN UNBUFFERED CHANNEL per call, and the test puts on it
+   the patch the real one computes — so each delivery is a RENDEZVOUS with the very take
+   that decides the race, and returns only once the machine has made it. A gate opened
+   after the events are taken is not enough under core.async: the machine runs on another
+   thread, and may look at the two handlers only after BOTH have answered, when the order
+   they finished in can no longer be seen. See :a-rendezvous-decides-a-race-a-gate-does-not."
+  [sh initial events order]
+  (let [ph      (c/phases sh a/context)
+        patches (mapv #(let [p ((:patch ph) initial %)]
+                          (if (satisfies? p/ReadPort p) (wait p) p))
+                      events)
+        chans   (vec (repeatedly (count events) ca/chan))
+        calls   (atom -1)
+        in      (ca/chan)
+        m       (a/drive (:step ph) initial in a/state-only
+                         (assoc (licensed sh ph) :patch (fn [_ _] (chans (swap! calls inc)))))
+        handed  (mapv #(hand! in %) events)
+        landed  (mapv #(hand! (chans %) (patches %)) order)]
+    (ca/close! in)
+    (assoc (collect m) :handed handed :landed landed)))
+
 (deftest a-licensed-pair-is-applied-in-completion-order
   ;; THE WHOLE POINT OF THE SPLIT, and deterministic without a clock: :eval is fed first
-  ;; and parks, so the first result CANNOT be :eval — its handler has not answered. The
-  ;; machine therefore applies :test to :verifying while :eval is still in flight, which
-  ;; one step doing both halves at once could not express.
-  (let [gate (d/deferred)
-        sh   (gated-join gate)
-        ph   (c/phases sh a/context)
-        {:keys [states done]} (a/drive (:step ph) (c/initial sh {})
-                                       (fed [{:id :eval} {:id :test}])
-                                       a/state-only (licensed sh ph))]
-    ;; THE RACE IS ALREADY DECIDED by the time `drive` has returned: :test's handler
-    ;; answers a plain map and :eval's answers this deferred, and every stream here is
-    ;; buffered, so the chain runs synchronously to the point where the machine chooses.
-    ;; Only THEN is the gate opened — which is what makes the order below a fact about the
-    ;; machine and not about a clock.
-    (is (= {:verifying #{#{:eval :test}}} (:pairs (licensed sh ph)))
+  ;; and :test's patch lands first, so the machine applies :test to :verifying while :eval
+  ;; is still in flight, which one step doing both halves at once could not express.
+  (let [sh  (join)
+        got (cranked sh (c/initial sh {}) [{:id :eval} {:id :test}] [1 0])]
+    (is (= {:verifying #{#{:eval :test}}} (check/commuting sh))
         "the pair really is licensed, so the branch under test is the one taken")
-    (d/success! gate {:eval 1})
-    (let [got (collect {:states states :done done})]
-      (is (= [{:id :tested :test 2} {:id :complete :eval 1 :test 2}] (:states got))
-          ":test landed first though :eval arrived first, and :eval's patch — computed in
-           :verifying, where its target was :evaled — landed in :complete instead")
-      (is (= {:id :complete :eval 1 :test 2} (:done got))))))
+    (is (= [true true] (:handed got)) "both events were taken while neither had landed")
+    (is (= [true true] (:landed got)) "and each patch was taken by the machine")
+    (is (= [{:id :tested :test 2} {:id :complete :eval 1 :test 2}] (:states got))
+        ":test landed first though :eval arrived first, and :eval's patch — computed in
+         :verifying, where its target was :evaled — landed in :complete instead")
+    (is (= {:id :complete :eval 1 :test 2} (:done got)))))
 
 (deftest the-licence-changes-the-order-and-never-the-destination
   ;; The same shape and the same events, driven both ways. Serialised it goes through
-  ;; :evaled; licensed with :eval parked it goes through :tested. TWO ROUTES, ONE
+  ;; :evaled; licensed with :test landing first it goes through :tested. TWO ROUTES, ONE
   ;; DESTINATION — which is what `commutes` proved before anything ran, and the reason the
   ;; row order may be traded away at all.
-  (let [open (d/success-deferred {:eval 1})
-        sh   (gated-join open)
-        ph   (c/phases sh a/context)
-        serial (collect (a/drive (:step ph) (c/initial sh {})
-                                 (fed [{:id :eval} {:id :test}])))]
+  (let [sh     (join)
+        serial (collect (a/drive (c/compile sh a/context) (c/initial sh {})
+                                 (fed [{:id :eval} {:id :test}])))
+        got    (cranked sh (c/initial sh {}) [{:id :eval} {:id :test}] [1 0])]
     (is (= [{:id :evaled :eval 1} {:id :complete :eval 1 :test 2}] (:states serial))
         "with no licence, strictly the order it was fed")
-    (let [gate (d/deferred)
-          sh2  (gated-join gate)
-          ph2  (c/phases sh2 a/context)
-          {:keys [states done]} (a/drive (:step ph2) (c/initial sh2 {})
-                                         (fed [{:id :eval} {:id :test}])
-                                         a/state-only (licensed sh2 ph2))]
-      (d/success! gate {:eval 1})
-      (let [got (collect {:states states :done done})]
-        (is (= [{:id :tested :test 2} {:id :complete :eval 1 :test 2}] (:states got))
-            "licensed with :eval parked, it goes through :tested instead")
-        (is (= (:done serial) (:done got))
-            "and both doors end in the same state, by different routes")))))
+    (is (= [{:id :tested :test 2} {:id :complete :eval 1 :test 2}] (:states got))
+        "licensed with :test landing first, it goes through :tested instead")
+    (is (= (:done serial) (:done got))
+        "and both doors end in the same state, by different routes")))
 
 (deftest an-unlicensed-pair-is-never-run-at-once
   ;; The licence is a set lookup of somebody else's proof and nothing is inferred here.
@@ -253,7 +312,7 @@
   ;; order-indifferent: serialised that is ~600ms and licensed it is ~300ms. The bound is
   ;; loose because the assertion is about which of the two regimes is running, not about
   ;; how fast this machine is.
-  (let [slow (fn [k] (fn [_] (d/future (Thread/sleep 300) {k 1})))
+  (let [slow (fn [k] (fn [_] (ca/thread (Thread/sleep 300) {k 1})))
         sh (shape/shape
             (shape/state :verifying [:map] {:initial true})
             (shape/state :evaled    [:map [:eval :int]])
@@ -286,82 +345,65 @@
   ;; never be licensed — they write the same key, and which landed second decided the
   ;; answer. With a commutative combine on the node they are licensed, and the result is
   ;; the better offer whichever handler finished first.
-  (let [gate (d/deferred)
-        sh (shape/shape
+  (let [sh (shape/shape
             (shape/state :choosing
                          [:map [:best {:optional true
                                        :combine ts/better
                                        :combine/commutes true} ts/Impl]]
                          {:initial true})
-            (shape/event :offer-a [:map] (fn [_] gate)  [:map [:best ts/Impl]])
+            (shape/event :offer-a [:map]
+                         (constantly {:best {:score 5 :by "a"}}) [:map [:best ts/Impl]])
             (shape/event :offer-b [:map]
                          (constantly {:best {:score 9 :by "b"}}) [:map [:best ts/Impl]])
             (shape/transition :choosing :offer-a :choosing)
             (shape/transition :choosing :offer-b :choosing))
-        ph (c/phases sh a/context)
-        {:keys [states done]} (a/drive (:step ph) (c/initial sh {})
-                                       (fed [{:id :offer-a} {:id :offer-b}])
-                                       a/state-only (licensed sh ph))]
-    (is (contains? (get (:pairs (licensed sh ph)) :choosing) #{:offer-a :offer-b})
+        got (cranked sh (c/initial sh {}) [{:id :offer-a} {:id :offer-b}] [1 0])]
+    (is (contains? (get (check/commuting sh) :choosing) #{:offer-a :offer-b})
         "one key, two writers, licensed")
-    (d/success! gate {:best {:score 5 :by "a"}})
-    (let [got (collect {:states states :done done})]
-      (is (= [{:id :choosing :best {:score 9 :by "b"}}
-              {:id :choosing :best {:score 9 :by "b"}}] (:states got))
-          ":offer-b landed first and :offer-a's lower score did not displace it")
-      (is (= {:id :choosing :best {:score 9 :by "b"}} (:done got))))))
+    (is (= [{:id :choosing :best {:score 9 :by "b"}}
+            {:id :choosing :best {:score 9 :by "b"}}] (:states got))
+        ":offer-b landed first and :offer-a's lower score did not displace it")
+    (is (= {:id :choosing :best {:score 9 :by "b"}} (:done got)))))
 
 (deftest a-false-promise-stops-the-machine-rather-than-flaking
   ;; The whole reason :agree is not optional. A combine declared commutative that is not
   ;; would otherwise produce an order-dependent answer silently — the one failure this
   ;; library refuses. It is a DEFECT, so it reaches :done and closes the results, and it
   ;; does so BEFORE either patch lands, which is why :states is empty.
-  (let [gate (d/deferred)
-        sticky (fn [x y] (if (= "pinned" (:by x)) x (ts/better x y)))
+  (let [sticky (fn [x y] (if (= "pinned" (:by x)) x (ts/better x y)))
         sh (shape/shape
             (shape/state :s [:map [:best {:combine sticky :combine/commutes true} ts/Impl]]
                          {:initial true})
-            (shape/event :p [:map] (fn [_] gate) [:map [:best ts/Impl]])
+            (shape/event :p [:map]
+                         (constantly {:best {:score 5 :by "pinned"}}) [:map [:best ts/Impl]])
             (shape/event :q [:map]
                          (constantly {:best {:score 9 :by "z"}}) [:map [:best ts/Impl]])
             (shape/transition :s :p :s)
             (shape/transition :s :q :s))
-        ph (c/phases sh a/context)
-        {:keys [states done]} (a/drive (:step ph) (c/initial sh {:best {:score 0 :by "m"}})
-                                       (fed [{:id :p} {:id :q}])
-                                       a/state-only (licensed sh ph))]
-    (d/success! gate {:best {:score 5 :by "pinned"}})
-    (is (= [] (deref (s/reduce conj [] states) patience ::timeout))
-        "closed, and closed EMPTY — the check runs before either patch lands")
-    (is (thrown? clojure.lang.ExceptionInfo (deref done patience ::timeout)))))
+        got (cranked sh (c/initial sh {:best {:score 0 :by "m"}}) [{:id :p} {:id :q}] [1 0])]
+    (is (= [] (:states got)) "closed, and closed EMPTY — the check runs before either patch lands")
+    (is (= :combine (:crossing (ex-data (:done got))))
+        "and :done is the exception :agree threw, with everything it said")))
 
 ;;; ---------------------------------------------------------- the fan-out licence
 
 (deftest two-of-ONE-event-run-at-once-where-the-accumulator-commutes
   ;; THE FAN-OUT, and what the licence was refusing until 2026-09-03. Two reports of the
-  ;; same kind, each parked on its own deferred, and neither can land until BOTH patches are
-  ;; in — which is what makes :agree a genuine pre-condition. Resolved out of order on
-  ;; purpose, so the assertion is about the ANSWER and never about a clock.
-  (let [g1 (d/deferred) g2 (d/deferred)
-        gates (atom [g1 g2])
-        next-gate (fn [] (let [[g & more] @gates] (reset! gates more) g))
+  ;; same kind, and neither can land until BOTH patches are in — which is what makes :agree
+  ;; a genuine pre-condition. Landed out of order on purpose, so the assertion is about the
+  ;; ANSWER and never about a clock.
+  (let [reports (atom [#{1} #{2}])
         sh (shape/shape
             (shape/state :gathering
                          [:map [:seen {:combine into :combine/commutes true} [:set :int]]]
                          {:initial true})
-            ;; each report parks on its OWN gate, so the test decides which lands first
-            (shape/event :found [:map] (fn [_] (next-gate))
+            (shape/event :found [:map]
+                         (fn [_] (let [[r & more] @reports] (reset! reports more) {:seen r}))
                          [:map [:seen [:set :int]]])
             (shape/transition :gathering :found :gathering))
-        ph (c/phases sh a/context)
-        {:keys [states done]} (a/drive (:step ph) (c/initial sh {:seen #{}})
-                                       (fed [{:id :found} {:id :found}])
-                                       a/state-only (licensed sh ph))]
-    (is (= {:gathering #{#{:found}}} (:pairs (licensed sh ph)))
+        got (cranked sh (c/initial sh {:seen #{}}) [{:id :found} {:id :found}] [1 0])]
+    (is (= {:gathering #{#{:found}}} (check/commuting sh))
         "a SINGLETON licence, which is the fan-out one")
-    (d/success! g2 {:seen #{2}})
-    (d/success! g1 {:seen #{1}})
-    (let [got (collect {:states states :done done})]
-      (is (= #{1 2} (:seen (:done got)))
-          "set union, so which worker finished first is not in the answer")
-      (is (= 2 (count (:states got))) "one row per event, still"))))
+    (is (= #{1 2} (:seen (:done got)))
+        "set union, so which worker finished first is not in the answer")
+    (is (= 2 (count (:states got))) "one row per event, still")))

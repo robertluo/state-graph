@@ -1,6 +1,6 @@
 (ns robertluo.state-graph.async
-  "A DEFAULT and not the core: manifold streams. An event stream reduced to a stream of
-   results, one per event.
+  "A DEFAULT and not the core: core.async channels. An event channel reduced to a channel
+   of results, one per event.
 
    EVERYTHING IT NEEDS ARRIVES AS A VALUE — a compiled step function, a way to make a first
    state, and a way to turn a step's answer into an output value. So it never learns what a
@@ -8,14 +8,19 @@
    nothing. That is what makes this a battery rather than part of the core.
 
    PARALLELISM IS ACROSS INSTANCES and serialisation is within one — unless a LICENCE says
-   otherwise. `drive` runs a single machine in order; `fan` partitions a stream on :instance
-   and runs one drive per machine, concurrently. Given a `Licence` — the step in two halves
-   and the pairs `check/commuting` proved — a machine will also run TWO handlers at once
-   where the order they finish in cannot be observed. See :parallel-is-across-instances on
-   `fan` and :two-events-in-flight-at-once on `check/confluence` for what that proof is.
+   otherwise. `drive` runs a single machine in order; `fan` partitions a channel on
+   :instance and runs one drive per machine, concurrently. Given a `Licence` — the step in
+   two halves and the pairs `check/commuting` proved — a machine will also run TWO handlers
+   at once where the order they finish in cannot be observed. See
+   :parallel-is-across-instances on `fan` and :two-events-in-flight-at-once on
+   `check/confluence` for what that proof is.
 
-   Requires manifold, and NOTHING BELOW THIS REQUIRES IT — which is the whole purpose of
-   the Context that `compile` takes."
+   AN EXCEPTION IS A VALUE HERE. A go block is a boundary an exception does not cross, so
+   where one would be lost at that boundary it is caught and handed on AS IT IS — the same
+   object, with its message, its data, its cause and its trace — and :done delivers it.
+
+   Written for both hosts, and requires core.async and NOTHING BELOW THIS REQUIRES IT —
+   which is the whole purpose of the Context that `compile` takes."
   {:knowledge
    [{:id :the-defaults-are-batteries
      :kind :decision
@@ -33,15 +38,60 @@
      :says "manifold is pinned at 0.5.0 since 2026-09-15, for the release: 0.4.3 had been the pin since the library began, every consumer in the repository it grew up in pinned 0.5.0, and one classpath keeps one version — so the library's pin was the only thing in the repository still saying otherwise. The whole suite had passed on 0.5.0 with an override on 2026-09-02 and passes on it now; only long-stable API is used."
      :when "2026-09-15"
      :supersedes [:dependency-manifold]
-     :cites [:dependency-manifold]}]}
-  (:require [manifold.deferred :as d]
-            [manifold.stream :as s]))
+     :cites [:dependency-manifold]}
+    {:id :core-async-is-the-async-default
+     :kind :decision
+     :says "core.async 1.9.865 is the async default since 2026-09-25, replacing manifold, and this namespace is .cljc. ClojureScript is the goal and manifold is JVM-only; core.async is the one channel library on both hosts, and its unbuffered channel, promise-chan and alts! are what the pump and the fan need, one for one. Nothing below this layer requires it, exactly as nothing required manifold."
+     :why "What it cost, said out loud: a channel carries no error, so an exception had to become a value — see :an-exception-at-a-go-boundary-is-handed-on-as-it-is; and a channel is not IDeref, so a handler answering one no longer runs under compile's synchronous default on its own — see `blocking`. What it bought beyond portability: alts! completes EXACTLY ONE of the operations it races, so the speculative take manifold committed and had to carry forward is simply not taken when it loses. And the slf4j noise went with manifold."
+     :from "the author, 2026-09-25: `ClojureScript is the goal, go with core.async`"
+     :when "2026-09-25"
+     :supersedes [:manifold-is-pinned-at-what-its-consumers-resolve]
+     :cites [:the-defaults-are-batteries]}
+    {:id :an-exception-at-a-go-boundary-is-handed-on-as-it-is
+     :kind :decision
+     :says "An exception thrown inside a go block does not cross it — it goes to the uncaught handler and the block's channel simply closes, which for a machine is :done never settling and :states never closing. So wherever one would be lost at that boundary, and only there, it is CAUGHT AND HANDED ON AS IT IS: the same Throwable, not wrapped, not summarised, not converted to a map, so its message, ex-data, cause chain and stack all arrive. :done delivers it in place of the final state. That is not the bare try/catch the library forbids: nothing is swallowed and nothing is thrown away."
+     :from "the author, 2026-09-25: `it has to be because the boundary of an exception. We need to turn the exception into data, however, not throw away information.`"
+     :when "2026-09-25"
+     :cites [:core-async-is-the-async-default]}]}
+  (:require [clojure.core.async :as a]
+            [clojure.core.async.impl.protocols :as p]))
 
 ;;; ---------------------------------------------------------------- vocabulary
 
+(defn- port?
+  "Whether `x` is something a value can be taken from. core.async publishes no predicate,
+   and ReadPort is the protocol every channel and promise-chan implements."
+  [x]
+  (satisfies? p/ReadPort x))
+
+(defn- error?
+  "Whether a value that came off a channel is an exception handed on in place of one."
+  [x]
+  (instance? #?(:clj Throwable :cljs js/Error) x))
+
+(defn- raise
+  "Inside a go block: the value — or, where it is an exception handed on, that exception
+   thrown again, for the one catch at the edge of this block to hand on in its turn."
+  [x]
+  (if (error? x) (throw x) x))
+
+(defn- present
+  "What came off `port`, or an exception saying nothing did. A channel closed EMPTY is a
+   handler that answered nothing, and a nil handed on would fail one seam later with a
+   worse diagnosis."
+  [x]
+  (if (nil? x)
+    (ex-info "A channel closed without answering a value" {:crossing :channel})
+    x))
+
+(defn- settled
+  "A promise-chan answering `x`, or `x` itself where it is already a port."
+  [x]
+  (if (port? x) x (doto (a/promise-chan) (a/put! x))))
+
 (def Source
-  "A stream something can be taken from."
-  [:fn s/source?])
+  "A channel something can be taken from."
+  [:fn port?])
 
 (def ^{:knowledge
        [{:id :consume-states-or-done-may-never-resolve
@@ -54,35 +104,36 @@
   Machine
   "What `drive` and `fan` answer. TWO DIFFERENT THINGS, so two names.
 
-   :states is a source of one RESULT per event, closed when there are no more coming — by
+   :states is a channel of one RESULT per event, closed when there are no more coming — by
    draining or by throwing, so a consumer is never left waiting on a machine that has
    stopped. What a result IS belongs to whoever passed the `result` function: the state by
    default, and a layer that knows the shape puts something richer there.
 
-   :done resolves with the final state — `fan` answering one per instance — or ERRORS with
-   whatever the step threw. That is where an error belongs: `compile` treats a crossing
-   that does not hold as a DEFECT and not a fact about the run, and a stream of results has
-   nowhere honest to put one.
+   :done is a promise-chan delivering the final state — `fan` delivering one per instance —
+   or THE EXCEPTION the step threw, as it was thrown. That is where an error belongs:
+   `compile` treats a crossing that does not hold as a DEFECT and not a fact about the run,
+   and a channel of results has nowhere honest to put one. A promise-chan, so it may be
+   read as often as anybody likes.
 
-   CONSUME :states, OR :done MAY NEVER RESOLVE. The output is unbuffered and backpressure
+   CONSUME :states, OR :done MAY NEVER DELIVER. The output is unbuffered and backpressure
    is real, so a machine whose states nobody is reading stops rather than racing ahead.
-   That is the correct behaviour and it is worth knowing before deref-ing :done first."
-  [:map [:states Source] [:done :some]])
+   That is the correct behaviour and it is worth knowing before waiting on :done first."
+  [:map [:states Source] [:done Source]])
 
 (def Result
   "HOW A STEP'S ANSWER BECOMES AN OUTPUT VALUE: the state an event was applied to, the
-   event, and the state that came back.
+   event, and the state that came back. Never nil, which no channel will carry.
 
    INJECTED FOR THE SAME REASON THE Context IS. Whether an event FIRED is shape knowledge
    and this layer has no shape — an event nobody handled answers the state unchanged, and
    there is nothing in the two states to tell that from a self-loop that fired. So a layer
    that does know the shape closes over one and hands the maker down as a VALUE, and this
    one goes on knowing only that some value is to be put."
-  [:=> [:cat :map :map :map] :any])
+  [:=> [:cat :map :map :map] :some])
 
 (def state-only
   "The default `result` — put the new state and say nothing about what caused it. Exactly
-   what this layer put before it was parameterised, so a caller who wants a stream of
+   what this layer put before it was parameterised, so a caller who wants a channel of
    states passes nothing."
   (fn [_state _event state'] state'))
 
@@ -108,10 +159,10 @@
   "WHAT A PROVEN PAIR NEEDS IN ORDER TO RUN AT ONCE, and the answer to the one thing this
    layer could not do: the step IN ITS TWO HALVES, plus the pairs themselves.
 
-     :patch  (fn [state event] -> a deferred patch, see compile/phases)         the handler, run
-     :apply  (fn [state event patch] -> a deferred State)   the patch, landed
-     :agree  (fn [state ea pa eb pb])                       throws if the two disagree
-     :pairs  {state-id #{#{event-a event-b}}}               check/commuting, verbatim
+     :patch  (fn [state event] -> a patch, or a channel of one, see compile/phases)  the handler, run
+     :apply  (fn [state event patch] -> a State, or a channel of one)  the patch, landed
+     :agree  (fn [state ea pa eb pb])                                  throws if the two disagree
+     :pairs  {state-id #{#{event-a event-b}}}                          check/commuting, verbatim
 
    :agree IS NOT OPTIONAL, and requiring it is the point. Part of what licensed a pair may
    be a claim about a CLOSURE — that a domain combine is commutative — which no static
@@ -129,23 +180,69 @@
   [:map [:patch fn?] [:apply fn?] [:agree fn?]
         [:pairs [:map-of :keyword [:set [:set :keyword]]]]])
 
+(defn- then
+  "compile's :then over channels — a BIND, so it flattens: where `v` is a port, what `f`
+   answers for its value, taken off again if `f` answered a port too. A plain `v` goes
+   straight to `f`, with no block and no channel, so a handler answering a map costs
+   nothing here and a throw from it reaches whoever called the step.
+
+   THE CATCH IS THE BOUNDARY, and :an-exception-at-a-go-boundary-is-handed-on-as-it-is is
+   why it is not a bare one: an exception taken off `v`, thrown by `f`, or taken off what
+   `f` answered is handed on as the block's value, the same object, and never swallowed."
+  [v f]
+  (if (port? v)
+    (a/go
+      (try
+        (let [r (f (raise (present (a/<! v))))]
+          (if (port? r) (present (a/<! r)) r))
+        (catch #?(:clj Throwable :cljs :default) e e)))
+    (f v)))
+
 (def ^{:knowledge
        [{:id :a-manifold-deferred-is-ideref
          :kind :lesson
          :says "Verified 2026-08-31 in this project's own REPL: a manifold Deferred implements clojure.lang.IDeref, which is what lets the synchronous default deref one without a dependency, and d/chain takes a plain value as happily as a deferred, so a handler answering an ordinary map costs nothing here. Clojure's own delay, promise and future are IDeref too, which is how the deref decision was tested with no manifold."
          :when "2026-08-31"
-         :cites [:a-deferred-under-the-synchronous-default-is-dereferenced]}]}
+         :cites [:a-deferred-under-the-synchronous-default-is-dereferenced]}
+        {:id :a-handler-answers-a-channel
+         :kind :decision
+         :says "Under this Context a handler may answer a CHANNEL — a promise-chan, a go block, a/thread — delivering its map, or delivering an exception to fail. Anything else is a value already available. :pure puts a value in a promise-chan, so the step always answers a channel here, as it always answered a deferred."
+         :when "2026-09-25"
+         :cites [:core-async-is-the-async-default :a-handler-may-answer-later]}]}
   context
-  "The Context to hand `compile` so that a handler may answer a deferred and the step
-   answers one too. TWO FUNCTIONS, and that is the whole of what manifold contributes to
-   the core — which still requires no manifold and never learns what a deferred is.
+  "The Context to hand `compile` so that a handler may answer a channel and the step
+   answers one too. TWO FUNCTIONS, and that is the whole of what core.async contributes to
+   the core — which still requires no core.async and never learns what a channel is.
 
-   Verified 2026-08-31 in this project's own REPL: a manifold Deferred implements
-   clojure.lang.IDeref, which is what lets compile/synchronous deref one without a
-   dependency; and d/chain takes a plain value as happily as a deferred, so a handler
-   answering an ordinary map costs nothing here."
-  {:then d/chain
-   :pure d/success-deferred})
+   A HANDLER MAY ANSWER A CHANNEL delivering its map, or an exception to fail with. A
+   handler that BLOCKS should answer (a/thread ...) rather than block where it was called,
+   because a go block's pool is small and a machine is meant to hold no thread while it
+   waits."
+  {:then then
+   :pure settled})
+
+#?(:clj
+   (def ^{:knowledge
+          [{:id :a-channel-is-not-ideref
+            :kind :lesson
+            :says "Verified 2026-09-25 in this project's own REPL: a core.async channel is NOT clojure.lang.IDeref, where a manifold Deferred was. So compile's synchronous default, which derefs what is IDeref and passes on what is not, would hand a handler's channel to the :out check as if it were the answer — one Context no longer served a handler written for the stream."
+            :when "2026-09-25"
+            :cites [:a-manifold-deferred-is-ideref :a-deferred-under-the-synchronous-default-is-dereferenced]}
+           {:id :blocking-is-the-jvm-s-way-to-mix-the-doors
+            :kind :decision
+            :says "`blocking` is the Context that runs a handler written for the stream through a synchronous door — `(compile sh blocking)`, or {:context blocking} to a driver — by TAKING from a channel with <!!, where the synchronous default derefs. It lives here because only this layer may know what a channel is, and it is JVM-only because a JavaScript host cannot block at all: on ClojureScript a handler that answers a channel runs through the stream door and nowhere else."
+            :when "2026-09-25"
+            :cites [:a-channel-is-not-ideref :the-defaults-are-batteries]}]}
+     blocking
+     "The Context for running, SYNCHRONOUSLY, a shape whose handlers answer channels: a
+      channel is taken from with <!! and anything else is used as it is, so the step
+      answers a State, as under compile's default. An exception delivered on a channel is
+      THROWN, the same object, because a synchronous step has nowhere else to put it.
+
+      JVM ONLY. A JavaScript host cannot block, so there a handler that answers a channel
+      is run through `drive` or `fan`."
+     {:then (fn [v f] (f (if (port? v) (raise (present (a/<!! v))) v)))
+      :pure identity}))
 
 ;;; ---------------------------------------------------------------------- pump
 
@@ -169,113 +266,105 @@
   (contains? (get pairs (:id state)) (hash-set (:id a) (:id b))))
 
 (defn- pump
-  "Take events, step, put one result per event to `out`. Answers a deferred of the final
-   state — the STATE and never a result, because the state is the accumulator and a result
-   is only what a consumer is told.
+  "Take events, step, put one result per event to `out`. Answers a promise-chan of the
+   final state — the STATE and never a result, because the state is the accumulator and a
+   result is only what a consumer is told — or of the exception that stopped it.
 
    DOES NOT CLOSE `out`, and that is the whole reason it exists apart from `drive`: whoever
    made the sink closes it, which is what lets `fan` share ONE output between many machines.
    The first version of `fan` used s/connect from each machine's own stream instead, and
    s/connect is ASYNCHRONOUS — closing the shared output after every machine reported done
    raced the last value still in a connect pipeline, and lost it. Writing straight to the
-   sink means a machine's :done cannot resolve until its last result has been ACCEPTED there.
+   sink means a machine's :done cannot deliver until its last result has been ACCEPTED there.
 
    WITH A LICENCE IT WILL RUN TWO HANDLERS AT ONCE. The shape of it is one speculative
-   take: start this event's handler, then reach for another event WITHOUT waiting, and race
-   the two. Whatever the take brings is never wasted — it is either the other half of a
-   licensed pair or the next iteration's event, carried forward in `held` — so the reach
-   costs nothing when no second event is coming.
+   take: start this event's handler, then race it against the next event with alts!. alts!
+   completes EXACTLY ONE of the two, so a take that loses the race never happened and
+   nothing is taken twice; an event that wins it is either the other half of a licensed
+   pair or the next iteration's event, carried forward in `held`.
 
    ONLY EVER TWO, deliberately. `check/commuting` is a PAIRWISE relation on ONE state, which
    is precisely what :two-events-in-flight-at-once designed and proved; three in flight would
    need the licence re-established at each intermediate state, and inventing that here would
-   be taking more than was proven."
+   be taking more than was proven.
+
+   ONE CATCH, AT THE EDGE OF THE BLOCK, and it hands the exception on as :done's value —
+   see :an-exception-at-a-go-boundary-is-handed-on-as-it-is. Everything inside throws."
   [step result initial events out licence]
   (let [{patch :patch land :apply agree :agree pairs :pairs} licence
-        emit (fn [state event state']
-               (d/chain (s/put! out (result state event state')) (fn [_] state')))]
-    (d/loop [state initial held nil]
-      (d/chain
-       (or held (s/take! events ::drained))
-       (fn [e]
-         (cond
-           (identical? ::drained e) state
+        done (a/promise-chan)]
+    (a/go
+      (a/>!
+       done
+       (try
+         (loop [state initial held nil]
+           (let [e (or held (a/<! events))]
+             (cond
+               ;; nil is a closed channel: drained.
+               (nil? e) state
 
-           ;; STRICTLY IN ORDER — each event applied to what the last one produced, which
-           ;; is what a reduction means. Taken with no licence at all AND wherever THIS
-           ;; state has no licensed pair, which is most states in most shapes: there is
-           ;; then nothing a second event in flight could be paired with, so reaching for
-           ;; one early would buy nothing and hold an event for no reason.
-           (or (nil? licence) (empty? (get pairs (:id state))))
-           (d/chain (step state e)
-                    (fn [state'] (emit state e state'))
-                    (fn [state'] (d/recur state' nil)))
+               ;; STRICTLY IN ORDER — each event applied to what the last one produced,
+               ;; which is what a reduction means. Taken with no licence at all AND wherever
+               ;; THIS state has no licensed pair, which is most states in most shapes:
+               ;; there is then nothing a second event in flight could be paired with, so
+               ;; reaching for one early would buy nothing and hold an event for no reason.
+               (or (nil? licence) (empty? (get pairs (:id state))))
+               (let [state' (raise (present (a/<! (settled (step state e)))))]
+                 (a/>! out (result state e state'))
+                 (recur state' nil))
 
-           :else
-           (let [p1  (patch state e)
-                 nxt (s/take! events ::drained)]
-             (d/chain
-              ;; WHICH HAPPENS FIRST: this handler settling, or another event arriving.
-              (d/alt (d/chain p1 (fn [_] ::settled))
-                     (d/chain nxt (fn [e2] [::arrived e2])))
-              (fn [outcome]
-                (if-let [e2 (when (vector? outcome)
-                              (let [v (second outcome)]
-                                (when (and (not (identical? ::drained v))
-                                           (licensed? pairs state e v))
-                                  v)))]
-                  ;; TWO IN FLIGHT. Both handlers were selected from the SAME state, so
-                  ;; there is no speculation about which edge either belongs to; the patches
-                  ;; are then applied AS THEY LAND rather than as they arrived, which is the
-                  ;; whole of the licence. `commutes` proved the diamond closes and the
-                  ;; patches satisfy Bernstein's conditions, so where the machine ends up
-                  ;; cannot tell you which finished first.
-                  ;;
-                  ;; THE RACE CARRIES THE PATCH AND NOT ITS DEFERRED for whichever won, and
-                  ;; the loser's deferred to be waited on second. `apply` takes a PATCH: a
-                  ;; deferred handed to it has no :depth and fails at that seam, which is
-                  ;; how this was found rather than shipped.
-                  (let [p2 (patch state e2)]
-                    (d/chain
-                     ;; WHICH LANDED FIRST — the only thing the race is for. Both handlers
-                     ;; are already running, so this costs no wall-clock either way.
-                     (d/alt (d/chain p1 (fn [v] [e v e2 p2]))
-                            (d/chain p2 (fn [v] [e2 v e p1])))
-                     (fn [[ea pa eb pb]]
-                       ;; BOTH PATCHES BEFORE EITHER LANDS. The concurrency is in the
-                       ;; HANDLERS and they have both already run, so waiting here costs
-                       ;; only the first RESULT's latency and never the machine's — and it
-                       ;; buys the one thing worth more: :agree becomes a genuine
-                       ;; PRE-CONDITION. Applying one patch and then discovering the
-                       ;; licence was invalid would emit a result derived from an unsound
-                       ;; proof, which is the silent wrongness this whole check exists for.
-                       (d/chain
-                        pb
-                        (fn [pbv]
-                          (agree state ea pa eb pbv)
-                          (d/chain
-                           (land state ea pa)
-                           (fn [s1] (emit state ea s1))
-                           (fn [s1] (d/chain (land s1 eb pbv)
-                                             (fn [s2] (emit s1 eb s2))
-                                             (fn [s2] (d/recur s2 nil))))))))))
-                  ;; NOT A PAIR — the handler landed first, or what arrived may not be
-                  ;; applied beside it. Finish this event and carry the take forward: `nxt`
-                  ;; is the same deferred either way, so nothing is ever taken twice and
-                  ;; nothing is dropped.
-                  (d/chain p1
-                           (fn [p] (land state e p))
-                           (fn [state'] (emit state e state'))
-                           (fn [state'] (d/recur state' nxt)))))))))))))
+               :else
+               (let [p1 (settled (patch state e))
+                     ;; WHICH HAPPENS FIRST: this handler settling, or another event
+                     ;; arriving. :priority so that where both are ready the handler wins,
+                     ;; which is the serial order and never needs a licence.
+                     [v port] (a/alts! [p1 events] :priority true)]
+                 (if (and (not= port p1) (some? v) (licensed? pairs state e v))
+                   ;; TWO IN FLIGHT. Both handlers were selected from the SAME state, so
+                   ;; there is no speculation about which edge either belongs to; the
+                   ;; patches are then applied AS THEY LAND rather than as they arrived,
+                   ;; which is the whole of the licence. `commutes` proved the diamond
+                   ;; closes and the patches satisfy Bernstein's conditions, so where the
+                   ;; machine ends up cannot tell you which finished first.
+                   (let [e2 v
+                         p2 (settled (patch state e2))
+                         ;; WHICH LANDED FIRST — the only thing the race is for. Both
+                         ;; handlers are already running, so this costs no wall-clock
+                         ;; either way. THE RACE CARRIES THE PATCH for whichever won and
+                         ;; the loser's port to be waited on second.
+                         [pa port'] (a/alts! [p1 p2] :priority true)
+                         [ea eb pb-port] (if (= port' p1) [e e2 p2] [e2 e p1])
+                         pa (raise (present pa))
+                         ;; BOTH PATCHES BEFORE EITHER LANDS. The concurrency is in the
+                         ;; HANDLERS and they have both already run, so waiting here costs
+                         ;; only the first RESULT's latency and never the machine's — and
+                         ;; it buys the one thing worth more: :agree becomes a genuine
+                         ;; PRE-CONDITION. Applying one patch and then discovering the
+                         ;; licence was invalid would emit a result derived from an unsound
+                         ;; proof, which is the silent wrongness this whole check exists for.
+                         pb (raise (present (a/<! pb-port)))
+                         _  (agree state ea pa eb pb)
+                         s1 (raise (present (a/<! (settled (land state ea pa)))))
+                         _  (a/>! out (result state ea s1))
+                         s2 (raise (present (a/<! (settled (land s1 eb pb)))))]
+                     (a/>! out (result s1 eb s2))
+                     (recur s2 nil))
+                   ;; NOT A PAIR — the handler landed first, or what arrived may not be
+                   ;; applied beside it, or the events ran out. Finish this event and carry
+                   ;; forward whatever the race took: an event, or nothing.
+                   (let [p      (raise (present (if (= port p1) v (a/<! p1))))
+                         state' (raise (present (a/<! (settled (land state e p)))))]
+                     (a/>! out (result state e state'))
+                     (recur state' (when (not= port p1) v))))))))
+         (catch #?(:clj Throwable :cljs :default) ex ex))))
+    done))
 
 (defn- closing
-  "Close `out` when `done` settles, either way. d/catch here is manifold's combinator over a
-   deferred and NOT a bare try/catch: it swallows nothing — `done` still errors for the
-   caller — it only makes sure a consumer is not left waiting on a machine that has stopped."
+  "Close `out` when `done` delivers, whatever it delivers — a final state or an exception —
+   so a consumer is not left waiting on a machine that has stopped. `done` is a
+   promise-chan, so taking from it here leaves it for the caller."
   [done out]
-  (-> done
-      (d/chain (fn [_] (s/close! out)))
-      (d/catch (fn [_] (s/close! out))))
+  (a/go (a/<! done) (a/close! out))
   done)
 
 ;;; --------------------------------------------------------------------- drive
@@ -303,7 +392,7 @@
    machine reaches its final state no later for it; only the intermediate row is delayed.
 
    `result` says what goes on :states, and defaults to the state alone. :done is the final
-   state either way."
+   state either way, or the exception that stopped the machine."
   {:malli/schema [:function [:=> [:cat ifn? :map Source] Machine]
                             [:=> [:cat ifn? :map Source Result] Machine]
                             [:=> [:cat ifn? :map Source Result [:maybe Licence]] Machine]]
@@ -319,30 +408,37 @@
     {:id :the-race-carries-the-patch-and-not-its-deferred
      :kind :lesson
      :says "The race carries the PATCH for whichever handler won and the loser's deferred to be waited on second. `apply` takes a patch: a deferred handed to it has no :depth and fails at that seam, which is how this was found rather than shipped."
-     :cites [:a-patch-has-to-say-whose-it-is]}]}
+     :cites [:a-patch-has-to-say-whose-it-is]}
+    {:id :a-rendezvous-decides-a-race-a-gate-does-not
+     :kind :lesson
+     :says "Parking the first handler on a gate and opening it once both events were TAKEN stopped deciding the race under core.async: 16 runs in 20 came back in arrival order under instrumentation. Under manifold the whole chain ran in the test's own thread, so the race was decided before `drive` returned; a go block runs on another thread, and the pump computing the second patch — slow with malli instrumenting — looked at the two only after the gate was open, when both had answered and :priority rightly chose arrival order. The machine was right and the test was not. The test now answers the patches itself on UNBUFFERED channels, so each delivery is a rendezvous with the very take that decides and returns only once the machine has made it; 20 runs in 20. Through the facade, where :patch cannot be reached, concurrency is proved by DEADLOCK instead: the second handler opens the first one's gate, which a serialised machine never reaches."
+     :when "2026-09-25"
+     :supersedes [:completion-order-is-testable-without-a-clock]
+     :cites [:core-async-is-the-async-default]}]}
   ([step initial events] (drive step initial events state-only))
   ([step initial events result] (drive step initial events result nil))
   ([step initial events result licence]
-   (let [out (s/stream)]
-     {:states (s/source-only out)
+   (let [out (a/chan)]
+     {:states out
       :done (closing (pump step result initial events out licence) out)})))
 
 ;;; ----------------------------------------------------------------------- fan
 
 (defn fan
-  "MANY machines at once, which is where the parallelism is: the stream is partitioned on
+  "MANY machines at once, which is where the parallelism is: the channel is partitioned on
    :instance and each machine gets its own reduction, running concurrently. Results from
-   every machine arrive on one :states stream.
+   every machine arrive on one :states channel.
 
    `initial-of` is called with an instance the first time that instance is seen, and answers
    that machine's first state — (fn [k] (compile/initial sh k {})) at a call site, which is
    how this stays ignorant of shapes. `result` says what goes on :states and defaults to the
    state alone.
 
-   :done IS A MAP, {instance -> final state}, where `drive` answers one state — a vector
-   would have said the same thing while making the caller guess which machine each entry
-   belonged to, since a machine's own name is the one thing this function has in hand. Empty
-   where no event ever arrived, there being no machine to report on.
+   :done DELIVERS A MAP, {instance -> final state}, where `drive` delivers one state — a
+   vector would have said the same thing while making the caller guess which machine each
+   entry belonged to, since a machine's own name is the one thing this function has in
+   hand. Empty where no event ever arrived, there being no machine to report on. OR IT
+   DELIVERS THE EXCEPTION that stopped any one machine, and the rest are closed.
 
    AN EVENT WITH NO :instance IS ITS OWN MACHINE, under the key nil. Deliberate, and it
    costs nothing: a caller who never names anything still works, and
@@ -380,35 +476,45 @@
     {:id :s-connect-is-asynchronous
      :kind :lesson
      :says "s/connect is asynchronous, and it cost a LOST STATE: giving each machine its own stream and connecting them into one output dropped whatever was still in a connect pipeline when the output was closed — instance a ran three events and only two states came out. Every machine now writes STRAIGHT to the shared sink, so a machine's :done cannot resolve until its last result has been ACCEPTED there, and only whoever made the sink closes it."
-     :cites [:parallel-is-across-instances]}]}
+     :cites [:parallel-is-across-instances]}
+    {:id :a-stopped-machine-stops-the-fan
+     :kind :decision
+     :says "An event routed to a machine that has already stopped on a defect is not put and waited on for ever: the put is raced against that machine's :done, and where :done has delivered, the fan delivers the same exception, closes every machine's input and stops. Under manifold the put would have pended with nobody taking, and the fan's :done would never have settled."
+     :when "2026-09-25"
+     :cites [:an-exception-at-a-go-boundary-is-handed-on-as-it-is :consume-states-or-done-may-never-resolve]}]}
   ([step initial-of events] (fan step initial-of events state-only))
   ([step initial-of events result] (fan step initial-of events result nil))
   ([step initial-of events result licence]
-   (let [out (s/stream)
-         machines (atom {})
-         done (d/loop []
-                (d/chain
-                 (s/take! events ::drained)
-                 (fn [e]
-                   (if (identical? ::drained e)
-                     ;; close every input, then wait for every machine — a result still in
-                     ;; flight when the events run out is still a result. ONE SNAPSHOT of
-                     ;; the atom, so the keys and the deferreds cannot be zipped out of step.
-                     (let [ms @machines]
-                       (doseq [m (vals ms)] (s/close! (:in m)))
-                       (if (empty? ms)
-                         {}
-                         (d/chain (apply d/zip (map :done (vals ms)))
-                                  #(zipmap (keys ms) %))))
-                     (let [k (:instance e)
-                           m (or (@machines k)
-                                 ;; only this loop creates one and it is sequential, so
-                                 ;; there is no race here to guard.
-                                 (let [in (s/stream)
-                                       m {:in in :done (pump step result (initial-of k)
-                                                             in out licence)}]
-                                   (swap! machines assoc k m)
-                                   m))]
-                       (d/chain (s/put! (:in m) e) (fn [_] (d/recur))))))))]
-     {:states (s/source-only out)
+   (let [out  (a/chan)
+         done (a/promise-chan)]
+     (a/go
+       (a/>!
+        done
+        ;; ONLY THIS LOOP CREATES A MACHINE and it is sequential, so the map of them is
+        ;; the loop's own accumulator and nothing needs guarding.
+        (loop [machines {}]
+          (let [e (a/<! events)]
+            (if (nil? e)
+              ;; close every input, then wait for every machine — a result still in flight
+              ;; when the events run out is still a result. The first exception any of
+              ;; them delivers is what the fan delivers.
+              (do (doseq [m (vals machines)] (a/close! (:in m)))
+                  (loop [acc {} [[k m] & more] (seq machines)]
+                    (if (nil? m)
+                      acc
+                      (let [v (a/<! (:done m))]
+                        (if (error? v) v (recur (assoc acc k v) more))))))
+              (let [k  (:instance e)
+                    m  (or (get machines k)
+                           (let [in (a/chan)]
+                             {:in in :done (pump step result (initial-of k) in out licence)}))
+                    machines (assoc machines k m)
+                    [v port] (a/alts! [[(:in m) e] (:done m)])]
+                (if (= port (:done m))
+                  ;; THE MACHINE STOPPED before it would take this — a defect, since only
+                  ;; a closed input ends one otherwise. See :a-stopped-machine-stops-the-fan.
+                  (do (doseq [m (vals machines)] (a/close! (:in m)))
+                      v)
+                  (recur machines))))))))
+     {:states out
       :done (closing done out)})))
