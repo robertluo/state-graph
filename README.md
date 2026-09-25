@@ -1,7 +1,7 @@
 # robertluo.state-graph
 
-A finite state machine whose **shape is a graph** — so a graph library can draw it and
-check it, and a compiler can turn it into an ordinary Clojure function.
+A finite state machine whose **shape is a graph** — so it can be drawn and checked as one,
+and a compiler can turn it into an ordinary Clojure function.
 
 ```clojure
 ;; from Clojars, once `clojure -T:build deploy` has run
@@ -578,8 +578,8 @@ written yesterday would match nothing today.
 
 `canonical` puts everything that is **data** in — node ids, the *form* of every schema,
 `:initial` `:final`, every edge as `[from event to]` with its guard, `:out`, `:sees` and
-`:reads`, every completion edge with its `:yield` — ordered by printed form, since ubergraph
-keeps nodes and out-edges in sets. A nested machine is its child's fingerprint, so the
+`:reads`, every completion edge with its `:yield` — ordered by printed form, since a shape
+keeps its nodes in a map and its edges in a set. A nested machine is its child's fingerprint, so the
 recursion terminates and a change deep in a child still moves the parent. Keep it for when two
 fingerprints disagree and you need to know *why*: a hash can only say "different".
 
@@ -1029,8 +1029,9 @@ Underneath, and directly usable — the facade is the convenience, these are the
 it), `.async` (manifold streams: `drive` for one machine, `fan` for many). Nothing below
 `.async` requires manifold, `.drive` included.
 
-Dependencies: ubergraph, malli, manifold, test.check — the last at runtime and on purpose, since
-`check/laws` generates through malli.generator. Drawing needs graphviz installed, and so does
+Dependencies: malli, manifold, test.check — no graph library, the graph being a plain map the
+library owns; test.check at runtime and on purpose, since `check/laws` generates through
+malli.generator. Drawing needs graphviz installed, and so does
 running the suites: the drawing tests shell out to `dot`.
 
 ## Development

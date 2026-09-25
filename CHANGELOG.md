@@ -18,6 +18,13 @@ The first version meant to be used from outside the repository it was built in.
   signature.
 - manifold 0.5.0, test.check 1.1.3. test.check is a runtime dependency on purpose:
   `check/laws` generates through malli.generator.
+- No graph library: ubergraph is gone, and with it loom, potemkin's graph type, specter,
+  dorothy, two priority maps and a ClojureScript 1.7.170 that had ridden onto every JVM
+  classpath. A shape is a plain map, `{::nodes {id attrs} ::edges #{edge}}`, and `shape/Shape`
+  is a closed malli schema over it. `shape/state-schema`, `shape/successors` and
+  `shape/predecessors` are new, and are how `check` reads a shape. Fingerprints are unchanged.
+  `check/labelled`, and so `dot` and `draw!`, now refuse a value that is not a shape;
+  ubergraph used to throw on one by accident.
 - A smaller public surface: `compile/Patch` and `drive/Applied` are gone, being schemas nothing
   validated with, and `check/produced`, `check/continued`, `shape/combines-of` and
   `shape/completions` are private. What a user is promised is the facade and what the README names.

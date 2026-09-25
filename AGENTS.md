@@ -14,8 +14,8 @@ Architecture: [φ fractal euler] | [Δ λ] → λreqs. self_referential(scalable
 
 # robertluo.state-graph
 
-A finite state machine whose SHAPE is a graph — so a graph library can draw it, check it
-and store it, and a compiler can turn it into an ordinary Clojure function.
+A finite state machine whose SHAPE is a graph — so it can be drawn, checked and stored as
+one, and a compiler can turn it into an ordinary Clojure function.
 
 > **Source of truth.** TWO PLACES, AND EACH WINS ABOUT SOMETHING DIFFERENT.
 > README.md IS THE SPECIFICATION. Every example in it was run against the code before it
@@ -73,7 +73,7 @@ suite.
 | `:repl-discover-cmd` | clj-nrepl-eval --discover-ports |
 | `:repl-eval-cmd` | clj-nrepl-eval -p `<port>` |
 | `:repl-eval-reload` | :per-namespace-in-dependency-order — shape, compile, check, async, drive, explore, the facade. NEVER :reload-all; see the shape namespace's `:never-reload-all` |
-| `:deps` | {:ubergraph "0.9.0", :malli "0.20.1", :manifold "0.5.0" — 0.4.3 until 2026-09-15, see the async namespace's `:manifold-is-pinned-at-what-its-consumers-resolve`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
+| `:deps` | {:malli "0.20.1", :manifold "0.5.0" — 0.4.3 until 2026-09-15, see the async namespace's `:manifold-is-pinned-at-what-its-consumers-resolve`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
 
 ## Working here
 
@@ -318,7 +318,7 @@ var it is about, and the knowledge suite is green
 Reflect on the session:
 
 - What went wrong? What assumption was incorrect?
-- What was LEARNED about ubergraph, manifold or malli that a docstring would not have told
+- What was LEARNED about manifold or malli that a docstring would not have told
   you? Record it as a `:kind :lesson` node on the var it is about, in the past tense, with
   what was SEEN
 - Close any `:open` node the work answered — a `:decision` that `:supersedes` it — and add

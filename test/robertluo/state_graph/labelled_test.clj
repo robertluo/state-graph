@@ -5,7 +5,22 @@
             [clojure.test.check.properties :as prop]
             [robertluo.state-graph.shape :as shape]
             [clojure.string :as str]
-            [robertluo.state-graph.check :refer [labelled]]))
+            [robertluo.state-graph.check :refer [labelled]]
+            [robertluo.state-graph.test-support :as ts]))
+
+(defspec labelled-edges-are-the-declared-transitions-and-completions 100
+  ;; Read off the PARTS: an event edge is labelled with its event (the generator writes no
+  ;; guards), a completion is marked :done and labelled with its outcome in brackets, or with
+  ;; nothing where it is unconditional. A multiset, so an edge drawn twice or not at all fails.
+  (prop/for-all [parts ts/gen-completing-shape]
+                (= (frequencies
+                    (concat (for [t (ts/parts-of :transition parts)]
+                              [(:from t) (:to t) false (name (:event t))])
+                            (for [[from outcome to] (ts/completions-of parts)]
+                              [from to true (if outcome (str "[" (name outcome) "]") "")])))
+                   (frequencies
+                    (map (juxt :from :to :done :label)
+                         (:edges (labelled (apply shape/shape parts))))))))
 
 (deftest labelled-basic-example
   (testing "simple linear shape as given"

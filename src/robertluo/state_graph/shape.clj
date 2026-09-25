@@ -9,10 +9,13 @@
 
    The shape IS CODE — built at load time, handlers are closures, schemas are compiled.
    Nothing here serialises and nothing here needs to. That is also why the event
-   catalogue is DENORMALISED onto the edges: an Ubergraph holds nodes and edges and
-   nothing else, and says so by silently ignoring an assoc and discarding metadata.
+   catalogue is DENORMALISED onto the edges: a shape holds nodes and edges and nothing
+   else, and its schema is CLOSED to say so.
 
-   Requires ubergraph and malli, and nothing else — ever."
+   THE GRAPH IS THIS NAMESPACE'S OWN — a plain map, read through the reading section below
+   and by nothing above it. See `Shape`.
+
+   Requires malli, and nothing else — ever."
   {:knowledge
    [{:id :the-shape-is-a-graph
      :kind :decision
@@ -56,10 +59,17 @@
     {:id :dependency-malli
      :kind :decision
      :says "malli 0.20.1 shapes every state, every event and every function signature here. It is the one dependency that punishes a careless REPL."
-     :cites [:never-reload-all]}]}
+     :cites [:never-reload-all]}
+    {:id :the-shape-owns-its-graph
+     :kind :decision
+     :says "The graph is this namespace's own: a shape is a plain map, {::nodes {id attrs} ::edges #{edge}}, each edge a map carrying its :from and :to beside its attributes, and no graph library is a dependency. Everything above reads it through the reading section — `check` walks `successors` and `predecessors` and never touches the keys."
+     :why "Asked for PORTABILITY, and ubergraph was the obstacle rather than manifold: it is .clj only, its graph type a potemkin def-map-type over clojure.lang interfaces, its edge ids from java.util.UUID, and it loads dorothy.jvm on require. loom, which IS portable, keeps a digraph's edges as {n #{succ}} and so collapses the parallel edges a shape needs; keeping it for `pre-traverse` alone would have left ClojureScript 1.7.170 and two priority maps on every consumer's classpath for fifteen lines. What this library used of ubergraph was thirteen functions and one traversal. The ubergraph lessons still describe the map: edges are still a SET, so there is still no order to recover, and a shape is = and EDN wherever its attributes are values. One trap became a refusal — a key assoc'd onto a shape is refused by the closed `Shape` rather than silently dropped — and one behaviour moved: an attribute read off a node the shape does not hold answers nil where ubergraph threw."
+     :from "the author, 2026-09-25: `no graph dependency, go ahead`"
+     :when "2026-09-25"
+     :supersedes [:dependency-ubergraph]
+     :cites [:dependency-ubergraph :ubergraph-out-edges-are-a-set :ubergraph-is-equal-and-edn-for-value-attributes :ubergraph-is-a-closed-map-and-fails-silently]}]}
   (:require [malli.core :as m]
-            [malli.util :as mu]
-            [ubergraph.core :as uber]))
+            [malli.util :as mu]))
 
 ;;; ---------------------------------------------------------------- vocabulary
 
@@ -119,8 +129,26 @@
    #(= :map (m/type (m/schema %)))])
 
 (def Shape
-  "The graph. Its innards are ubergraph's business, so what is guarded is what goes in."
-  [:fn uber/ubergraph?])
+  "The graph: {::nodes {id attrs} ::edges #{edge}}, where an edge is a map carrying its own
+   :from and :to beside its attributes.
+
+   A MULTI-DIGRAPH BY CONSTRUCTION. Two edges joining one pair of states are two different
+   maps — they fire on different events, or carry different outcomes — so a set keeps both,
+   and two that were the same map would be one declaration written twice, which `problems`
+   refuses as :ambiguous before a set could fold them.
+
+   THE EDGES ARE A SET, so there is no order among them to recover; anything needing one
+   computes it. CLOSED, so a key assoc'd onto a shape is refused and never carried.
+
+   Read through the reading section and nothing else: above this namespace a shape is
+   `states`, `transitions`, `continuations`, `successors` and the rest, never its keys."
+  [:map {:closed true}
+   [::nodes [:map-of Id :map]]
+   [::edges [:set [:map [:from Id] [:to Id]]]]])
+
+(def ^:private shape?
+  "Is this a built shape? What `problems` asks of a :machine before reading it as one."
+  (m/validator Shape))
 
 (def ^{:knowledge
        [{:id :a-state-has-an-id
@@ -816,7 +844,7 @@
   [s]
   (let [child (:machine s)]
     (or (nil? child)
-        (and (uber/ubergraph? child) (final? child (initial-id child))))))
+        (and (shape? child) (final? child (initial-id child))))))
 
 (defn problems
   "What is wrong with these parts, AS DATA — a vector of maps, empty when nothing is.
@@ -890,7 +918,7 @@
       ;; SAFETY rather than report a proven fault: not-provably-disjoint is a fault.
       ;; AN UNGUARDED EDGE BESIDE ANY OTHER IS THE SIMPLEST CASE OF IT and needs no special
       ;; handling — with no :when, `accepted` is the bare event schema, which is disjoint
-      ;; from nothing. And an ordered `first match wins` is not the alternative: ubergraph
+      ;; from nothing. And an ordered `first match wins` is not the alternative: a shape
       ;; keeps out-edges in a SET, so there is no order to fall back on and the proof is
       ;; the whole of the safety.
       (let [schema-of (into {} (map (juxt :id :schema)) event)]
@@ -951,7 +979,7 @@
       ;;   provide the seed, and will the child take it.
       (for [s state
             :let [child (:machine s)]
-            :when (and child (uber/ubergraph? child) (not (:seed s)))
+            :when (and child (shape? child) (not (:seed s)))
             :let [id (initial-id child)]
             :when (not (m/validate (enter-schema child id) {:id id}))]
         {:problem :machine-cannot-start :id (:id s) :initial id})
@@ -971,18 +999,16 @@
       ;; child being a built shape already.
       (for [s state :when (map? (:done s))
             :let [child (:machine s)]
-            :when (not (and child (uber/ubergraph? child)))]
+            :when (not (and child (shape? child)))]
         {:problem :outcome-without-machine :id (:id s)})
       (for [s state :when (and (map? (:done s))
-                               (:machine s) (uber/ubergraph? (:machine s)))
+                               (:machine s) (shape? (:machine s)))
             :let [child-ids (set (states (:machine s)))]
             outcome (sort (keys (:done s)))
-            ;; ASKED AS MEMBERSHIP FIRST, exactly as :unknown-state above is. `final?`
-            ;; reads an attribute off a NODE and ubergraph THROWS on one it does not
-            ;; hold — so an outcome naming no state at all, which is what a misspelling
-            ;; looks like, would escape as an ubergraph error instead of the fault this
-            ;; line exists to report. Not final and not there at all are one fault, the
-            ;; branch being untakeable either way.
+            ;; ASKED AS MEMBERSHIP FIRST, exactly as :unknown-state above is: an outcome
+            ;; naming no state at all is what a misspelling looks like, and it once
+            ;; escaped as the graph library's error instead of this fault. Not final and
+            ;; not there at all are one fault, the branch being untakeable either way.
             :when (not (and (child-ids outcome) (final? (:machine s) outcome)))]
         {:problem :unknown-outcome :id (:id s) :outcome outcome})
       ;; A per-outcome :done carries each branch's own :yield, so one beside it is a
@@ -1004,7 +1030,7 @@
       ;; A :done that can NEVER fire, because the child it waits on has no way to finish.
       (for [s state
             :let [child (:machine s)]
-            :when (and (:done s) child (uber/ubergraph? child)
+            :when (and (:done s) child (shape? child)
                        (not-any? #(final? child %) (states child)))]
         {:problem :machine-cannot-finish :id (:id s)})
       ;; A CYCLE AMONG ENTRY-FIRED CONTINUATIONS IS A PROVEN INFINITE LOOP, and being
@@ -1082,60 +1108,62 @@
     (throw (ex-info "The shape has problems" {:problems (vec ps)})))
   (let [{:keys [state event transition]} (group-by ::kind parts)
         catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :sees :report :reads]))) event)]
-    (-> (uber/multidigraph)
-        (uber/add-nodes-with-attrs*
-         (for [s state] [(:id s) (cond-> (select-keys s [:schema :initial :final :machine])
-                                   (:seed s) (assoc :seed (m/schema (:seed s))))]))
-        (uber/add-directed-edges*
-         (for [t transition]
-           [(:from t) (:to t)
-            (cond-> (assoc (catalogue (:event t)) :event (:event t))
-              (:when t) (assoc :when (:when t)))]))
-        ;; A COMPLETION TRANSITION IS A REAL EDGE and not a node attribute, and that is
-        ;; what buys the structural checks for nothing: `reachable`, `dead-ends`,
-        ;; `finishable` and `traps` all WALK THE GRAPH, so a state reached only by
-        ;; completing is reached, and a state whose only way out is completing is not a
-        ;; dead end. Getting that from a node attribute would have meant teaching four
-        ;; traversals about it.
-        ;; IT CARRIES NO :event, and that absence is the whole distinction: `transitions`
-        ;; reads it to leave these out, because an edge fired by an EVENT and an edge fired
-        ;; by ARRIVING are different things to everything above here.
-        ;; ONE EDGE PER OUTCOME, which is what makes the per-outcome form cost the
-        ;; traversals nothing either: two ways for a child to finish are two arrows, and
-        ;; `reachable`, `dead-ends`, `finishable` and `traps` walk them without being told
-        ;; that a state can complete in more than one way.
-        (uber/add-directed-edges*
-         (for [s state, c (completions s)]
-           [(:id s) (:to c) (cond-> {:done true}
-                              (:outcome c) (assoc :outcome (:outcome c))
-                              (:yield c) (assoc :yield (m/schema (:yield c))))])))))
+    {::nodes
+     (into {} (for [s state] [(:id s) (cond-> (select-keys s [:schema :initial :final :machine])
+                                        (:seed s) (assoc :seed (m/schema (:seed s))))]))
+     ::edges
+     (into (set (for [t transition]
+                  (cond-> (assoc (catalogue (:event t)) :from (:from t) :to (:to t) :event (:event t))
+                    (:when t) (assoc :when (:when t)))))
+      ;; A COMPLETION TRANSITION IS A REAL EDGE and not a node attribute, and that is
+      ;; what buys the structural checks for nothing: `reachable`, `dead-ends`,
+      ;; `finishable` and `traps` all WALK THE GRAPH, so a state reached only by
+      ;; completing is reached, and a state whose only way out is completing is not a
+      ;; dead end. Getting that from a node attribute would have meant teaching four
+      ;; traversals about it.
+      ;; IT CARRIES NO :event, and that absence is the whole distinction: `transitions`
+      ;; reads it to leave these out, because an edge fired by an EVENT and an edge fired
+      ;; by ARRIVING are different things to everything above here.
+      ;; ONE EDGE PER OUTCOME, which is what makes the per-outcome form cost the
+      ;; traversals nothing either: two ways for a child to finish are two arrows, and
+      ;; `reachable`, `dead-ends`, `finishable` and `traps` walk them without being told
+      ;; that a state can complete in more than one way.
+      (for [s state, c (completions s)]
+        (cond-> {:from (:id s) :to (:to c) :done true}
+          (:outcome c) (assoc :outcome (:outcome c))
+          (:yield c) (assoc :yield (m/schema (:yield c))))))}))
 
 ;;; ------------------------------------------------------------------- reading
+
+(defn- attrs
+  "What a node holds, or nil where the shape holds no such node."
+  [shape id]
+  (get-in shape [::nodes id]))
 
 (defn states
   "The ids of every state in the shape."
   {:malli/schema [:=> [:cat Shape] [:sequential Id]]}
   [shape]
-  (uber/nodes shape))
+  (keys (::nodes shape)))
 
 (defn initial-id
   "The state a run starts in. The shape knows the NODE; the starting data is still an
    argument to the reduction."
   {:malli/schema [:=> [:cat Shape] Id]}
   [shape]
-  (first (filter #(uber/attr shape % :initial) (uber/nodes shape))))
+  (first (filter #(:initial (attrs shape %)) (states shape))))
 
 (defn final?
   {:malli/schema [:=> [:cat Shape Id] :boolean]}
   [shape id]
-  (boolean (uber/attr shape id :final)))
+  (boolean (:final (attrs shape id))))
 
 (defn machine
   "The machine NESTED in this node, or nil. A child is an ordinary Shape and is checked,
    compiled and drawn as one — which is what makes nesting cost so little."
   {:malli/schema [:=> [:cat Shape Id] [:maybe Shape]]}
   [shape id]
-  (uber/attr shape id :machine))
+  (:machine (attrs shape id)))
 
 (defn machines
   "{node id -> the machine nested in it}, for every node that has one. Empty for a flat
@@ -1145,10 +1173,43 @@
    built out of already-built children, so no shape can contain itself."
   {:malli/schema [:=> [:cat Shape] [:map-of Id Shape]]}
   [shape]
-  (into {} (for [id (uber/nodes shape)
+  (into {} (for [id (states shape)
                  :let [m (machine shape id)]
                  :when m]
              [id m])))
+
+(defn state-schema
+  "The map schema a state DECLARES — its data without :id, :instance and :sub, as `state`
+   was given it, compiled. What `enter-schema` and `patch-schema` derive from, and what a
+   structural check merges a patch over."
+  {:malli/schema [:=> [:cat Shape Id] MapSchema]}
+  [shape id]
+  (:schema (attrs shape id)))
+
+(defn- adjacent
+  "{state -> #{state}} over every edge, read from its `near` end to its `far` one, with an
+   entry for every state whether or not an edge touches it."
+  [shape near far]
+  (reduce (fn [m e] (update m (near e) conj (far e)))
+          (zipmap (states shape) (repeat #{}))
+          (::edges shape)))
+
+(defn successors
+  "{state -> the states ONE EDGE AWAY}, for every state, over BOTH KINDS of edge — one an
+   event fires and one a completion does. Empty where a state has nowhere to go.
+
+   WHAT A TRAVERSAL WALKS, and why a completion transition cost the structural checks
+   nothing: it is an edge, so it is here without anybody being told."
+  {:malli/schema [:=> [:cat Shape] [:map-of Id [:set Id]]]}
+  [shape]
+  (adjacent shape :from :to))
+
+(defn predecessors
+  "{state -> the states ONE EDGE BEFORE it}, for every state — `successors` with every edge
+   reversed, which is what a traversal BACKWARDS from an ending walks."
+  {:malli/schema [:=> [:cat Shape] [:map-of Id [:set Id]]]}
+  [shape]
+  (adjacent shape :to :from))
 
 (defn transitions
   "Every edge FIRED BY AN EVENT as a plain map — :from :event :to, and the event's
@@ -1167,9 +1228,7 @@
      :says "A reading layer between the graph and its consumers is what lets a structural change stay local. Moving the handler onto the event changed shape.clj AND NOTHING ELSE, because everything above reads a shape through this function; adding a whole new KIND of edge, the completion, touched it and nothing above it. Twice now."
      :cites [:a-handler-belongs-to-the-event :a-completion-is-an-edge-and-not-a-node-attribute]}]}
   [shape]
-  (for [e (uber/edges shape)
-        :when (uber/attr shape e :event)]
-    (into {:from (uber/src e) :to (uber/dest e)} (uber/attrs shape e))))
+  (filter :event (::edges shape)))
 
 (defn reports
   "{event-id -> {:report <fn>, :reads <schema>}} for every event a DRIVER produces —
@@ -1231,8 +1290,8 @@
    A NESTED MACHINE IS ITS CHILD'S FINGERPRINT, so the recursion terminates and a change deep
    in a child still moves the parent.
 
-   ORDERED BY PRINTED FORM, because ubergraph keeps nodes and out-edges in SETS and a
-   fingerprint that depended on iteration order would not be one."
+   ORDERED BY PRINTED FORM, because a shape keeps its nodes in a map and its edges in a SET,
+   and a fingerprint that depended on iteration order would not be one."
   {:malli/schema [:=> [:cat Shape] :map]
    :knowledge
    [{:id :closures-are-erased-and-not-rendered
@@ -1244,7 +1303,7 @@
   {:states
    (vec (sort-by pr-str
                  (for [id (states sh)
-                       :let [a (uber/attrs sh id)]]
+                       :let [a (attrs sh id)]]
                    (plain [id (cond-> {:schema (m/form (:schema a))
                                        :initial (boolean (:initial a))
                                        :final (boolean (:final a))
@@ -1334,7 +1393,7 @@
    on an id and never a search — nothing is guarded, so there is still no ambiguity to prove
    away, which is the difference between this and a guard.
 
-   ORDERED, because ubergraph keeps out-edges in a SET and a runtime that depended on
+   ORDERED, because a shape keeps its edges in a SET and a runtime that depended on
    iteration order would not be one.
 
    THE EDGE IS THE ONLY RECORD OF IT. `state` takes :done, :yield and :seed, the constructor
@@ -1342,11 +1401,9 @@
    places saying one thing is how a shape drifts from itself."
   {:malli/schema [:=> [:cat Shape] [:map-of Id [:vector :map]]]}
   [shape]
-  (->> (for [e (uber/edges shape)
-             :when (uber/attr shape e :done)
-             :let [y (uber/attr shape e :yield)
-                   o (uber/attr shape e :outcome)]]
-         [(uber/src e) (cond-> {:to (uber/dest e)} o (assoc :outcome o) y (assoc :yield y))])
+  (->> (for [{:keys [from to done yield outcome]} (::edges shape)
+             :when done]
+         [from (cond-> {:to to} outcome (assoc :outcome outcome) yield (assoc :yield yield))])
        (reduce (fn [m [from c]] (update m from (fnil conj []) c)) {})
        (into {} (map (fn [[from cs]] [from (vec (sort-by pr-str cs))])))))
 
@@ -1357,7 +1414,7 @@
    edge — a seed is about entering this state, which is not a transition anywhere."
   {:malli/schema [:=> [:cat Shape Id] [:maybe MapSchema]]}
   [shape id]
-  (uber/attr shape id :seed))
+  (:seed (attrs shape id)))
 
 (defn combines
   "{k {:combine f :commutes? bool :schema S}} for a NODE — what its own schema declares
@@ -1366,7 +1423,7 @@
    `merge` always did. See `combines-of`."
   {:malli/schema [:=> [:cat Shape Id] :map]}
   [shape id]
-  (combines-of (uber/attr shape id :schema)))
+  (combines-of (state-schema shape id)))
 
 (defn enter-schema
   "What a state is validated against ON ENTER: its own schema with :id written in, and
@@ -1380,7 +1437,7 @@
   [shape id]
   (mu/merge (cond-> [:map [:id [:= id]] [:instance {:optional true} Instance]]
               (machine shape id) (conj [:sub [:map [:id Id]]]))
-            (uber/attr shape id :schema)))
+            (state-schema shape id)))
 
 (defn patch-schema
   "What a HANDLER may answer for a state: the state's own schema, EVERY KEY OPTIONAL and
@@ -1410,7 +1467,7 @@
      :when "2026-09-03"
      :cites [:a-state-has-an-id :the-schema-describes-the-map-without-the-machinery-keys]}]}
   [shape id]
-  (-> (uber/attr shape id :schema)
+  (-> (state-schema shape id)
       (mu/optional-keys)
       (mu/update-properties assoc :closed true)))
 

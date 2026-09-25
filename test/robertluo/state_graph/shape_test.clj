@@ -4,8 +4,7 @@
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [robertluo.state-graph.shape :as shape]
-            [robertluo.state-graph.test-support :as ts]
-            [ubergraph.core :as uber]))
+            [robertluo.state-graph.test-support :as ts]))
 
 (use-fixtures :once ts/instrumented)
 
@@ -18,12 +17,48 @@
                 (empty? (apply shape/problems parts))))
 
 (defspec no-transition-is-lost-to-the-graph 100
-  ;; Not a test that ubergraph adds an edge — a test that `multidigraph` was the right
+  ;; Not a test that a set holds an edge — a test that a MULTI-digraph was the right
   ;; call. Two events joining one pair of states are two edges, and a plain digraph
   ;; would silently keep one of them, which is the kind of loss nothing else notices.
   (prop/for-all [parts ts/gen-shape]
                 (= (count (ts/parts-of :transition parts))
                    (count (shape/transitions (apply shape/shape parts))))))
+
+(defspec a-well-formed-completing-shape-has-no-problems 100
+  ;; The generator's own claim, and the checker's: completions, outcomes and nesting laid
+  ;; over a well-formed shape accuse nothing. Every property over `gen-completing-shape`
+  ;; rests on this one.
+  (prop/for-all [parts ts/gen-completing-shape]
+                (empty? (apply shape/problems parts))))
+
+(defspec successors-are-the-declared-arrows-and-predecessors-their-reverse 100
+  ;; Against the PARTS and not the graph, so it is not the implementation restated: every
+  ;; state has an entry, every declared transition AND COMPLETION is an arrow, nothing else
+  ;; is, and `predecessors` is exactly `successors` turned round.
+  (prop/for-all [parts ts/gen-completing-shape]
+                (let [sh (apply shape/shape parts)
+                      arrows (ts/arrows parts)
+                      pairs (fn [m] (set (for [[a bs] m, b bs] [a b])))]
+                  (and (= (set (map :id (ts/parts-of :state parts)))
+                          (set (keys (shape/successors sh)))
+                          (set (keys (shape/predecessors sh))))
+                       (= arrows (pairs (shape/successors sh)))
+                       (= (set (map (fn [[a b]] [b a]) arrows)) (pairs (shape/predecessors sh)))))))
+
+(defspec continuations-are-the-declared-completions 100
+  ;; What each state's :done SAID, unconditional or per outcome, and no state that said
+  ;; nothing — read back through the edges they became.
+  (prop/for-all [parts ts/gen-completing-shape]
+                (let [cs (shape/continuations (apply shape/shape parts))]
+                  (= (ts/completions-of parts)
+                     (set (for [[from es] cs, e es] [from (:outcome e) (:to e)]))))))
+
+(deftest a-shape-is-a-closed-map
+  (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})
+                        (shape/state :b [:map] {:final true}))]
+    (is (m/validate shape/Shape sh))
+    (is (not (m/validate shape/Shape (assoc sh :junk 1)))
+        "a key assoc'd onto a shape is refused, where ubergraph dropped it without a word")))
 
 ;;; ------------------------------------------------------------------- the checks
 
@@ -232,7 +267,7 @@
 (deftest two-edges-on-one-event-must-be-PROVABLY-exclusive
   ;; The one check here that demands proven SAFETY rather than reporting a proven fault,
   ;; because determinism is the contract. And an ordered `first match wins` is not the
-  ;; alternative on offer: ubergraph keeps out-edges in a SET.
+  ;; alternative on offer: a shape keeps its edges in a SET.
   (let [parts [(shape/state :a [:map] {:initial true})
                (shape/state :b [:map])
                (shape/state :c [:map] {:final true})
@@ -306,12 +341,12 @@
   (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})
                         (shape/state :b [:map] {:final true}))]
     (testing "the graph has the arrow"
-      (is (= [:b] (map uber/dest (uber/out-edges sh :a)))))
+      (is (= #{:b} (get (shape/successors sh) :a))))
     (testing "`transitions` is about EVENTS and leaves it out"
       (is (empty? (shape/transitions sh))))
     (testing "`continuations` is where it is read, and nothing is left on the node"
       (is (= {:a [{:to :b}]} (shape/continuations sh)))
-      (is (nil? (uber/attr sh :a :done))))
+      (is (not (contains? (get-in sh [::shape/nodes :a]) :done))))
     (testing "and with no :outcome on it, which is what says EVERY way of finishing goes
               here — the form every shape written before outcomes existed has"
       (is (= [nil] (map :outcome (get (shape/continuations sh) :a)))))))
@@ -456,7 +491,7 @@
             (shape/state :done [:map] {:final true}))]
     (testing "one EDGE per outcome, which is what buys the traversals for nothing all over
               again: two ways for a child to finish are two arrows"
-      (is (= #{:paid :done} (set (map uber/dest (uber/out-edges sh :a)))))
+      (is (= #{:paid :done} (get (shape/successors sh) :a)))
       (is (= [{:outcome :lost :to :done}
               {:outcome :won :to :paid}]
              (mapv #(dissoc % :yield) (get (shape/continuations sh) :a)))))
@@ -476,8 +511,8 @@
                                          :done {:c1 {:to :z}}})
                  (shape/state :z [:map] {:final true})))))
     (testing "and a key naming NO state of the child is the same fault, not a throw —
-              `final?` reads an attribute off a node and ubergraph refuses one it does
-              not hold, so the commonest way to write this wrong is the way that escaped"
+              the commonest way to write this wrong, and once the way that escaped as the
+              graph library's error"
       (is (= [:unknown-outcome]
              (ok (shape/state :a [:map] {:initial true :machine child
                                          :done {:nope {:to :z}}})

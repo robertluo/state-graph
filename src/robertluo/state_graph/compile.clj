@@ -217,7 +217,7 @@
    THE VALUE IS A VECTOR OF CANDIDATES, because a guard lets one event lead two ways. It
    is still a LOOKUP and never a search: the candidates were proved DISJOINT before the
    shape was built, so at most one can admit an event and the order they sit in cannot
-   matter — which is just as well, ubergraph keeping out-edges in a set.
+   matter — which is just as well, a shape keeping its edges in a set.
 
    RECURSIVE, because nesting is: a child's own index sits under its parent's node, so a
    step or an `admits?` can descend without recomputing anything."

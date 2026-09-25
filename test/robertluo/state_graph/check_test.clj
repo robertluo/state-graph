@@ -19,6 +19,35 @@
 
 ;;; ----------------------------------------------------------------- properties
 
+;; THE TRAVERSALS AGAINST A REFERENCE MODEL. `ts/closure` is a FIXPOINT over the arrows the
+;; PARTS declare — a different algorithm over a different reading — so a fault in how a shape
+;; stores its edges or in how `walk` follows them cannot hide behind itself. Over
+;; `gen-completing-shape`, because a completion is an arrow too and `gen-shape` makes none.
+
+(defspec reachable-is-the-closure-from-the-initial-state 100
+  (prop/for-all [parts ts/gen-completing-shape]
+                (let [initial (:id (first (filter :initial (ts/parts-of :state parts))))]
+                  (= (ts/closure (ts/arrows parts) [initial])
+                     (check/reachable (apply shape/shape parts))))))
+
+(defspec finishable-is-the-closure-backwards-from-every-final 100
+  ;; And EVERY state where there is no final at all — the vacuous case is half the samples.
+  (prop/for-all [parts ts/gen-completing-shape]
+                (let [states (ts/parts-of :state parts)
+                      finals (map :id (filter :final states))]
+                  (= (if (seq finals)
+                       (ts/closure (set (map (fn [[a b]] [b a]) (ts/arrows parts))) finals)
+                       (set (map :id states)))
+                     (check/finishable (apply shape/shape parts))))))
+
+(defspec a-dead-end-is-a-state-no-arrow-leaves-that-nobody-called-final 100
+  (prop/for-all [parts ts/gen-completing-shape]
+                (let [departs (set (map first (ts/arrows parts)))]
+                  (= (set (for [s (ts/parts-of :state parts)
+                                :when (not (or (:final s) (departs (:id s))))]
+                            (:id s)))
+                     (set (check/dead-ends (apply shape/shape parts)))))))
+
 (defspec a-reduction-never-leaves-the-reachable-set 100
   ;; The invariant that ties the STATIC analysis to what actually runs, and the only
   ;; one that can catch either half being wrong: `reachable` walks the graph, the step
