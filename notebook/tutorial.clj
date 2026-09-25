@@ -556,7 +556,7 @@
    (sg/transition :paying :cancel   :cancelled)))
 
 ;; `:paying ⊞ 3 states` is the marker for a node that nests one. The child is not drawn
-;; inside its parent — graphviz clusters are not reachable through ubergraph — so a nested
+;; inside its parent — the drawing has no graphviz clusters — so a nested
 ;; machine is two pictures, and the parent's says where to look:
 
 (picture order)

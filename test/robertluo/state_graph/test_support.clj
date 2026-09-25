@@ -53,7 +53,12 @@
      :from "the author, 2026-09-16, of a suite asserting edge and coverage totals over a fixture: `these tests are very frigile, a classic anti-pattern.`"
      :when "2026-09-16"
      :supersedes [:the-count-is-a-repl-habit-and-not-an-assertion]
-     :cites [:the-instrument-count-caught-a-stale-repl]}]}
+     :cites [:the-instrument-count-caught-a-stale-repl]}
+    {:id :gen-shape-never-made-a-completion
+     :kind :lesson
+     :says "`gen-shape` generates no :done, no outcome, no nesting and no final, so when the graph under a shape was rewritten on 2026-09-25 every line handling a COMPLETION edge — successors, continuations, the traversals, the drawing — was covered by examples alone, and the suite was green for it. `gen-completing-shape` lays those roles over it. Its first cut made a dead end in 15 shapes of 500, `gen-shape` making every state depart somewhere, and a property over dead ends would have been asking almost nothing; the :sink role took it to 236. Each property over it was then shown to FAIL: `walk` stopping a hop short, the adjacency forgetting completions, `predecessors` left unreversed and `continuations` losing its outcomes were each caught by at least two."
+     :when "2026-09-25"
+     :cites [:the-shape-owns-its-graph :a-completion-is-an-edge-and-not-a-node-attribute]}]}
   (:require [clojure.test.check.generators :as gen]
             [malli.instrument :as mi]
             [robertluo.state-graph.shape :as shape]))
@@ -135,6 +140,100 @@
   "The parts of one kind, out of a generated shape."
   [kind parts]
   (filter #(= kind (:robertluo.state-graph.shape/kind %)) parts))
+
+(def ^:private completing-child
+  "A child that can finish TWO ways, so a parent nesting it can say where each outcome goes.
+   Its first state is not final, so the node nesting it does not complete on entry."
+  (shape/shape (shape/state :c0 [:map] {:initial true})
+               (shape/state :c1 [:map] {:final true})
+               (shape/state :c2 [:map] {:final true})
+               (shape/event :x [:map])
+               (shape/event :y [:map])
+               (shape/transition :c0 :x :c1)
+               (shape/transition :c0 :y :c2)))
+
+(defn- lay-roles
+  "`gen-shape`'s parts with a ROLE laid on each state, the i-th role on the i-th state:
+
+   :final   — {:final true}
+   :done    — an unconditional completion, on entry, to a state of HIGHER index, so no two
+              of them make a cycle; its own event edges go, being dead code beside it, and
+              so does every event nothing fires any more. The last state cannot go further
+              and stays plain.
+   :nest    — nests `completing-child` and says where each of its two outcomes goes. It
+              completes only when the child does, so it keeps its edges and may point
+              anywhere.
+   :sink    — loses its event edges and gains nothing: a DEAD END, which `gen-shape` almost
+              never makes because every state it generates departs somewhere.
+   :plain   — as generated.
+
+   Built to be well formed rather than filtered into it; the property over it says whether
+   it is."
+  [parts roles]
+  (let [states (vec (parts-of :state parts))
+        n (count states)
+        ids (mapv :id states)
+        role (fn [i] (let [[r a b] (nth roles i)]
+                       (if (and (= r :done) (= i (dec n))) [:plain a b] [r a b])))
+        states' (map-indexed
+                 (fn [i s]
+                   (let [[r a b] (role i)]
+                     (case r
+                       :final (assoc s :final true)
+                       :done  (assoc s :done (nth ids (+ i 1 (mod a (- n i 1)))))
+                       :nest  (assoc s :machine completing-child
+                                     :done {:c1 {:to (nth ids (mod a n))}
+                                            :c2 {:to (nth ids (mod b n))}})
+                       s)))
+                 states)
+        silenced (into (set (keep :id (filter #(and (:done %) (not (:machine %))) states')))
+                       (keep-indexed (fn [i id] (when (= :sink (first (role i))) id)) ids))
+        transitions (remove (comp silenced :from) (parts-of :transition parts))
+        fired (set (map :event transitions))]
+    (concat states'
+            (filter (comp fired :id) (parts-of :event parts))
+            transitions)))
+
+(def gen-completing-shape
+  "A WELL-FORMED shape with COMPLETION TRANSITIONS in it, as its parts: `gen-shape` with
+   finals, unconditional :done continuations and nesting nodes whose :done names a target per
+   outcome laid over it. All-plain roles give back a `gen-shape`, so nothing flat is lost.
+
+   WHAT IT IS FOR: a completion is an edge, and everything that walks the graph — `successors`,
+   `continuations`, `reachable`, `finishable`, `dead-ends`, the drawing — has to see it as one.
+   `gen-shape` never makes one, so without this none of that is asked of a generated shape."
+  (gen/bind gen-shape
+            (fn [parts]
+              (gen/fmap #(lay-roles parts %)
+                        (gen/vector (gen/tuple (gen/elements [:plain :plain :final :done :nest :sink])
+                                               gen/nat gen/nat)
+                                    (count (parts-of :state parts)))))))
+
+(defn completions-of
+  "Every completion the PARTS declare, as [from outcome to] — outcome nil for an
+   unconditional :done. Read off the state definitions and never off a built shape."
+  [parts]
+  (set (for [s (parts-of :state parts)
+             :let [d (:done s)]
+             :when d
+             [outcome to] (if (map? d) (map (fn [[o {:keys [to]}]] [o to]) d) [[nil d]])]
+         [(:id s) outcome to])))
+
+(defn arrows
+  "Every [from to] the PARTS declare — each transition, and each completion — the relation a
+   reference model walks, independent of how a shape stores it."
+  [parts]
+  (into (set (map (juxt :from :to) (parts-of :transition parts)))
+        (map (fn [[from _ to]] [from to]))
+        (completions-of parts)))
+
+(defn closure
+  "The states reachable from `roots` along `arrows`, by FIXPOINT — add every arrow's head
+   whose tail is in, until nothing changes. A reference model, deliberately not a traversal."
+  [arrows roots]
+  (loop [s (set roots)]
+    (let [s' (into s (for [[a b] arrows :when (s a)] b))]
+      (if (= s s') s (recur s')))))
 
 (def gen-map-schema
   "A small map schema. The keys come from a POOL OF THREE so that two generated

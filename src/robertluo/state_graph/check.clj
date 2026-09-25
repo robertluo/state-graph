@@ -9,7 +9,7 @@
    application shipping a working shape never has to. These are for the person
    writing the machine, and they are the checks no other FSM library has.
 
-   Requires the shape, ubergraph and malli."
+   Requires the shape and malli."
   {:knowledge
    [{:id :what-the-graph-buys
      :kind :decision
@@ -42,19 +42,28 @@
             [malli.generator :as mg]
             [malli.util :as mu]
             [robertluo.state-graph.shape :as shape]
-            [ubergraph.alg :as alg]
-            [ubergraph.core :as uber]
             [clojure.java.shell :as shell]
             [clojure.java.io :as io]))
 
 ;;; ------------------------------------------------------------------ the graph
+
+(defn- walk
+  "Every state reachable from `root` along `next-of` — a map from a state to the states one
+   edge away, as `shape/successors` and `shape/predecessors` answer — the root included."
+  [next-of root]
+  (loop [seen #{} stack [root]]
+    (if-let [id (peek stack)]
+      (if (seen id)
+        (recur seen (pop stack))
+        (recur (conj seen id) (into (pop stack) (next-of id))))
+      seen)))
 
 (defn reachable
   "The states a run can actually get to, from the one it starts in. This is why the
    shape has to know its :initial — reachability needs a root."
   {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
   [sh]
-  (set (alg/pre-traverse sh (shape/initial-id sh))))
+  (walk (shape/successors sh) (shape/initial-id sh)))
 
 (defn unreachable
   "States the shape declares and no run can ever be in. Not `has no in-edge`, which
@@ -73,10 +82,11 @@
    is not one — that is what :final is for."
   {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
   [sh]
-  (into (sorted-set)
-        (comp (remove #(seq (uber/out-edges sh %)))
-              (remove #(shape/final? sh %)))
-        (shape/states sh)))
+  (let [next-of (shape/successors sh)]
+    (into (sorted-set)
+          (comp (remove #(seq (next-of %)))
+                (remove #(shape/final? sh %)))
+          (shape/states sh))))
 
 (defn finishable
   "The states from which a run can still reach AN ENDING — a :final, or somewhere a
@@ -96,8 +106,8 @@
   (let [finals (filter #(shape/final? sh %) (shape/states sh))]
     (if (empty? finals)
       (set (shape/states sh))
-      (let [back (uber/transpose sh)]
-        (into #{} (mapcat #(alg/pre-traverse back %)) finals)))))
+      (let [back (shape/predecessors sh)]
+        (into #{} (mapcat #(walk back %)) finals)))))
 
 (defn traps
   "Reachable states from which NO ENDING can be reached. The machine stays alive, goes
@@ -259,7 +269,7 @@
      :cites [:what-is-checked-must-be-what-runs :sub-is-the-machinerys]}]}
   [sh {:keys [from to out]}]
   (when out
-    (cond-> (-> (mu/merge (uber/attr sh from :schema) out)
+    (cond-> (-> (mu/merge (shape/state-schema sh from) out)
                 (mu/assoc :id [:= to]))
       (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
 
@@ -282,7 +292,7 @@
      :says "A completion transition is checked HARDER than an event edge and is never :undeclared: it carries no closure, so what arrives is the state itself and its schema is known exactly. :sub is not carried, `arrive` dropping and re-seeding it, and this starts from the node's own schema, which never held it — so the two agree without either mentioning the other."
      :cites [:what-is-checked-must-be-what-runs :a-completion-is-an-edge-and-not-a-node-attribute]}]}
   [sh from {:keys [to yield]}]
-  (let [base (cond-> (uber/attr sh from :schema) yield (mu/merge yield))]
+  (let [base (cond-> (shape/state-schema sh from) yield (mu/merge yield))]
     (cond-> (mu/assoc base :id [:= to])
       (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
 
@@ -1132,11 +1142,10 @@
    in brackets, the same way a guard is: two dashed arrows leaving one node are two different
    structural facts, and a drawing that cannot tell them apart is showing a machine that does
    not exist."
-  [sh e]
-  (if-let [ev (uber/attr sh e :event)]
-    (let [w (uber/attr sh e :when)]
-      (str (name ev) (when w (str " [" (guard-label w) "]"))))
-    (if-let [o (uber/attr sh e :outcome)] (str "[" (name o) "]") "")))
+  [{ev :event w :when o :outcome}]
+  (if ev
+    (str (name ev) (when w (str " [" (guard-label w) "]")))
+    (if o (str "[" (name o) "]") "")))
 
 (defn labelled
   "The shape's DRAWING AS DATA: one entry per node and one per edge, each carrying only what
@@ -1183,8 +1192,15 @@
     {:id :graphviz-clusters-are-not-reachable-through-viz-graph
      :kind :lesson
      :says "ubergraph's viz-graph builds its own dorothy element list with no hook for a graphviz CLUSTER, so a nested child is not drawn inside its parent. The alternatives were copying ubergraph's private dotid and sanitize-attrs, or rewriting the child's dot to prefix every node id — a small and fragile compiler. Instead the parent MARKS the node and the child is asked for its own picture."
-     :cites [:a-node-is-labelled-by-its-id]}]}
+     :cites [:a-node-is-labelled-by-its-id]}
+    {:id :a-refusal-was-borrowed-from-the-graph-library
+     :kind :lesson
+     :says "`draw!` refused a value that is not a shape only because ubergraph's `nodes` threw on it: nothing here asked. Once the graph became a plain map, a keyword read as a shape with no states, `labelled` answered an empty drawing and `draw!` rendered it without a word — caught by draw_test's two refusals. So `labelled`, which `dot` and `draw!` both render, refuses what is not a `Shape` in so many words."
+     :when "2026-09-25"
+     :cites [:the-shape-owns-its-graph :draw-swallows-nothing]}]}
   [sh]
+  (when-not (m/validate shape/Shape sh)
+    (throw (ex-info "Not a shape" {:problems (shape/explain shape/Shape sh)})))
   (let [nodes (mapv (fn [id]
                        (let [child (shape/machine sh id)
                              base {:id id :label (node-label* sh id)}]
@@ -1193,11 +1209,13 @@
                            base)))
                      (shape/states sh))
         edges (mapv (fn [e]
-                       {:from (uber/src e)
-                        :to (uber/dest e)
-                        :label (edge-label sh e)
-                        :done (boolean (uber/attr sh e :done))})
-                     (uber/edges sh))]
+                      {:from (:from e)
+                       :to (:to e)
+                       :label (edge-label e)
+                       :done (boolean (:done e))})
+                    (concat (shape/transitions sh)
+                            (for [[from cs] (shape/continuations sh), c cs]
+                              (assoc c :from from :done true))))]
     {:nodes nodes :edges edges}))
 
 (defn- dot-escape
@@ -1229,8 +1247,8 @@
    HOW: this is built directly from `labelled`'s plain drawing — one node statement per
    entry of :nodes carrying its :label, one edge statement per entry of :edges from :from to
    :to carrying its :label, dashed where :done is true — with every id and label quoted for
-   graphviz. It calls no ubergraph rendering function, so it needs no graph value, no writer
-   and no file: it is a pure function of the shape, and the labels are exactly `labelled`'s."
+   graphviz. It calls no graph library's renderer, so it needs no writer and no file: it is a
+   pure function of the shape, and the labels are exactly `labelled`'s."
   {:malli/schema [:=> [:cat shape/Shape] :string]
    :knowledge
    [{:id :dot-arrived-from-a-consumer
