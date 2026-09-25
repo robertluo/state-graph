@@ -122,17 +122,17 @@
   Context
   "HOW A VALUE BECOMES AVAILABLE, and what becomes of an event nobody handled. The only
    thing `compile` is parameterised by, and the reason this namespace never learns what a
-   deferred is: the async layer passes manifold's, and nothing here requires manifold.
+   deferred or a channel is: the async layer passes its own, and nothing here requires one.
 
    :then    a value and a continuation. Answers whatever the continuation answers, in
-            whatever container the caller works in — (fn [v f] (f v)) here, d/chain there.
+            whatever container the caller works in — (fn [v f] (f v)) here, a go block there.
 
             IT MUST FLATTEN, which is a BIND and not a map: where the continuation answers
             a container, `then` answers THAT container and never one wrapped around it.
             The words above always said so — `answers whatever the continuation answers` —
             and nothing depended on it until the step came apart into `phases`, both of
             whose halves answer a container, so the step now composes two binds where it
-            used to take one. d/chain flattens; the default answers f's value untouched.
+            used to take one. A go-block bind flattens; the default answers f's value untouched.
             An fmap in this slot yields a container of a container and fails at the seam
             rather than silently, `applying` finding no :depth on what it was handed.
    :pure    a value already available, put into that same container.
@@ -161,9 +161,11 @@
 
    A DEFERRED HERE IS DEREFERENCED rather than refused, because synchronous is precisely
    what `block until it is available` means, so there is nothing to refuse.
-   clojure.lang.IDeref is CLOJURE'S and not manifold's — a manifold deferred implements
-   it, which is what makes @d work — so this needs no dependency to honour one. A
-   handler's answer is a MAP and a map is not IDeref, so the common path is untouched.
+   clojure.lang.IDeref is CLOJURE'S — a delay, a promise and a future implement it — so
+   this needs no dependency to honour one. A handler's answer is a MAP and a map is not
+   IDeref, so the common path is untouched. A CHANNEL IS NOT IDeref, so a shape whose
+   handlers answer channels needs a Context that takes from them, which only a layer that
+   knows what a channel is can give.
 
    The cost, said out loud: this can block for ever. No timeout is chosen because that is
    policy; clojure.core/deref has a 3-arity if a bounded wait is ever wanted."
@@ -668,7 +670,7 @@
    refuses a typo, and never by a special case.
 
    WITH NO CONTEXT the step is synchronous and answers a State, which is what Step says.
-   With one, the return type is the CALLER'S to know — a deferred State under manifold —
+   With one, the return type is the CALLER'S to know — a channel of a State under core.async —
    so that arity promises a function and no more."
   {:malli/schema [:function [:=> [:cat shape/Shape] Step]
                             [:=> [:cat shape/Shape [:maybe Context]] ifn?]]

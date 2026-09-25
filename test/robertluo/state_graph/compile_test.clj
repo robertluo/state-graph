@@ -139,12 +139,10 @@
 
 (deftest a-deferred-under-the-default-is-dereferenced
   ;; The decision was `just deref it`, and the mechanism is clojure.lang.IDeref rather
-  ;; than anything of manifold's. THAT is what this proves, and it proves it with
+  ;; than anything of an async library's. THAT is what this proves, and it proves it with
   ;; CLOJURE'S OWN derefables — a delay and a promise are both IDeref — so the claim is
-  ;; tested today, with no manifold on the classpath at all.
-  ;;
-  ;; What is NOT proven here and stays UNVERIFIED: that manifold's Deferred implements
-  ;; IDeref. That is read and reasoned, and is to be checked the day manifold lands.
+  ;; tested with no async library in sight. A core.async channel is NOT IDeref; see the
+  ;; async namespace's `blocking` for the Context that takes from one.
   (doseq [[what wrap] [["a delay"   #(delay %)]
                        ["a promise" #(doto (promise) (deliver %))]
                        ["a future"  #(future %)]
@@ -177,13 +175,13 @@
       (is (= 2 (count @seen))))))
 
 (deftest the-container-is-the-callers
-  ;; :then and :pure are what keep manifold OUT of the core: swap them and the step
+  ;; :then and :pure are what keep any async library OUT of the core: swap them and the step
   ;; answers something else entirely, while compile never learns what that something is.
   ;; A one-key box stands in for a deferred — the point is that BOTH paths route through
   ;; the context, the transition through :then and the miss through :pure.
   ;;
   ;; THE BOX IS A LAWFUL BIND AND HAS TO BE. `then` unwraps its input and answers exactly
-  ;; what the continuation answers, boxing only what is not already boxed — d/chain's own
+  ;; what the continuation answers, boxing only what is not already boxed — a go-block bind's own
   ;; behaviour, and what Context asks for. An fmap here (box (f v)) instead reads as a
   ;; container of a container the moment the step composes two of them, which is what
   ;; `phases` does.
@@ -345,7 +343,7 @@
 (deftest a-nested-handler-may-answer-later
   ;; The Context composes ACROSS the nesting boundary: the child is compiled with the same
   ;; one, so a child handler may answer a derefable wherever a parent's may. Asserted with
-  ;; clojure's own delay, so this needs no manifold to prove.
+  ;; clojure's own delay, so this needs no async library to prove.
   (let [g (shape/shape
            (shape/state :out [:map] {:initial true})
            (shape/state :in  [:map] {:machine (shape/shape

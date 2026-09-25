@@ -32,8 +32,7 @@
      :kind :lesson
      :says "The cross-instance interleaving on :states is visible and is not deterministic, so the page says the ROW ORDER is not promised and shows the per-instance paths beside it, which are. A tutorial that asserted the interleaved order would flake."
      :cites [:parallel-is-across-instances]}]}
-  (:require [manifold.deferred :as d]
-            [manifold.stream :as s]
+  (:require [clojure.core.async :as a]
             [robertluo.state-graph :as sg]
             [robertluo.state-graph.shape :as shape]
             [scicloj.kindly.v4.kind :as kind]))
@@ -202,23 +201,29 @@
 
 ;; ## Running it: the stream
 ;;
-;; The other door. `sg/run` takes a source of events and answers a source of results and a
-;; deferred. **The caller owns the lifecycle in all three** — this is the same reduction with
+;; The other door. `sg/run` takes a channel of events and answers a channel of results and a
+;; promise-chan. **The caller owns the lifecycle in all three** — this is the same reduction with
 ;; the loop shipped, not a different kind of machine.
 
 (defn fed
-  "A source carrying exactly these events, then closed."
+  "A channel carrying exactly these events, then closed."
   [events]
-  (let [in (s/stream (max 1 (count events)))]
-    (s/put-all! in events)
-    (s/close! in)
+  (let [in (a/chan (max 1 (count events)))]
+    (a/onto-chan!! in events)
     in))
+
+(defn within
+  "What `ch` delivers within `ms`, or ::timeout — a page waits on a machine for a BOUNDED
+   time, or a mistake here would hang the render."
+  [ms ch]
+  (let [[v port] (a/alts!! [ch (a/timeout ms)])]
+    (if (= port ch) v ::timeout)))
 
 (def ran
   (sg/run task {:what "write the tutorial"}
           (fed [{:id :start :who "ada"} {:id :finish} {:id :finish}])))
 
-(deref (s/reduce conj [] (:states ran)) 1000 ::timeout)
+(within 1000 (a/into [] (:states ran)))
 
 ;; `:states` carries one **transition result** per event: what the machine was told, the
 ;; state it produced, and whether it `:fired` at all. That last field is the answer to the
@@ -230,19 +235,20 @@
 ;; This library **stores nothing**. The results *are* the history, and writing them down is
 ;; yours — which is why they carry the event and not just the state.
 
-(deref (:done ran) 1000 ::timeout)
+(within 1000 (:done ran))
 
-;; `:done` is a deferred `{instance -> final state}`. Nobody named a machine here, so the
+;; `:done` is a promise-chan delivering `{instance -> final state}`. Nobody named a machine here, so the
 ;; one machine is under `nil`.
 ;;
-;; A defect belongs on `:done` and never on a stream of things that happened. `d/catch` is
-;; manifold's combinator, not a bare try/catch:
+;; A defect belongs on `:done` and never on a stream of things that happened. A channel has
+;; no error of its own, so `:done` delivers **the exception itself** — the same object, so
+;; nothing it said is lost and `ex-data` is there to read:
 
-(-> (sg/run task {:what "x"} (fed [{:id :start :who 42}]))
-    :done
-    (d/catch ex-data)
-    (deref 1000 ::timeout)
-    :crossing)
+(->> (sg/run task {:what "x"} (fed [{:id :start :who 42}]))
+     :done
+     (within 1000)
+     ex-data
+     :crossing)
 
 ;; ## Running it: the crank
 ;;
@@ -364,7 +370,7 @@
 [(mapv :id (sg/drive gather [])) (drive/where gather (sg/drive gather []))]
 
 ;; The reports go through `:reports`, which defaults to running them in order. Hand it one
-;; that runs them at once — `d/zip` over `d/future`, say — and a proven join costs the slower
+;; that runs them at once — a `future` per report, say — and a proven join costs the slower
 ;; of the two rather than the sum. This layer depends on no stream library either way.
 ;;
 ;; ### And the graph can be asked the same question
@@ -479,7 +485,7 @@
   (sg/run pipeline {} (fed log)))
 
 (def history
-  (deref (s/reduce conj [] (:states published)) 5000 ::timeout))
+  (within 5000 (a/into [] (:states published))))
 
 ;; The history a caller would store — one row per event, whatever became of it:
 
@@ -508,7 +514,7 @@
 
 ;; **And each machine ends somewhere the shape allows**, carrying everything it gathered:
 
-(deref (:done published) 5000 ::timeout)
+(within 5000 (:done published))
 
 ;; And note what the published manuscript does **not** carry: no `:reviewer`, no `:notes`
 ;; from a review round three transitions back, no `:attempt` from the retry. A node holds

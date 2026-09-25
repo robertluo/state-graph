@@ -16,8 +16,15 @@ The first version meant to be used from outside the repository it was built in.
   licence had never had.
 - Every function written by the machine carries the library's own `shape/Shape` in its
   signature.
-- manifold 0.5.0, test.check 1.1.3. test.check is a runtime dependency on purpose:
+- core.async 1.9.865, test.check 1.1.3. test.check is a runtime dependency on purpose:
   `check/laws` generates through malli.generator.
+- core.async replaces manifold, towards ClojureScript: `.async` is `.cljc`. `run`, `async/drive`
+  and `async/fan` answer a channel of results and a promise-chan for `:done`, and take a
+  channel of events. A step that throws delivers the exception itself on `:done`, unwrapped.
+  A handler may answer a channel, delivering its map or an exception; `async/blocking` runs
+  such a shape synchronously on the JVM, where `compile`'s default still derefs a delay, a
+  promise or a future. `fan` delivers the defect that stopped any one machine rather than
+  waiting on it for ever.
 - No graph library: ubergraph is gone, and with it loom, potemkin's graph type, specter,
   dorothy, two priority maps and a ClojureScript 1.7.170 that had ridden onto every JVM
   classpath. A shape is a plain map, `{::nodes {id attrs} ::edges #{edge}}`, and `shape/Shape`

@@ -22,8 +22,8 @@
                      event, so it goes in a fold, a transducer, core.async, a test, or
                      anything else that can hold an accumulator.
 
-     the stream    — (run sh {} events) -> {:states :done}. A source of events in, a
-                     source of Transitions out. The state lives in a manifold loop's
+     the stream    — (run sh {} events) -> {:states :done}. A channel of events in, a
+                     channel of Transitions out. The state lives in a go loop's
                      accumulator exactly as it lives in reduce's; there is no cell
                      holding it and no object to own. `run` is a CALLER THIS LIBRARY
                      SHIPS, not a second kind of machine.
@@ -528,14 +528,14 @@
 ;;; ----------------------------------------------------------------- the stream
 
 (defn run
-  "A shape, the data every machine starts with, and a source of events -> {:states :done}.
+  "A shape, the data every machine starts with, and a channel of events -> {:states :done}.
 
-   :states is a source of Transitions, one per event, closed when no more are coming.
+   :states is a channel of Transitions, one per event, closed when no more are coming.
    CONSUME IT, OR :done MAY NEVER RESOLVE — backpressure is real, so a machine whose
    results nobody reads stops rather than racing ahead.
 
-   :done is a deferred {instance -> final state}, or an error carrying whatever the step
-   threw. A caller who named nothing finds their machine under nil.
+   :done is a promise-chan delivering {instance -> final state}, or the exception the step
+   threw, as it was thrown. A caller who named nothing finds their machine under nil.
 
    ONE FUNCTION FOR ONE MACHINE AND FOR MANY, because the stream is partitioned on
    :instance and one partition is one machine — all of them at once. That is where the
@@ -552,7 +552,7 @@
    state is ever wrong; what changes is the history, which should say what happened. A
    caller who wants strict arrival order everywhere drives `async/drive` with no licence.
 
-   Handlers may answer deferreds here, which is the point of the door: a machine waiting on
+   Handlers may answer channels here, which is the point of the door: a machine waiting on
    I/O holds no thread, and a slow handler slows only its own machine."
   {:malli/schema [:=> [:cat shape/Shape :map async/Source] async/Machine]
    :knowledge
