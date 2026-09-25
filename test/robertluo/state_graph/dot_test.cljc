@@ -70,3 +70,26 @@
       (and (string? (dot sh))
            (str/starts-with? (dot sh) "digraph")
            (str/includes? (dot sh) "->")))))
+
+(deftest one-shape-is-one-drawing-on-every-host
+  ;; PINNED, as a fingerprint is, and for the same reason: this suite runs on node as well as
+  ;; on the JVM, and the edges come from a SET the two iterate differently — so a literal
+  ;; here is what proves the hosts draw alike. See :a-drawing-is-in-printed-order.
+  (is (= (str "digraph {\n"
+              "  \"done\" [label=\"◼ done\"];\n"
+              "  \"idle\" [label=\"▸ idle\"];\n"
+              "  \"running\" [label=\"running\"];\n"
+              "  \"idle\" -> \"running\" [label=\"start\"];\n"
+              "  \"running\" -> \"done\" [label=\"stop\"];\n"
+              "  \"running\" -> \"running\" [label=\"set\"];\n"
+              "}\n")
+         (dot (shape/shape
+               (shape/state :idle [:map] {:initial true})
+               (shape/state :running [:map [:n :int]])
+               (shape/state :done [:map [:n :int]] {:final true})
+               (shape/event :start [:map [:seed :int]] (fn [e] {:n (:seed e)}) [:map [:n :int]])
+               (shape/event :set [:map [:to :int]] (fn [e] {:n (:to e)}) [:map [:n :int]])
+               (shape/event :stop [:map] (constantly {}))
+               (shape/transition :idle :start :running)
+               (shape/transition :running :set :running)
+               (shape/transition :running :stop :done))))))

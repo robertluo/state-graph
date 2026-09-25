@@ -23,6 +23,9 @@ The first version meant to be used from outside the repository it was built in.
   `async/blocking` are the JVM's alone. `fingerprint` computes SHA-256 itself and is the
   same on both hosts; every fingerprint is unchanged. `compile`'s missed-event sentinel is
   compared with `=`, which ClojureScript needed.
+- A drawing (`labelled`, and so `dot` and `draw!`) orders its nodes by id and its edges by
+  printed form, so one shape is one drawing on both hosts. Nodes followed declaration order
+  before, and only for shapes of eight states or fewer.
 - The implementation namespaces are renamed, since in ClojureScript a namespace `a.b.c` and
   the facade's var `a.b/c` are one JavaScript path: `robertluo.state-graph.shape` is
   `.shapes`, `.compile` is `.compiler`, `.drive` is `.crank`. The facade is unchanged, and
