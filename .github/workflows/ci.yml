@@ -1,0 +1,40 @@
+# The toolchain is devenv.nix and nothing else, so CI and a contributor's shell run the
+# same JDK, Clojure CLI and graphviz. `devenv test` is `clojure -T:build ci`: clean, both
+# suites, the jar.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The version is 0.1.<commit count>; a shallow clone would count one.
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+
+      # devenv's public binary cache, read-only: no token, nothing pushed.
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install devenv
+        run: nix profile install nixpkgs#devenv
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: ${{ runner.os }}-deps-${{ hashFiles('deps.edn') }}
+
+      - name: Test
+        run: devenv test
