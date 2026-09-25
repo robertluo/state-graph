@@ -1,6 +1,7 @@
 (ns robertluo.state-graph.shape-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check.clojure-test :refer [defspec]]
+            [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [robertluo.state-graph.shape :as shape]
@@ -52,6 +53,55 @@
                 (let [cs (shape/continuations (apply shape/shape parts))]
                   (= (ts/completions-of parts)
                      (set (for [[from es] cs, e es] [from (:outcome e) (:to e)]))))))
+
+(defspec a-path-is-declared-steps-to-every-state-a-run-reaches 100
+  ;; Against the PARTS: the states on offer are the closure from :initial over what was
+  ;; declared, and every step is a declared transition or a declared completion. That the
+  ;; path is SHORTEST is `graph`'s property and is asserted there.
+  (prop/for-all [parts ts/gen-completing-shape]
+                (let [sh (apply shape/shape parts)
+                      initial (shape/initial-id sh)
+                      declared (into (set (map (juxt :from :event :to) (ts/parts-of :transition parts)))
+                                     (map (fn [[from outcome to]] [from [:done outcome] to]))
+                                     (ts/completions-of parts))
+                      ps (shape/paths sh initial)]
+                  (and (= (ts/closure (ts/arrows parts) [initial]) (set (keys ps)))
+                       (every? (fn [[to p]]
+                                 (and (= initial (:from (first p) initial))
+                                      (= to (:to (peek p) initial))
+                                      (every? (fn [{:keys [from event done outcome] t :to}]
+                                                (declared [from (if done [:done outcome] event) t]))
+                                              p)))
+                               ps)))))
+
+(def ^:private gen-renamed-shape
+  "Well-formed parts, the same parts with every state renamed onto a fresh id, and a state
+   that could be made :final without breaking them — one with no :done — or nil."
+  (gen/bind ts/gen-completing-shape
+            (fn [parts]
+              (let [ids (map :id (ts/parts-of :state parts))]
+                (gen/fmap (fn [shuffled]
+                            (let [f (zipmap ids (map #(keyword (str "r" (name %))) shuffled))]
+                              [parts (ts/rename-states parts f)
+                               (first (for [s (ts/parts-of :state parts)
+                                            :when (not (or (:done s) (:final s)))]
+                                        (f (:id s))))]))
+                          (gen/shuffle ids))))))
+
+(defspec a-shape-with-its-states-renamed-is-the-same-machine 100
+  ;; The renaming answered is CHECKED, not compared to the one that made the copy — a shape
+  ;; with a symmetry has more than one: renaming the original by it must give the copy's
+  ;; fingerprint, which is what `the same machine` was defined to mean.
+  (prop/for-all [[a b _] gen-renamed-shape]
+                (let [m (shape/isomorphism (apply shape/shape a) (apply shape/shape b))]
+                  (and (some? m)
+                       (= (shape/fingerprint (apply shape/shape (ts/rename-states a m)))
+                          (shape/fingerprint (apply shape/shape b)))))))
+
+(defspec a-renamed-copy-with-one-more-final-is-a-different-machine 100
+  (prop/for-all [[a b s] (gen/such-that #(some? (nth % 2)) gen-renamed-shape)]
+                (let [b' (map #(if (= s (:id %)) (assoc % :final true) %) b)]
+                  (nil? (shape/isomorphism (apply shape/shape a) (apply shape/shape b'))))))
 
 (deftest a-shape-is-a-closed-map
   (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})

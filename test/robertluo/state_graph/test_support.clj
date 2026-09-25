@@ -67,7 +67,7 @@
   "Every namespace whose :malli/schema metadata the fixture collects. THE FACADE IS IN HERE
    and contributes exactly one schema — `run`, the one function it really adds; its
    re-exports carry none on purpose and are guarded by the vars they delegate to."
-  '[robertluo.state-graph.shape robertluo.state-graph.compile
+  '[robertluo.state-graph.graph robertluo.state-graph.shape robertluo.state-graph.compile
     robertluo.state-graph.check robertluo.state-graph.async
     robertluo.state-graph])
 
@@ -234,6 +234,19 @@
   (loop [s (set roots)]
     (let [s' (into s (for [[a b] arrows :when (s a)] b))]
       (if (= s s') s (recur s')))))
+
+(defn rename-states
+  "The parts with every STATE id renamed by `f` wherever one is named — a state's :id, its
+   :done target or targets, a transition's ends. Events, and anything inside a nested child,
+   are left as they are."
+  [parts f]
+  (for [p parts]
+    (case (:robertluo.state-graph.shape/kind p)
+      :state (cond-> (update p :id f)
+               (map? (:done p)) (update :done update-vals #(update % :to f))
+               (keyword? (:done p)) (update :done f))
+      :transition (-> p (update :from f) (update :to f))
+      p)))
 
 (def gen-map-schema
   "A small map schema. The keys come from a POOL OF THREE so that two generated

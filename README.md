@@ -180,6 +180,84 @@ One consequence worth knowing: `commuting`, which is the licence `run` hands to 
 layer, takes only the outermost machine's pairs. It is a lookup keyed by state id, and a
 child's concurrency is the compiler's business inside one step.
 
+### Walking it as a graph
+
+The questions a graph answers and a map literal does not:
+
+```clojure
+(sg/path signup :new :closed)
+;=> [{:from :new     :event :invite :to :invited}
+;    {:from :invited :event :accept :to :active}
+;    {:from :active  :event :close  :to :closed}]
+(sg/path signup :closed :new)       ;=> nil — no run goes back
+(sg/paths signup :new)              ;=> {state -> its shortest path}, every state a run reaches
+
+(sg/components signup)              ;=> #{#{:new} #{:invited} #{:active} #{:bounced} #{:closed}}
+(sg/topsort signup)                 ;=> [:new :invited :active :bounced :closed]
+(sg/dag? signup)                    ;=> true
+
+(sg/out-degree signup :invited)     ;=> 2
+(sg/in-degree signup :invited)      ;=> 1
+```
+
+A **path is edges, not states**: two events may join one pair of states, and a list of states
+cannot say which one was fired. A step is `{:from :event :to}`, or `{:from :done true :to}`
+for a completion, with its `:outcome` where there is one. It is the **shortest** path, and
+the same one on every run, because ties are broken in printed order. It carries no guard:
+which event a guard admits is `explore`'s question. `components` are the strongly connected
+ones: states a run can go from any one to any other of, which is where a machine loops.
+`topsort` is nil wherever it does. Degrees count **edges**, parallel ones each; the number of
+distinct neighbours is `(count ((shape/successors sh) id))`.
+
+Two shapes are **the same machine** when renaming one's states turns it into the other.
+Event ids, schemas, guards, outcomes, `:initial` and `:final` all have to match as they are:
+
+```clojure
+(def renamed   ; signup, with every state called something else
+  (sg/shape
+   (sg/state :start   [:map]                                   {:initial true})
+   (sg/state :pending [:map [:email :string]])
+   (sg/state :member  [:map [:email :string] [:name :string]])
+   (sg/state :failed  [:map [:email :string] [:reason :string]] {:final true})
+   (sg/state :gone    [:map [:email :string]]                   {:final true})
+   (sg/event :invite [:map [:email :string]])
+   (sg/event :accept [:map [:name :string]])
+   (sg/event :bounce [:map [:reason :string]])
+   (sg/event :close  [:map])
+   (sg/transition :start   :invite :pending)
+   (sg/transition :pending :accept :member)
+   (sg/transition :pending :bounce :failed)
+   (sg/transition :member  :close  :gone)))
+
+(= (sg/fingerprint signup) (sg/fingerprint renamed))   ;=> false — the ids are in it
+(sg/isomorphism signup renamed)
+;=> {:new :start, :invited :pending, :active :member, :bounced :failed, :closed :gone}
+
+(def invited-only
+  (sg/shape
+   (sg/state :new     [:map]                                   {:initial true})
+   (sg/state :invited [:map [:email :string]])
+   (sg/state :bounced [:map [:email :string] [:reason :string]] {:final true})
+   (sg/event :invite [:map [:email :string]])
+   (sg/event :bounce [:map [:reason :string]])
+   (sg/transition :new     :invite :invited)
+   (sg/transition :invited :bounce :bounced)))
+
+(sg/subgraph? invited-only signup)  ;=> true — every state and edge of it is in signup
+(sg/subgraph? signup invited-only)  ;=> false
+```
+
+`isomorphism` answers the renaming, or nil. It means *the same `canonical` form once the
+states are renamed*, so it is the fingerprint with state names left out. A nested child is
+compared by its own fingerprint, so a child whose states were renamed counts as a different
+child here; to see through that, ask the children. `subgraph?` asks for containment with no
+renaming at all.
+
+All of this is one level deep, like the other checks that answer about states: a nested
+machine is its own shape, and a path through it is a question for that shape. Underneath
+is `.graph`, the same algorithms over plain `{:nodes {id label} :edges [edge]}` data. It
+knows nothing about machines and is written as `.cljc`.
+
 ## Nesting a machine in a node
 
 A state can carry a machine of its own. While the parent sits there, the child runs inside
@@ -1016,6 +1094,7 @@ Said plainly, because each is a design decision and not an oversight.
 |---|---|
 | `state` `event` `transition` `shape` | build a machine, nesting and guarding where it helps |
 | `problems` `draw!` `dot` `fingerprint` | look at it, and name what you looked at |
+| `path` `paths` `components` `topsort` `dag?` `isomorphism` `subgraph?` `out-degree` `in-degree` | walk it as a graph |
 | `compile` `initial` | the reduction |
 | `run` | the stream |
 | `step` `drive` | the crank — one turn, and the loop |
@@ -1023,7 +1102,9 @@ Said plainly, because each is a design decision and not an oversight.
 Plus the schemas it publishes: `Instance`, `State`, `Event`, `Transition`.
 
 Underneath, and directly usable — the facade is the convenience, these are the truth:
-`.shape` (the graph and its referential checks), `.compile` (shape → function), `.check`
+`.graph` (paths, components, topological order, isomorphism and containment over any plain
+labelled multigraph — `.cljc`, and knowing nothing of machines), `.shape` (the graph and its
+referential checks), `.compile` (shape → function), `.check`
 (the static checks and the drawing), `.drive` (the crank: `awaits`, `awaiting`, `where`,
 `advance`, `step`, `drive`), `.explore` (`covering`: the same questions asked by *running*
 it), `.async` (manifold streams: `drive` for one machine, `fan` for many). Nothing below
