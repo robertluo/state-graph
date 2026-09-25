@@ -86,8 +86,10 @@
                 (sg/event :go [:map] (constantly {}))
                 (sg/transition :a :go :nowhere))
 
-;; Here is the machine itself. The drawing marks the initial state `▸`, gives a final state
-;; a double circle, and labels every node with its schema. One helper, used throughout:
+;; Here is the machine itself. The drawing marks the initial state `▸` and a final state `◼`,
+;; and labels no node with its schema — a drawing is for the STRUCTURE, which is what a map
+;; literal hides, and a schema is exactly what a map literal shows. One helper, used
+;; throughout:
 
 (defn picture
   "The shape as a diagram on this page.
@@ -521,6 +523,94 @@
 ;; exactly what its schema declares and the rest is dropped on entry — so `:published`, which
 ;; declares a title, an author and a url, holds a title, an author and a url. That is the
 ;; subject of the next section.
+
+;; ## Walking it as a graph
+;;
+;; The questions a graph answers and a map literal does not. A **path is edges, not
+;; states** — two events may join one pair of states, and a list of states cannot say which
+;; one fired. It is the shortest, and the same one on every run, ties broken in printed order:
+
+(sg/path pipeline :draft :published)
+
+;; and `nil` where no run goes:
+
+(sg/path pipeline :published :draft)
+
+;; `components` are the strongly connected ones: states a run can go from any one to any
+;; other of, which is where a machine loops. The review cycle is one. The retry on
+;; `:publishing` is a self-loop, and a component of one cannot show it — `out-degree`, below,
+;; can. So `pipeline` has no topological order, where `task`'s order is its whole story:
+
+(sg/components pipeline)
+
+[(sg/dag? pipeline) (sg/topsort pipeline) (sg/topsort task)]
+
+;; Degrees count **edges**, parallel ones each — `:in-review` has four ways out, and three
+;; states withdraw into `:withdrawn`:
+
+[(sg/out-degree pipeline :in-review) (sg/in-degree pipeline :withdrawn)]
+
+;; Two shapes are **the same machine** when renaming one's states turns it into the other;
+;; event ids, schemas, guards, `:initial` and `:final` all have to match as they are.
+;; `isomorphism` answers the renaming, or `nil`:
+
+(def task-renamed
+  (sg/shape
+   (sg/state :open    [:map [:what :string]]                  {:initial true})
+   (sg/state :working [:map [:what :string] [:who :string]])
+   (sg/state :closed  [:map [:what :string] [:who :string]]    {:final true})
+   (sg/event :start  [:map [:who :string]] (fn [e] {:who (:who e)}) [:map [:who :string]])
+   (sg/event :finish [:map]                (constantly {})          [:map])
+   (sg/transition :open    :start  :working)
+   (sg/transition :working :finish :closed)))
+
+(sg/isomorphism task task-renamed)
+
+;; and `subgraph?` asks for containment, with no renaming at all:
+
+(def withdrawing
+  (sg/shape
+   (sg/state :draft     [:map]                                    {:initial true})
+   (sg/state :submitted [:map [:title :string] [:author :string]])
+   (sg/state :withdrawn [:map [:title :string]]                   {:final true})
+   (sg/event :submit   [:map [:title :string] [:author :string]]
+             (fn [e] (select-keys e [:title :author]))
+             [:map [:title :string] [:author :string]])
+   (sg/event :withdraw [:map] (constantly {}) [:map])
+   (sg/transition :draft     :submit   :submitted)
+   (sg/transition :submitted :withdraw :withdrawn)))
+
+[(sg/subgraph? withdrawing pipeline) (sg/subgraph? pipeline withdrawing)]
+
+;; All of it is one level deep: a nested machine, below, is its own shape, and a path through
+;; it is a question for that shape.
+
+;; ## Identifying a machine: the fingerprint
+;;
+;; A transcript row that cannot say which machine produced it is a row nobody can audit. So a
+;; shape has a **derived** id — SHA-256 over its data, the same in every process and on both
+;; hosts, and nobody can forget to bump it:
+
+(sg/fingerprint task)
+
+;; `hash` will not do: two builds of one shape are not even `=`, their handlers being distinct
+;; closures and their schemas distinct compiled objects. The state ids ARE in it, so the
+;; renamed copy above is a different fingerprint — `isomorphism` is the fingerprint with the
+;; names left out:
+
+(= (sg/fingerprint task) (sg/fingerprint task-renamed))
+
+;; `canonical` is what it is taken over. Keep it for when two fingerprints disagree and you
+;; need to know *why*:
+
+(shape/canonical task)
+
+;; Everything that is data is in — ids, the *form* of every schema, every edge with its guard
+;; and declarations; a nested machine is its child's fingerprint. Everything that is a
+;; closure is in only as its **presence**, because a closure prints as a hex address that
+;; differs every process. So a fingerprint proves **the graph matched**, not that the same code
+;; ran: change what a handler returns without changing its `:out`, and it does not move. And it
+;; carries **no name** — what a machine is called is a fact about the job, not the graph.
 
 ;; ## Nesting: a machine in a node
 ;;
@@ -1261,11 +1351,12 @@
 
 ;; ## Beneath the facade
 ;;
-;; `robertluo.state-graph` is the only namespace an application needs, but it is a
-;; convenience over six that are usable directly — `.shape`, `.compile`, `.check`, `.drive`,
-;; `.async` and `.explore`. Drop through when you want something the facade does not offer,
-;; which is what `drive/awaiting`, `drive/where`, `drive/advance`, `check/driving` and
-;; `check/seeds` were above.
+;; `robertluo.state-graph` is the only namespace an application needs. Underneath are the
+;; implementation namespaces — `.graph`, `.shapes`, `.compiler`, `.check`, `.crank`, `.async`
+;; and `.explore` — which can be required, but whose names are not API and may change. Drop
+;; through when you want something the facade does not offer, which is what
+;; `drive/awaiting`, `drive/where`, `drive/advance`, `check/driving` and `check/seeds` were
+;; above.
 ;;
 ;; `check/confluence`, for instance, publishes every verdict and not merely the licences, so
 ;; the check's own coverage is readable. For this pipeline the answer is none — divergence is
@@ -1367,6 +1458,39 @@
 ;;
 ;; And it is not only functions. A budget that is an edge is covered by varying a **plain
 ;; number**, where otherwise it would take as many real laps as the budget allows.
+
+;; ## What it does not do
+;;
+;; Said plainly, because each is a design decision and not an oversight.
+;;
+;; - **An event is the only way a transition happens.** A handler answers a patch and nothing
+;;   else: naming `:id`, `:instance` or `:sub` is refused by the patch check, since no state
+;;   schema declares them. A handler may not raise an event either — the next event is found
+;;   by a `:report` the shape declares and a driver runs, never by the handler that landed
+;;   the last one.
+;; - **A guard reads the event, never the state.** Where a decision depends on the state,
+;;   whoever produces the event reports it as a fact the guard can read. The one fact about
+;;   the state the shape settles itself is **completion**: "when the child has finished",
+;;   and "which way", are expressible; "when the total is over 100" is not.
+;; - **Two edges on one event must be provably disjoint**, so overlapping guards are refused
+;;   rather than resolved by declaration order. There is no order: out-edges are a set.
+;; - **State-dependent update must be declared** as a `{:sees …}` view, and a handler that
+;;   reads is never licensed to run beside one that writes what it read. Where an
+;;   accumulation must also be concurrent, the way is a **combine**, not a view.
+;; - **A state cannot hand a key onward silently.** A node holds only what it declares, so
+;;   data meant to survive several states is declared by each of them.
+;; - **No orthogonal regions.** A node nests one child, so waiting on several independent
+;;   children needs a shape to ask for them; a join over plain events needs none — it is the
+;;   product lattice, and `confluence` proves it.
+;; - **A fan-out's width is the driver's.** *n* results accumulate through a commutative
+;;   combine, but nothing in the shape says how wide the fan is: the width is a runtime value,
+;;   and counting to it would be a guard over the state.
+;; - **Concurrency within one machine is two events, and only where proven.** `commuting` is
+;;   pairwise on one state; a third in flight would need the licence re-established at each
+;;   intermediate state. An unproven pair waits, which is always correct. Nothing is
+;;   *declared* concurrent.
+;; - **No persistence, and no shape versioning.** The results are the history; storing them is
+;;   yours.
 
 ;; ## Rendering this notebook
 ;;

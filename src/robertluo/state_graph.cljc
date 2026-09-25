@@ -55,7 +55,12 @@
    `check`, so an application loads the graph algorithms it may never run. That is what a
    facade costs; a user who minds requires robertluo.state-graph.compiler directly."
   {:knowledge
-   [{:id :the-implementation-namespaces-are-renamed-for-clojurescript
+   [{:id :the-tutorial-is-the-specification
+     :kind :decision
+     :says "Since 2026-09-25 the README states the purpose, a scenario, prior art and the key API, and nothing more, and the TUTORIAL is the specification: it works the whole API through, rendering it runs every example, and it carries the limits in `What it does not do`. The README had grown to 1,160 lines holding both, and three topics lived in it alone — walking a shape as a graph, the fingerprint, the limits — so they moved into the tutorial before the README was cut, and nothing was dropped."
+     :from "the author, 2026-09-25: `the purpose of this file is to state the purpose/rational of the project, example scenario, prior arts, and briefly introduce some key API.`"
+     :when "2026-09-25"}
+    {:id :the-implementation-namespaces-are-renamed-for-clojurescript
      :kind :decision
      :says "robertluo.state-graph.shape, .compile and .drive became .shapes, .compiler and .crank on 2026-09-25, and the facade kept its name. In ClojureScript a namespace a.b.c and a var a.b/c are ONE JavaScript path, so the facade's `shape`, `compile` and `drive` overwrote the namespaces of the same names the moment both were loaded — the first ClojureScript compile warned `Namespace robertluo.state-graph.shape clashes with var robertluo.state-graph/shape` and the suite died on it. Renaming the facade was tried first and turned down by the author: it is the one require every user has. The implementation namespaces are not API, and the README now says so."
      :why "WHAT THIS EDITED, said out loud because a node is added to and never edited: 34 :see and :cites edges naming a var of the three were repointed to its new namespace, since an edge is checked by the knowledge suite and a dangling one is a broken build rather than a record. What a node SAYS in prose was left as written, as a node quoting ../coder is. And the marker a fingerprint prints was pinned to the old name — see :the-opaque-marker-keeps-its-first-namespace — so no fingerprint moved."
