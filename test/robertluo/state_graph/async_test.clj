@@ -2,6 +2,9 @@
   (:require [clojure.core.async :as ca]
             [clojure.core.async.impl.protocols :as p]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.test.check.clojure-test :refer [defspec]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [robertluo.state-graph.async :as a]
             [robertluo.state-graph.check :as check]
             [robertluo.state-graph.compile :as c]
@@ -237,30 +240,55 @@
   {:patch (:patch ph) :apply (:apply ph) :agree (:agree ph)
    :pairs (check/commuting sh)})
 
-(defn- cranked
-  "Drive `events` through a licensed machine whose handlers finish WHEN THE TEST SAYS, and
-   collect. `order` is the indices of the events whose patches land, first to last.
+(defn- scripted
+  "Drive a licensed machine whose handlers finish WHEN THE TEST SAYS, by a script, and
+   collect. A step of the script is one of
+
+     [:event e]        hand the machine an event
+     [:land i]         land the patch of the i-th licensed :patch call, as the real one computes it
+     [:land i value]   land `value` in its place — an exception, or a patch the target refuses
+     [:close]          close the events
+
+   and :acks says, per step, whether the machine TOOK what was handed within the patience.
 
    THE LICENCE'S :patch ANSWERS AN UNBUFFERED CHANNEL per call, and the test puts on it
    the patch the real one computes — so each delivery is a RENDEZVOUS with the very take
    that decides the race, and returns only once the machine has made it. A gate opened
    after the events are taken is not enough under core.async: the machine runs on another
    thread, and may look at the two handlers only after BOTH have answered, when the order
-   they finished in can no longer be seen. See :a-rendezvous-decides-a-race-a-gate-does-not."
-  [sh initial events order]
+   they finished in can no longer be seen. See :a-rendezvous-decides-a-race-a-gate-does-not.
+
+   The patches are computed from `initial`, which is where both of a pair are selected, and
+   the i-th call is the i-th event the licensed branch patches."
+  [sh initial script]
   (let [ph      (c/phases sh a/context)
+        events  (for [[op x] script :when (= op :event)] x)
         patches (mapv #(let [p ((:patch ph) initial %)]
-                          (if (satisfies? p/ReadPort p) (wait p) p))
+                         (if (satisfies? p/ReadPort p) (wait p) p))
                       events)
         chans   (vec (repeatedly (count events) ca/chan))
         calls   (atom -1)
         in      (ca/chan)
         m       (a/drive (:step ph) initial in a/state-only
                          (assoc (licensed sh ph) :patch (fn [_ _] (chans (swap! calls inc)))))
-        handed  (mapv #(hand! in %) events)
-        landed  (mapv #(hand! (chans %) (patches %)) order)]
+        ;; DRAINED WHILE THE SCRIPT RUNS: the output is unbuffered, so a machine whose
+        ;; rows nobody reads takes no further event — see
+        ;; :consume-states-or-done-may-never-resolve.
+        rows    (ca/into [] (:states m))
+        acks    (mapv (fn [[op x & v]]
+                        (case op
+                          :event (hand! in x)
+                          :land  (hand! (chans x) (if (seq v) (first v) (patches x)))
+                          :close (do (ca/close! in) true)))
+                      script)]
     (ca/close! in)
-    (assoc (collect m) :handed handed :landed landed)))
+    {:states (wait rows) :done (wait (:done m)) :acks acks}))
+
+(defn- cranked
+  "`scripted`, for the common case: hand every event, then land the patches in `order`."
+  [sh initial events order]
+  (scripted sh initial (concat (map (fn [e] [:event e]) events)
+                               (map (fn [i] [:land i]) order))))
 
 (deftest a-licensed-pair-is-applied-in-completion-order
   ;; THE WHOLE POINT OF THE SPLIT, and deterministic without a clock: :eval is fed first
@@ -270,8 +298,8 @@
         got (cranked sh (c/initial sh {}) [{:id :eval} {:id :test}] [1 0])]
     (is (= {:verifying #{#{:eval :test}}} (check/commuting sh))
         "the pair really is licensed, so the branch under test is the one taken")
-    (is (= [true true] (:handed got)) "both events were taken while neither had landed")
-    (is (= [true true] (:landed got)) "and each patch was taken by the machine")
+    (is (every? true? (:acks got))
+        "both events were taken while neither had landed, and each patch by the machine")
     (is (= [{:id :tested :test 2} {:id :complete :eval 1 :test 2}] (:states got))
         ":test landed first though :eval arrived first, and :eval's patch — computed in
          :verifying, where its target was :evaled — landed in :complete instead")
@@ -407,3 +435,268 @@
     (is (= #{1 2} (:seen (:done got)))
         "set union, so which worker finished first is not in the answer")
     (is (= 2 (count (:states got))) "one row per event, still")))
+
+;;; ------------------------------------------------------- every way to fail
+;;
+;; A bug in a go block is the hardest kind in this library to find after the fact: an
+;; exception that escapes one is printed on another thread and the machine simply stops.
+;; So every path by which a machine can stop is asserted here, each by the channel it
+;; stops on, and each asserts that :states CLOSED and :done DELIVERED — a timeout on
+;; either is the failure these tests exist to catch.
+
+(defn- two-state
+  "A to b on :go, whose handler is `handler`."
+  [handler]
+  (shape/shape
+   (shape/state :a [:map] {:initial true})
+   (shape/state :b [:map [:n :int]] {:final true})
+   (shape/event :go [:map] handler [:map [:n :int]])
+   (shape/transition :a :go :b)))
+
+(deftest a-handler-channel-closed-empty-is-a-defect
+  ;; A handler that answered NOTHING — its channel closed with no value — would otherwise
+  ;; hand nil on to fail one seam later with a worse diagnosis.
+  (let [sh (two-state (fn [_] (doto (ca/chan) ca/close!)))
+        got (collect (a/drive (c/compile sh a/context) (c/initial sh {}) (fed [{:id :go}])))]
+    (is (= [] (:states got)))
+    (is (= :channel (:crossing (ex-data (:done got)))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed without answering"
+                          ((c/compile sh a/blocking) (c/initial sh {}) {:id :go}))
+        "and a/blocking says the same thing, by throwing")))
+
+(deftest a-late-answer-is-checked-as-strictly-as-a-prompt-one
+  ;; The :out check runs INSIDE a go block when the answer came on a channel, so its throw
+  ;; is the one the boundary in `then` exists for.
+  (let [sh (two-state (fn [_] (ca/go {:n "seven"})))
+        got (collect (a/drive (c/compile sh a/context) (c/initial sh {}) (fed [{:id :go}])))]
+    (is (= [] (:states got)))
+    (is (= {:from :a :event :go :to :b :crossing :out}
+           (select-keys (ex-data (:done got)) [:from :event :to :crossing])))))
+
+(deftest blocking-leaves-a-plain-answer-alone
+  (let [sh (two-state (constantly {:n 7}))]
+    (is (= ((c/compile sh) (c/initial sh {}) {:id :go})
+           ((c/compile sh a/blocking) (c/initial sh {}) {:id :go})
+           {:id :b :n 7}))))
+
+(deftest a-result-maker-that-fails-stops-the-machine
+  ;; `result` is the caller's and runs inside the pump: throwing, or answering nil — which
+  ;; no channel will carry — is a defect like any other.
+  (let [sh (ts/counter)
+        boom (ex-info "no row" {})
+        drive-with (fn [result] (collect (a/drive (c/compile sh a/context) (c/initial sh {})
+                                                  (fed [{:id :start :seed 0}]) result)))]
+    (let [got (drive-with (fn [& _] (throw boom)))]
+      (is (= [] (:states got)))
+      (is (identical? boom (:done got))))
+    (let [got (drive-with (constantly nil))]
+      (is (= [] (:states got)))
+      (is (instance? IllegalArgumentException (:done got))))))
+
+;;; ------------------------------------------------ every branch of the licence
+
+(deftest a-pair-ready-at-once-lands-in-arrival-order
+  ;; Both handlers answer at once, so by the time the machine looks the order they finished
+  ;; in cannot be seen — and :priority then keeps the order they ARRIVED in, which is the
+  ;; row order a consumer would have got with no licence at all.
+  (let [sh (join)
+        ph (c/phases sh a/context)
+        got (collect (a/drive (:step ph) (c/initial sh {}) (fed [{:id :eval} {:id :test}])
+                              a/state-only (licensed sh ph)))]
+    (is (= [:evaled :complete] (mapv :id (:states got))))))
+
+(deftest a-pair-landing-in-arrival-order-is-applied-in-it
+  ;; The other side of the race `a-licensed-pair-is-applied-in-completion-order` decides.
+  (let [sh (join)
+        got (cranked sh (c/initial sh {}) [{:id :eval} {:id :test}] [0 1])]
+    (is (every? true? (:acks got)))
+    (is (= [{:id :evaled :eval 1} {:id :complete :eval 1 :test 2}] (:states got)))))
+
+(deftest an-event-that-arrives-first-but-is-no-pair-is-held-and-not-lost
+  ;; A second :eval is not licensed beside the first. It won the race, so it is HELD and
+  ;; applied next, to the state the first one produced — and nothing is taken twice.
+  (let [sh (join)
+        got (scripted sh (c/initial sh {})
+                      [[:event {:id :eval}] [:event {:id :eval}] [:land 0] [:event {:id :test}]])]
+    (is (every? true? (:acks got)))
+    (is (= [{:id :evaled :eval 1} {:id :evaled :eval 1} {:id :complete :eval 1 :test 2}]
+           (:states got))
+        "the held :eval was applied in :evaled, which ignores it, and :test after it")))
+
+(deftest the-events-running-out-mid-handler-lose-nothing
+  ;; The race can be won by the events CLOSING: the handler in flight still lands.
+  (let [sh (join)
+        got (scripted sh (c/initial sh {}) [[:event {:id :eval}] [:close] [:land 0]])]
+    (is (every? true? (:acks got)))
+    (is (= [{:id :evaled :eval 1}] (:states got)))
+    (is (= {:id :evaled :eval 1} (:done got)))))
+
+(deftest a-pair-whose-handler-fails-stops-before-either-lands
+  (let [sh (join)
+        boom (ex-info "eval crashed" {})
+        got (scripted sh (c/initial sh {})
+                      [[:event {:id :eval}] [:event {:id :test}] [:land 1] [:land 0 boom]])]
+    (is (every? true? (:acks got)))
+    (is (= [] (:states got)) "neither landed — :test's patch waited for :eval's")
+    (is (identical? boom (:done got)))))
+
+(deftest a-pair-whose-first-patch-its-target-refuses-stops-there
+  (let [sh (join)
+        got (scripted sh (c/initial sh {})
+                      [[:event {:id :eval}] [:event {:id :test}]
+                       [:land 1 {:answer {:test "two"} :depth 0}] [:land 0]])]
+    (is (every? true? (:acks got)))
+    (is (= [] (:states got)))
+    (is (= :answer (:crossing (ex-data (:done got)))))))
+
+(deftest a-malformed-event-in-a-licensed-state-is-a-defect
+  ;; Where a state has a licensed pair the event goes to :patch directly, whose event check
+  ;; throws BEFORE any channel exists — the pump's own boundary is what catches it.
+  (let [sh (shape/shape
+            (shape/state :verifying [:map] {:initial true})
+            (shape/state :evaled    [:map [:eval :int]])
+            (shape/state :tested    [:map [:test :int]])
+            (shape/state :complete  [:map [:eval :int] [:test :int]] {:final true})
+            (shape/event :eval [:map] (constantly {:eval 1}) [:map [:eval :int]])
+            (shape/event :test [:map [:by :string]] (constantly {:test 2}) [:map [:test :int]])
+            (shape/transition :verifying :eval :evaled)
+            (shape/transition :verifying :test :tested)
+            (shape/transition :tested    :eval :complete)
+            (shape/transition :evaled    :test :complete))
+        ph (c/phases sh a/context)
+        got (collect (a/drive (:step ph) (c/initial sh {}) (fed [{:id :test}])
+                              a/state-only (licensed sh ph)))]
+    (is (seq (:verifying (check/commuting sh))) "the licensed branch is the one taken")
+    (is (= [] (:states got)))
+    (is (= :event (:crossing (ex-data (:done got)))))))
+
+(deftest a-machine-goes-on-after-a-pair
+  ;; After a pair lands the machine is in a state with a licence again, and a third event
+  ;; takes the single-handler side of the race.
+  (let [reports (atom [#{1} #{2} #{3}])
+        sh (shape/shape
+            (shape/state :gathering
+                         [:map [:seen {:combine into :combine/commutes true} [:set :int]]]
+                         {:initial true})
+            (shape/event :found [:map]
+                         (fn [_] (let [[r & more] @reports] (reset! reports more) {:seen r}))
+                         [:map [:seen [:set :int]]])
+            (shape/transition :gathering :found :gathering))
+        got (scripted sh (c/initial sh {:seen #{}})
+                      [[:event {:id :found}] [:event {:id :found}] [:land 1] [:land 0]
+                       [:event {:id :found}] [:land 2]])]
+    (is (every? true? (:acks got)))
+    (is (= 3 (count (:states got))))
+    (is (= #{1 2 3} (:seen (:done got))))))
+
+;;; --------------------------------------------------------- every way a fan stops
+
+(deftest a-machine-failing-on-its-last-event-fails-the-fan
+  ;; The other road to a stopped machine: nothing more is routed to it, and the fan finds
+  ;; the defect only when it waits for every machine at the end.
+  (let [sh (two-state (constantly {:n "seven"}))
+        got (collect (a/fan (c/compile sh a/context) (fn [k] (c/initial sh k {}))
+                            (fed [{:id :go :instance "x"}])))]
+    (is (= [] (:states got)))
+    (is (= :out (:crossing (ex-data (:done got)))))))
+
+(deftest a-first-state-that-cannot-be-made-fails-the-fan
+  ;; `initial-of` is the caller's and runs inside the fan's own go block — a first state
+  ;; its schema refuses, for one. This HUNG for ever before the fan had a boundary.
+  (let [sh (ts/counter)
+        boom (ex-info "no first state" {})
+        got (collect (a/fan (c/compile sh a/context) (fn [_] (throw boom))
+                            (fed [{:id :start :seed 0}])))]
+    (is (= [] (:states got)))
+    (is (identical? boom (:done got)))))
+
+;;; ------------------------------------------ whatever a handler answers, generated
+
+(def ^:private modes
+  "Every way a handler can answer under a/context: at once, on a ready channel, from a go
+   block, from a real thread — or by delivering an exception."
+  [:plain :now :go :thread :fails])
+
+(defn- answering
+  [mode boom]
+  (case mode
+    :plain  (constantly {})
+    :now    (fn [_] (now {}))
+    :go     (fn [_] (ca/go {}))
+    :thread (fn [_] (ca/thread {}))
+    :fails  (fn [_] (ca/go boom))))
+
+(defn- rewired
+  "The generated parts with every event's handler answering as `mode-of` says, and failing
+   with its own exception from `booms`."
+  [parts mode-of booms]
+  (map (fn [p]
+         (if (= :event (:robertluo.state-graph.shape/kind p))
+           (shape/event (:id p) [:map] (answering (mode-of (:id p)) (booms (:id p))))
+           p))
+       parts))
+
+(def ^:private gen-modes
+  (gen/fmap #(zipmap [:e0 :e1 :e2 :e3] %) (gen/vector (gen/elements modes) 4)))
+
+(def ^:private booms
+  (into {} (for [id [:e0 :e1 :e2 :e3]] [id (ex-info "handler failed" {:event id})])))
+
+(defspec serialised-the-states-are-the-reduction-s-whatever-a-handler-answers 60
+  ;; An INDEPENDENT reference: the same shape with every handler answering {} at once,
+  ;; reduced. Serialised, a machine must emit exactly the states that reduction passes
+  ;; through, however late each answer came — and where a handler FAILS, exactly the
+  ;; prefix before the first failing event that FIRED, with that very exception on :done.
+  ;; `admits?` on the reference says which events fire, so no machine is consulted twice.
+  (prop/for-all [parts ts/gen-shape
+                 mode-of gen-modes
+                 events (gen/vector ts/gen-event 0 8)]
+    (let [ref     (apply shape/shape parts)
+          sh      (apply shape/shape (rewired parts #(mode-of % :plain) booms))
+          idx     (c/index ref)
+          before  (vec (reductions (c/compile ref) (c/initial ref {}) events))
+          fail-at (first (keep-indexed (fn [i e]
+                                         (when (and (= :fails (mode-of (:id e)))
+                                                    (c/admits? idx (before i) e))
+                                           i))
+                                       events))
+          got     (collect (a/drive (c/compile sh a/context) (c/initial sh {}) (fed events)))]
+      (if fail-at
+        (and (= (subvec before 1 (inc fail-at)) (:states got))
+             (identical? (booms (:id (events fail-at))) (:done got)))
+        (and (= (rest before) (:states got))
+             (= (peek before) (:done got)))))))
+
+(defspec licensed-the-machine-ends-where-the-reduction-does 60
+  ;; Every pair gen-shape's empty answers make licensable IS licensed, so handlers of mixed
+  ;; timing race for real here. The row ORDER may then differ from the reduction's — that
+  ;; is the licence's price — but never the number of rows or where the machine ends.
+  (prop/for-all [parts ts/gen-shape
+                 mode-of (gen/fmap #(update-vals % (fn [m] (if (= :fails m) :go m))) gen-modes)
+                 events (gen/vector ts/gen-event 0 8)]
+    (let [ref (apply shape/shape parts)
+          sh  (apply shape/shape (rewired parts #(mode-of % :plain) booms))
+          ph  (c/phases sh a/context)
+          got (collect (a/drive (:step ph) (c/initial sh {}) (fed events)
+                                a/state-only (licensed sh ph)))]
+      (and (= (count events) (count (:states got)))
+           (= (reduce (c/compile ref) (c/initial ref {}) events) (:done got))))))
+
+(defspec fanned-each-instance-is-its-own-reduction 60
+  ;; Routing under mixed timing: each instance's rows, in order, are the reduction over its
+  ;; OWN events, and :done holds where each ended. Rows of different instances interleave
+  ;; however they like.
+  (prop/for-all [parts ts/gen-shape
+                 mode-of (gen/fmap #(update-vals % (fn [m] (if (= :fails m) :thread m))) gen-modes)
+                 events (gen/vector (gen/fmap (fn [[e k]] (cond-> e k (assoc :instance k)))
+                                              (gen/tuple ts/gen-event (gen/elements [nil "a" "b"])))
+                                    0 10)]
+    (let [ref  (apply shape/shape parts)
+          sh   (apply shape/shape (rewired parts #(mode-of % :plain) booms))
+          step (c/compile ref)
+          by   (group-by :instance events)
+          got  (collect (a/fan (c/compile sh a/context) (fn [k] (c/initial sh k {})) (fed events)))]
+      (and (= (into {} (for [[k es] by] [k (reduce step (c/initial ref k {}) es)]))
+              (:done got))
+           (= (into {} (for [[k es] by] [k (rest (reductions step (c/initial ref k {}) es))]))
+              (group-by :instance (:states got)))))))

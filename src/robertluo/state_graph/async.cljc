@@ -414,7 +414,12 @@
      :says "Parking the first handler on a gate and opening it once both events were TAKEN stopped deciding the race under core.async: 16 runs in 20 came back in arrival order under instrumentation. Under manifold the whole chain ran in the test's own thread, so the race was decided before `drive` returned; a go block runs on another thread, and the pump computing the second patch — slow with malli instrumenting — looked at the two only after the gate was open, when both had answered and :priority rightly chose arrival order. The machine was right and the test was not. The test now answers the patches itself on UNBUFFERED channels, so each delivery is a rendezvous with the very take that decides and returns only once the machine has made it; 20 runs in 20. Through the facade, where :patch cannot be reached, concurrency is proved by DEADLOCK instead: the second handler opens the first one's gate, which a serialised machine never reaches."
      :when "2026-09-25"
      :supersedes [:completion-order-is-testable-without-a-clock]
-     :cites [:core-async-is-the-async-default]}]}
+     :cites [:core-async-is-the-async-default]}
+    {:id :the-async-layer-is-mutation-tested
+     :kind :lesson
+     :says "A bug in a go block stops a machine in silence, so on 2026-09-25 the tests of this namespace were held to the code by MUTATION: nineteen deliberate breakages — the boundary catches removed, a bind that did not flatten, a held event dropped, the second race fixed in arrival order, :agree skipped, the output never closed, the fan's put not raced — each applied alone and the async and facade suites run against it. Seventeen turned them red. The two that did not were the fan closing its other machines on the way out, which nothing could see and which went — see :a-stopped-fan-leaves-its-machines-to-the-collector. One more survives on purpose: :priority on the FIRST race, handler before event. Where both are ready it only chooses whether the second handler starts before the first has landed, and a licensed pair ends in the same rows either way; it saves a speculative start and is not a correctness claim. The run also found `run` HANGING on data its first state refuses, the one regression manifold's d/chain had been hiding. Re-run the mutations after changing `then`, `pump` or `fan`."
+     :when "2026-09-25"
+     :cites [:an-exception-at-a-go-boundary-is-handed-on-as-it-is :a-rendezvous-decides-a-race-a-gate-does-not]}]}
   ([step initial events] (drive step initial events state-only))
   ([step initial events result] (drive step initial events result nil))
   ([step initial events result licence]
@@ -438,7 +443,7 @@
    vector would have said the same thing while making the caller guess which machine each
    entry belonged to, since a machine's own name is the one thing this function has in
    hand. Empty where no event ever arrived, there being no machine to report on. OR IT
-   DELIVERS THE EXCEPTION that stopped any one machine, and the rest are closed.
+   DELIVERS THE EXCEPTION that stopped any one machine, or that `initial-of` threw.
 
    AN EVENT WITH NO :instance IS ITS OWN MACHINE, under the key nil. Deliberate, and it
    costs nothing: a caller who never names anything still works, and
@@ -481,7 +486,13 @@
      :kind :decision
      :says "An event routed to a machine that has already stopped on a defect is not put and waited on for ever: the put is raced against that machine's :done, and where :done has delivered, the fan delivers the same exception, closes every machine's input and stops. Under manifold the put would have pended with nobody taking, and the fan's :done would never have settled."
      :when "2026-09-25"
-     :cites [:an-exception-at-a-go-boundary-is-handed-on-as-it-is :consume-states-or-done-may-never-resolve]}]}
+     :cites [:an-exception-at-a-go-boundary-is-handed-on-as-it-is :consume-states-or-done-may-never-resolve]}
+    {:id :a-stopped-fan-leaves-its-machines-to-the-collector
+     :kind :decision
+     :says "An event routed to a machine that has already stopped is still not put and waited on for ever: the put is raced against that machine's :done, and the fan delivers the exception it finds there. `initial-of` throwing is handed on the same way, by the fan's own boundary catch — before it had one, a first state its schema refused HUNG `run` for ever. Either way the fan closes NOTHING ELSE. Closing every other machine's input was written and then refuted by mutation: removing it, on either road out, left every test green, because nothing a caller holds can see it. :states is closed by `closing` and :done has delivered; a machine still mid-handler finds the output closed and its put answers false; a pump parked on an input nobody can reach any more is garbage with it. Code no test can fail is code that was guarding nothing, so it went, and with it the atom it had been the only reason for."
+     :when "2026-09-25"
+     :supersedes [:a-stopped-machine-stops-the-fan]
+     :cites [:a-stopped-machine-stops-the-fan]}]}
   ([step initial-of events] (fan step initial-of events state-only))
   ([step initial-of events result] (fan step initial-of events result nil))
   ([step initial-of events result licence]
@@ -490,31 +501,38 @@
      (a/go
        (a/>!
         done
-        ;; ONLY THIS LOOP CREATES A MACHINE and it is sequential, so the map of them is
-        ;; the loop's own accumulator and nothing needs guarding.
-        (loop [machines {}]
-          (let [e (a/<! events)]
-            (if (nil? e)
-              ;; close every input, then wait for every machine — a result still in flight
-              ;; when the events run out is still a result. The first exception any of
-              ;; them delivers is what the fan delivers.
-              (do (doseq [m (vals machines)] (a/close! (:in m)))
-                  (loop [acc {} [[k m] & more] (seq machines)]
-                    (if (nil? m)
-                      acc
-                      (let [v (a/<! (:done m))]
-                        (if (error? v) v (recur (assoc acc k v) more))))))
-              (let [k  (:instance e)
-                    m  (or (get machines k)
-                           (let [in (a/chan)]
-                             {:in in :done (pump step result (initial-of k) in out licence)}))
-                    machines (assoc machines k m)
-                    [v port] (a/alts! [[(:in m) e] (:done m)])]
-                (if (= port (:done m))
-                  ;; THE MACHINE STOPPED before it would take this — a defect, since only
-                  ;; a closed input ends one otherwise. See :a-stopped-machine-stops-the-fan.
-                  (do (doseq [m (vals machines)] (a/close! (:in m)))
-                      v)
-                  (recur machines))))))))
+        (try
+          ;; ONLY THIS LOOP CREATES A MACHINE and it is sequential, so the map of them is
+          ;; the loop's own accumulator and nothing needs guarding.
+          (loop [machines {}]
+            (let [e (a/<! events)]
+              (if (nil? e)
+                ;; close every input, then wait for every machine — a result still in
+                ;; flight when the events run out is still a result. The first exception
+                ;; any of them delivers is what the fan delivers.
+                (do (doseq [m (vals machines)] (a/close! (:in m)))
+                    (loop [acc {} [[k m] & more] (seq machines)]
+                      (if (nil? m)
+                        acc
+                        (let [v (a/<! (:done m))]
+                          (if (error? v) v (recur (assoc acc k v) more))))))
+                (let [k (:instance e)
+                      ;; `initial-of` is the caller's and may throw — a first state its
+                      ;; own schema refuses — which the catch below hands on.
+                      m (or (get machines k)
+                            (let [in (a/chan)]
+                              {:in in :done (pump step result (initial-of k) in out licence)}))
+                      machines (assoc machines k m)
+                      [v port] (a/alts! [[(:in m) e] (:done m)])]
+                  (if (= port (:done m))
+                    ;; THE MACHINE STOPPED before it would take this — a defect, since
+                    ;; only a closed input ends one otherwise. See
+                    ;; :a-stopped-machine-stops-the-fan.
+                    v
+                    (recur machines))))))
+          ;; THE BOUNDARY, as in `pump`: see :an-exception-at-a-go-boundary-is-handed-on-as-it-is.
+          ;; Nothing else is closed on the way out, and nothing needs to be — see
+          ;; :a-stopped-fan-leaves-its-machines-to-the-collector.
+          (catch #?(:clj Throwable :cljs :default) ex ex))))
      {:states out
       :done (closing done out)})))

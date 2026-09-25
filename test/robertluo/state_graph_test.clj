@@ -141,6 +141,15 @@
         "closed, and closed EMPTY — the bad state was never a state")
     (is (instance? clojure.lang.ExceptionInfo (wait done)))))
 
+(deftest data-the-first-state-refuses-is-a-defect-and-not-a-hang
+  ;; The first state is made inside the stream door, the first time an instance is named, so
+  ;; a refusal there is thrown on a go block's thread. It reaches :done with what the check
+  ;; said, and the results close. Before the fan had a boundary catch this HUNG for ever.
+  (let [{:keys [states done]} (sg/run (ts/shipping) {:total "thirty"}
+                                      (fed [{:id :authorize :receipt "R-30"}]))]
+    (is (= [] (wait (ca/into [] states))))
+    (is (= :enter (:crossing (ex-data (wait done)))))))
+
 ;;; --------------------------------------------------------------- the vocabulary
 
 (deftest the-facade-does-not-run-the-structural-checks-for-you
