@@ -64,6 +64,7 @@ suite.
 | `:test-cmd-gate` | clojure -M:dev:test integration — needs graphviz, so run it inside the devenv |
 | `:lint-cmd` | clojure -M:lint --lint src test notebook — an ALIAS, not a binary on the path |
 | `:release-cmd` | clojure -T:build ci — clean, both suites, the jar in target/; clojure -T:build deploy — to Clojars as io.github.robertluo/state-graph, version 0.1.<commit count>. LICENSE is MIT and CHANGELOG.md is the list of facts per version |
+| `:ci` | .github/workflows/ci.yml — `devenv test` on ubuntu, on a push to main and on every pull request against it. Nix and devenv are installed by the workflow, so devenv.nix is the one toolchain |
 | `:eval-mechanism` | :nrepl-exclusive |
 | `:malli-shapes-all-data` | true |
 | `:malli-function-schemas` | true |
