@@ -41,29 +41,19 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.util :as mu]
+            [robertluo.state-graph.graph :as graph]
             [robertluo.state-graph.shape :as shape]
             [clojure.java.shell :as shell]
             [clojure.java.io :as io]))
 
 ;;; ------------------------------------------------------------------ the graph
 
-(defn- walk
-  "Every state reachable from `root` along `next-of` — a map from a state to the states one
-   edge away, as `shape/successors` and `shape/predecessors` answer — the root included."
-  [next-of root]
-  (loop [seen #{} stack [root]]
-    (if-let [id (peek stack)]
-      (if (seen id)
-        (recur seen (pop stack))
-        (recur (conj seen id) (into (pop stack) (next-of id))))
-      seen)))
-
 (defn reachable
   "The states a run can actually get to, from the one it starts in. This is why the
    shape has to know its :initial — reachability needs a root."
   {:malli/schema [:=> [:cat shape/Shape] [:set shape/Id]]}
   [sh]
-  (walk (shape/successors sh) (shape/initial-id sh)))
+  (graph/reachable (shape/successors sh) [(shape/initial-id sh)]))
 
 (defn unreachable
   "States the shape declares and no run can ever be in. Not `has no in-edge`, which
@@ -107,7 +97,7 @@
     (if (empty? finals)
       (set (shape/states sh))
       (let [back (shape/predecessors sh)]
-        (into #{} (mapcat #(walk back %)) finals)))))
+        (graph/reachable back finals)))))
 
 (defn traps
   "Reachable states from which NO ENDING can be reached. The machine stays alive, goes

@@ -25,6 +25,11 @@ The first version meant to be used from outside the repository it was built in.
   `shape/predecessors` are new, and are how `check` reads a shape. Fingerprints are unchanged.
   `check/labelled`, and so `dot` and `draw!`, now refuse a value that is not a shape;
   ubergraph used to throw on one by accident.
+- Walking a shape as a graph, on the facade: `path` and `paths` (shortest, as edges),
+  `components` (strongly connected), `topsort` and `dag?`, `isomorphism` (the same machine
+  with its states renamed) and `subgraph?`, and `out-degree` and `in-degree` (counting edges).
+  They are built on `robertluo.state-graph.graph`, a new `.cljc` namespace below `shape` that
+  holds the same algorithms over plain labelled multigraphs.
 - A smaller public surface: `compile/Patch` and `drive/Applied` are gone, being schemas nothing
   validated with, and `check/produced`, `check/continued`, `shape/combines-of` and
   `shape/completions` are private. What a user is promised is the facade and what the README names.

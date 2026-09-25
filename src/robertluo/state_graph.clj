@@ -3,7 +3,8 @@
    have.
 
    BUILD a shape out of states, events and transitions; LOOK at it with `problems`, `draw!`
-   and `dot`, which is what having a graph buys; then RUN it through one of three doors.
+   and `dot`, and WALK it with `path`, `components`, `topsort` and `isomorphism`, which is
+   what having a graph buys; then RUN it through one of three doors.
 
    A NODE MAY NEST A WHOLE MACHINE — {:machine sh} on a state — which is how a big problem
    stays readable. It is SOWN with {:seed} on the way in and HARVESTED with {:yield} on the
@@ -421,6 +422,57 @@
    nothing installed."
   [sh]
   (check/dot sh))
+
+;;; ----------------------------------------------------- walking it as a graph
+
+(defn paths
+  "{state -> the shortest path to it from `from`} for every state a run can reach, a path
+   being a vector of EDGES — {:from :event :to}, or {:from :done true :outcome :to} for a
+   completion — so it reads as the events that get there."
+  [sh from]
+  (shape/paths sh from))
+
+(defn path
+  "The shortest path from one state to another as `paths` answers it, or nil."
+  [sh from to]
+  (shape/path sh from to))
+
+(defn components
+  "The strongly connected components: sets of states each of which a run can get from any
+   other in the set."
+  [sh]
+  (shape/components sh))
+
+(defn topsort
+  "The states in an order every edge goes forward in, or nil where there is a cycle."
+  [sh]
+  (shape/topsort sh))
+
+(defn dag?
+  "Does no run ever come back to a state it has left?"
+  [sh]
+  (shape/dag? sh))
+
+(defn isomorphism
+  "{state-of-a state-of-b} under which the two are the same machine with its states renamed,
+   or nil. Everything but the state ids must match as it stands."
+  [a b]
+  (shape/isomorphism a b))
+
+(defn subgraph?
+  "Is every state and edge of `a` in `b`, as it stands?"
+  [a b]
+  (shape/subgraph? a b))
+
+(defn out-degree
+  "How many edges leave this state, parallel ones counted each."
+  [sh id]
+  (shape/out-degree sh id))
+
+(defn in-degree
+  "How many edges arrive at this state, parallel ones counted each."
+  [sh id]
+  (shape/in-degree sh id))
 
 ;;; ------------------------------------------------------------- the reduction
 

@@ -72,7 +72,7 @@ suite.
 | `:repl-launch-cmd` | clojure -M:dev:nrepl, from inside the devenv |
 | `:repl-discover-cmd` | clj-nrepl-eval --discover-ports |
 | `:repl-eval-cmd` | clj-nrepl-eval -p `<port>` |
-| `:repl-eval-reload` | :per-namespace-in-dependency-order — shape, compile, check, async, drive, explore, the facade. NEVER :reload-all; see the shape namespace's `:never-reload-all` |
+| `:repl-eval-reload` | :per-namespace-in-dependency-order — graph, shape, compile, check, async, drive, explore, the facade. NEVER :reload-all; see the shape namespace's `:never-reload-all` |
 | `:deps` | {:malli "0.20.1", :manifold "0.5.0" — 0.4.3 until 2026-09-15, see the async namespace's `:manifold-is-pinned-at-what-its-consumers-resolve`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
 
 ## Working here
@@ -219,7 +219,7 @@ REPL before anything is built on it. A schema is the cheapest place to be wrong
 
 ## :implement
 
-Write it in src/, lowest layer first (shape, then compile, then a default, then the
+Write it in src/, lowest layer first (graph, then shape, then compile, then a default, then the
 facade). One `<ns>_test.clj` per source namespace as you go, ^:integration on anything that
 opens a file, a socket or a real clock. Dependencies point down only — see the facade's
 `:dependencies-point-down-only`

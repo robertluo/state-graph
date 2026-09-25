@@ -1,5 +1,5 @@
 (ns robertluo.state-graph.shape
-  "THE BOTTOM: a state machine's shape, which is a graph.
+  "THE BOTTOM OF THE MACHINE: a state machine's shape, which is a graph.
 
    A STATE is a node, shaped by a malli schema and validated on enter. An EVENT is
    shaped by a malli schema too, and it CARRIES ITS HANDLER. A TRANSITION is an edge
@@ -13,9 +13,11 @@
    else, and its schema is CLOSED to say so.
 
    THE GRAPH IS THIS NAMESPACE'S OWN — a plain map, read through the reading section below
-   and by nothing above it. See `Shape`.
+   and by nothing above it. See `Shape`. What is generic about a graph — a traversal, a
+   path, a component, an isomorphism — is `graph`'s, and the last section here puts it to a
+   machine's use.
 
-   Requires malli, and nothing else — ever."
+   Requires malli and `graph`, and nothing else — ever."
   {:knowledge
    [{:id :the-shape-is-a-graph
      :kind :decision
@@ -69,7 +71,8 @@
      :supersedes [:dependency-ubergraph]
      :cites [:dependency-ubergraph :ubergraph-out-edges-are-a-set :ubergraph-is-equal-and-edn-for-value-attributes :ubergraph-is-a-closed-map-and-fails-silently]}]}
   (:require [malli.core :as m]
-            [malli.util :as mu]))
+            [malli.util :as mu]
+            [robertluo.state-graph.graph :as graph]))
 
 ;;; ---------------------------------------------------------------- vocabulary
 
@@ -1186,13 +1189,10 @@
   [shape id]
   (:schema (attrs shape id)))
 
-(defn- adjacent
-  "{state -> #{state}} over every edge, read from its `near` end to its `far` one, with an
-   entry for every state whether or not an edge touches it."
-  [shape near far]
-  (reduce (fn [m e] (update m (near e) conj (far e)))
-          (zipmap (states shape) (repeat #{}))
-          (::edges shape)))
+(defn- structure
+  "The shape as `graph` reads one: the nodes and the edges, attributes and all."
+  [shape]
+  {:nodes (::nodes shape) :edges (::edges shape)})
 
 (defn successors
   "{state -> the states ONE EDGE AWAY}, for every state, over BOTH KINDS of edge — one an
@@ -1202,14 +1202,14 @@
    nothing: it is an edge, so it is here without anybody being told."
   {:malli/schema [:=> [:cat Shape] [:map-of Id [:set Id]]]}
   [shape]
-  (adjacent shape :from :to))
+  (graph/successors (structure shape)))
 
 (defn predecessors
   "{state -> the states ONE EDGE BEFORE it}, for every state — `successors` with every edge
    reversed, which is what a traversal BACKWARDS from an ending walks."
   {:malli/schema [:=> [:cat Shape] [:map-of Id [:set Id]]]}
   [shape]
-  (adjacent shape :to :from))
+  (graph/predecessors (structure shape)))
 
 (defn transitions
   "Every edge FIRED BY AN EVENT as a plain map — :from :event :to, and the event's
@@ -1497,3 +1497,130 @@
                      (cond-> {:in in :value value
                               :schema (some-> (mu/get-in root path) m/form)}
                        type (assoc :type type)))))))
+
+;;; ------------------------------------------------------------ as a graph
+
+(def Step
+  "One edge of a PATH, as plain data: an event's — {:from :event :to} — or a completion's —
+   {:from :done true :to}, with the :outcome where it is per outcome. Never a guard, a
+   schema or a handler: which event a guard admits is `explore`'s question, not the path's."
+  [:map [:from Id] [:to Id]
+   [:event {:optional true} Id]
+   [:done {:optional true} [:= true]]
+   [:outcome {:optional true} Id]])
+
+(defn- step
+  [{:keys [from to event outcome]}]
+  (if event
+    {:from from :event event :to to}
+    (cond-> {:from from :done true :to to} outcome (assoc :outcome outcome))))
+
+(defn paths
+  "{state -> the SHORTEST PATH to it from `from`}, for every state a run starting there can
+   reach — [] for `from` itself, and no entry for a state it cannot. A path is a vector of
+   `Step`s, EDGES and not states, because two events may join one pair of states and a list
+   of states cannot say which was fired; it reads as the events that get there.
+
+   Shortest in edges, and the same path every time: where two tie, the first in printed
+   order is taken. Over BOTH kinds of edge, so arriving by completing is a step too. One
+   level only — a nested machine is its own shape, and a path through it is asked of it."
+  {:malli/schema [:=> [:cat Shape Id] [:map-of Id [:vector Step]]]
+   :knowledge
+   [{:id :a-path-is-edges
+     :kind :decision
+     :says "A path is a vector of EDGES — {:from :event :to}, or {:from :done true :outcome :to} for a completion — and not of states. It reads as the sequence of events that gets there, which is what a fault's witness wants."
+     :why "A shape is a multi-digraph: two events may join one pair of states, and a list of states cannot say which was fired. Loom's paths are lists of nodes, which is exactly what the parallel edges make ambiguous. No guard is on a step: which event satisfies a guard is `explore`'s question, and a step carries the event's name for it to be asked."
+     :from "the author, 2026-09-25"
+     :when "2026-09-25"
+     :cites [:the-graph-algorithms-are-generic-and-below-the-shape :the-shape-is-a-graph]}]}
+  [shape from]
+  (graph/paths {:nodes (::nodes shape) :edges (map step (::edges shape))} from))
+
+(defn path
+  "The shortest path from one state to another, as `paths` answers it, or nil where no run
+   gets there. (path sh s s) is []."
+  {:malli/schema [:=> [:cat Shape Id Id] [:maybe [:vector Step]]]}
+  [shape from to]
+  (get (paths shape from) to))
+
+(defn components
+  "The STRONGLY CONNECTED COMPONENTS: every state in exactly one set, two states in the same
+   set exactly when a run can go from each to the other. A state on no cycle is alone in its
+   set. Over both kinds of edge, one level only."
+  {:malli/schema [:=> [:cat Shape] [:set [:set Id]]]}
+  [shape]
+  (graph/components (structure shape)))
+
+(defn topsort
+  "The states in an order every edge goes FORWARD in, or nil where the shape has a cycle — a
+   self-loop included, and a machine that loops is most machines. Of states that could go
+   next together, the first in printed order does."
+  {:malli/schema [:=> [:cat Shape] [:maybe [:vector Id]]]}
+  [shape]
+  (graph/topsort (structure shape)))
+
+(defn dag?
+  "Does no run ever come back to a state it has left?"
+  {:malli/schema [:=> [:cat Shape] :boolean]}
+  [shape]
+  (some? (topsort shape)))
+
+(defn- labelled
+  "The shape as `graph` compares one: `canonical`'s plain data, a node labelled with what
+   `canonical` says of it and an edge with everything but its ends. So two shapes compare
+   exactly as their fingerprints are taken, closures being present or absent and no more."
+  [shape]
+  (let [{:keys [states events done]} (canonical shape)]
+    {:nodes (into {} states)
+     :edges (concat (for [[from event to attrs] events]
+                      {:from from :to to :event event :attrs attrs})
+                    (for [[from to attrs] done]
+                      {:from from :to to :done attrs}))}))
+
+(defn isomorphism
+  "A renaming of `a`'s STATES onto `b`'s under which the two are the same machine — as
+   {state-of-a state-of-b} — or nil where there is none. Everything else must match as it
+   stands: event ids, schemas, guards, :out, :sees, :reads, outcomes, :initial and :final.
+
+   The same machine means the same `canonical` form once the states are renamed. A nested
+   child compares by its fingerprint, so a child with its own states renamed is a different
+   child here — ask the children."
+  {:malli/schema [:=> [:cat Shape Shape] [:maybe [:map-of Id Id]]]
+   :knowledge
+   [{:id :isomorphism-renames-states-only
+     :kind :decision
+     :says "Two shapes are isomorphic when some one-to-one renaming of STATE ids makes their canonical forms equal; event ids, schemas, guards, outcomes, :initial and :final must match as they stand. `subgraph?` is containment under the identity renaming."
+     :why "Chosen over pure structure, which ignores every label and so calls two unrelated machines with the same pattern of arrows the same — rarely a question anyone here asks — and over renaming events too, which answers for a copy with its events renamed at the cost of a larger search. Built on `canonical`, so isomorphism is exactly `the fingerprint, modulo state names`."
+     :from "the author, 2026-09-25"
+     :when "2026-09-25"
+     :cites [:the-graph-algorithms-are-generic-and-below-the-shape :a-shape-has-a-derived-id]}]}
+  [a b]
+  (graph/isomorphism (labelled a) (labelled b)))
+
+(defn subgraph?
+  "Is `a` contained in `b` as it stands — every state of `a` in `b`, the same in every
+   respect `canonical` records, and every edge of `a` in `b`? No renaming."
+  {:malli/schema [:=> [:cat Shape Shape] :boolean]}
+  [a b]
+  (graph/subgraph? (labelled a) (labelled b)))
+
+(defn out-degree
+  "How many EDGES leave this state — events and completions, parallel ones counted each. The
+   number of distinct states it leads to is (count ((successors sh) id))."
+  {:malli/schema [:=> [:cat Shape Id] nat-int?]
+   :knowledge
+   [{:id :degree-counts-edges
+     :kind :decision
+     :says "`out-degree` and `in-degree` count EDGES, parallel ones each — two events from :a to :b are 2. Distinct neighbouring states are already (count ((successors sh) id))."
+     :why "It is the multigraph's own answer and loom's, and the other count needed no new function."
+     :from "the author, 2026-09-25"
+     :when "2026-09-25"
+     :cites [:the-shape-is-a-graph]}]}
+  [shape id]
+  (count (filter #(= id (:from %)) (::edges shape))))
+
+(defn in-degree
+  "How many EDGES arrive at this state — see `out-degree`."
+  {:malli/schema [:=> [:cat Shape Id] nat-int?]}
+  [shape id]
+  (count (filter #(= id (:to %)) (::edges shape))))
