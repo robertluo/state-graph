@@ -1164,7 +1164,13 @@
                   [:label :string]
                   [:done :boolean]]}}
     [:cat [:schema [:ref "Shape"]]]
-    [:schema [:ref "Drawing"]]] :knowledge [{:id :a-node-is-labelled-by-its-id
+    [:schema [:ref "Drawing"]]] :knowledge [{:id :a-drawing-is-in-printed-order
+     :kind :decision
+     :says "A drawing's nodes are ordered by their printed id and its edges by their printed form, as `canonical` orders what a fingerprint is taken over, so ONE SHAPE IS ONE DRAWING on every host. Edges came out in the order of the shape's edge SET, which the JVM and node iterate differently; nodes kept declaration order only up to eight states, since the shape's node map is an array map to eight and a hash map past it — so declaration order was never a promise, only an accident of small shapes that the two-state examples in labelled_test happened to rely on. It is not a promise now either: the order is printed order."
+     :from "a review of PR #4, 2026-09-25, which found both; the author chose sorting over keeping declaration order in the shape"
+     :when "2026-09-25"
+     :cites [:a-node-is-labelled-by-its-id :the-fingerprint-is-the-same-on-every-host]}
+    {:id :a-node-is-labelled-by-its-id
      :kind :decision
      :says "Labels are the name and the structural markers — ▸ initial, ◼ final, ⊞ n states for a nesting node, a guard on an arrow — and nothing else. The schema is not in the label, and it used to be."
      :why "What a drawing is FOR is structure — an unreachable state is obvious in a picture and invisible in a map literal — and a schema is precisely the part of a shape a map literal DOES show. Measured on the first real consumer: twelve labels, the longest 1,183 characters, a dot source of 10,408, and dot -Tpng printed `graph is too large for cairo-renderer bitmaps`, scaled, and wrote a ZERO-BYTE FILE. After: 1,007 characters of dot and a 120KB PNG. All markers kept are STRUCTURAL, which is the test for anything wanting into a label."
@@ -1206,7 +1212,10 @@
                     (concat (shape/transitions sh)
                             (for [[from cs] (shape/continuations sh), c cs]
                               (assoc c :from from :done true))))]
-    {:nodes nodes :edges edges}))
+    ;; SORTED, BOTH: a shape keeps its nodes in a map and its edges in a set, and neither
+    ;; iterates in one order on every host. See :a-drawing-is-in-printed-order.
+    {:nodes (vec (sort-by (comp pr-str :id) nodes))
+     :edges (vec (sort-by pr-str edges))}))
 
 (defn- dot-escape
   [s]

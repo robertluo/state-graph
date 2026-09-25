@@ -29,7 +29,7 @@
                            (shape/event :submit [:map])
                            (shape/transition :draft :submit :done))
           d (labelled sh)]
-      (is (= {:nodes [{:label "\u25b8 draft" :id :draft} {:label "\u25fc done" :id :done}]
+      (is (= {:nodes [{:label "\u25fc done" :id :done} {:label "\u25b8 draft" :id :draft}]
               :edges [{:done false :from :draft :label "submit" :to :done}]}
              d)))))
 
@@ -40,7 +40,7 @@
                                                        :initial true})
                            (shape/state :end [:map] {:final true}))
           d (labelled sh)]
-      (is (= {:nodes [{:nested 1 :label "\u25b8 \u229e 1 work" :id :work} {:label "\u25fc end" :id :end}]
+      (is (= {:nodes [{:label "\u25fc end" :id :end} {:nested 1 :label "\u25b8 \u229e 1 work" :id :work}]
               :edges [{:done true :from :work :label "" :to :end}]}
              d)))))
 
@@ -108,3 +108,12 @@
            (clojure.string/includes? (:label (by-id (last ids))) "\u25fc")
            (every? #(not (clojure.string/includes? (:label (by-id %)) "\u25b8")) middle-ids)
            (every? #(not (clojure.string/includes? (:label (by-id %)) "\u25fc")) middle-ids)))))
+
+(defspec a-drawing-does-not-depend-on-the-order-the-parts-were-declared 100
+  ;; The same parts in another order are the same shape, so they must be the same drawing.
+  ;; Nodes followed declaration order before, which this refutes on any shape of two states or
+  ;; more. See :a-drawing-is-in-printed-order.
+  (prop/for-all [[parts shuffled] (gen/bind ts/gen-shape
+                                            (fn [parts] (gen/fmap #(vector parts %) (gen/shuffle parts))))]
+    (= (labelled (apply shape/shape parts))
+       (labelled (apply shape/shape shuffled)))))

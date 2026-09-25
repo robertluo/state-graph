@@ -54,15 +54,30 @@
      :when "2026-09-25"
      :cites [:core-async-is-the-async-default]}]}
   (:require [clojure.core.async :as a]
-            [clojure.core.async.impl.protocols :as p]))
+            ;; The JVM names the protocol's interface directly in `port?`, and core.async has
+            ;; loaded it; only ClojureScript asks the protocol by its alias.
+            #?(:cljs [clojure.core.async.impl.protocols :as p])))
 
 ;;; ---------------------------------------------------------------- vocabulary
 
 (defn- port?
   "Whether `x` is something a value can be taken from. core.async publishes no predicate,
-   and ReadPort is the protocol every channel and promise-chan implements."
+   and ReadPort is the protocol every channel and promise-chan implements.
+
+   instance? ON THE JVM, not satisfies?: this is asked of every step's answer and every
+   bind, and the common answer is NO — a plain map — which is where satisfies? walks the
+   class's ancestors. Every core.async port implements the protocol's interface directly,
+   so the answers are the same. See :port-is-asked-by-instance-on-the-jvm."
+  {:knowledge
+   [{:id :port-is-asked-by-instance-on-the-jvm
+     :kind :decision
+     :says "`port?` is instance? on the JVM and satisfies? only on ClojureScript. It is asked of every step's answer and every bind, and the usual answer is NO, a plain map, which is exactly where satisfies? walks the class's ancestors. MEASURED here: 20,000 events through `sg/run` took about 630 ms with satisfies? and about 240 ms with instance?, the reviewer's own figures being 590 and 225. Every core.async port implements the protocol's interface directly, so the answers do not change; what is given up is a foreign port that satisfies ReadPort only by extend-protocol, which nothing here makes."
+     :from "a review of PR #4, 2026-09-25, suggesting the change with its measurement; the author agreed"
+     :when "2026-09-25"
+     :cites [:core-async-is-the-async-default]}]}
   [x]
-  (satisfies? p/ReadPort x))
+  #?(:clj  (instance? clojure.core.async.impl.protocols.ReadPort x)
+     :cljs (satisfies? p/ReadPort x)))
 
 (defn- error?
   "Whether a value that came off a channel is an exception handed on in place of one."
