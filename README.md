@@ -1049,4 +1049,4 @@ running the suites: the drawing tests shell out to `dot`.
   graphviz was installed cannot draw. The environment the suites need is a JDK, the Clojure CLI
   and graphviz on the `PATH` — `draw_test` and `dot_test` render for real, in the unit suite.
 - `clojure -T:build ci` cleans, runs both suites and builds the jar; `clojure -T:build deploy`
-  publishes it to Clojars as `io.github.robertluo/state-graph`. Licence: EPL-1.0, in LICENSE.
+  publishes it to Clojars as `io.github.robertluo/state-graph`. Licence: MIT, in LICENSE.

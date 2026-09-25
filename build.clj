@@ -14,8 +14,8 @@
           :scm      {:url "https://github.com/robertluo/state-graph"}
           :pom-data [[:licenses
                       [:license
-                       [:name "Eclipse Public License 1.0"]
-                       [:url "https://opensource.org/license/epl-1-0/"]]]]}
+                       [:name "MIT License"]
+                       [:url "https://opensource.org/license/mit/"]]]]}
          opts))
 
 (defn tests
