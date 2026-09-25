@@ -18,11 +18,11 @@ A finite state machine whose SHAPE is a graph — so it can be drawn, checked an
 one, and a compiler can turn it into an ordinary Clojure function.
 
 > **Source of truth.** TWO PLACES, AND EACH WINS ABOUT SOMETHING DIFFERENT.
-> README.md IS THE SPECIFICATION. Every example in it was run against the code before it
-> was written down, so PROPOSED is not a category: everything is built, and a divergence
-> is a bug. It also carries the LIMITS deliberately — no state-dependent update without a
-> view, no internal events, no persistence, no orthogonal regions — so a user meets one of
-> those in the README and not in a surprise.
+> THE TUTORIAL IS THE SPECIFICATION, since 2026-09-25: notebook/tutorial.clj works the whole
+> API through, and rendering it RUNS every example, so a divergence is a bug the render
+> finds. It carries the LIMITS too, in *What it does not do*, so a user meets one there and
+> not in a surprise. README.md is the pitch — purpose, a scenario, prior art, the key API —
+> and every example in it was run against the code before it was written down as well.
 >
 > THE SOURCE IS THE RECORD. What this library knows about itself — every design decision,
 > every rule, every alternative turned down, every lesson a run taught and every question
@@ -190,10 +190,10 @@ stateDiagram-v2
 
 ## :initialize
 
-Read README.md — it is the specification. Then the `:knowledge` of the vars the change
-touches, and every `:kind :open` node among them: if the change touches one, settle it with
-the human FIRST and write the answer down. Check *Gaps in the repository* before running
-anything that depends on a gap
+Read notebook/tutorial.clj — it is the specification — and README.md for the purpose.
+Then the `:knowledge` of the vars the change touches, and every `:kind :open` node among
+them: if the change touches one, settle it with the human FIRST and write the answer down.
+Check *Gaps in the repository* before running anything that depends on a gap
 
 | on | goes to | guard |
 |---|---|---|
@@ -202,7 +202,7 @@ anything that depends on a gap
 
 ## :decide
 
-A design question the README does not answer. Put it to the human in one sentence with a
+A design question the tutorial does not answer. Put it to the human in one sentence with a
 recommendation, not a survey. Record the answer as a `:decision` node on the var it is
 about, `:supersedes` the `:open` node it answers, and leave that node where it is — an
 answered question deleted is a question that gets asked again, and one left as `:open` too
