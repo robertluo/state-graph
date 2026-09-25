@@ -17,8 +17,8 @@
 (def namespaces
   "Every namespace whose :knowledge is collected — the seven of src, the facade and the test
    support. The tutorial is read separately, see `tutorial-nodes`."
-  '[robertluo.state-graph.graph robertluo.state-graph.shape robertluo.state-graph.compile robertluo.state-graph.check
-    robertluo.state-graph.async robertluo.state-graph.drive robertluo.state-graph.explore
+  '[robertluo.state-graph.graph robertluo.state-graph.shapes robertluo.state-graph.compiler robertluo.state-graph.check
+    robertluo.state-graph.async robertluo.state-graph.crank robertluo.state-graph.explore
     robertluo.state-graph robertluo.state-graph.test-support])
 
 (def Node

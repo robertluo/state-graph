@@ -1,4 +1,4 @@
-(ns robertluo.state-graph.compile
+(ns robertluo.state-graph.compiler
   "shape -> (fn [state event] state'). The only namespace that turns data into a
    function.
 
@@ -22,7 +22,7 @@
     {:id :inject-a-function-and-never-thread-options
      :kind :rule
      :says "Do not thread options through layers this library does not own — inject a function that closes over them. The Context is the pattern: the compiler is parameterised by HOW A VALUE BECOMES AVAILABLE and never learns what a deferred is; the async layer is handed a compiled step and never learns what a shape is."
-     :see [:robertluo.state-graph.compile/Context]}
+     :see [:robertluo.state-graph.compiler/Context]}
     {:id :inner-first
      :kind :decision
      :says "A nested child gets every event BEFORE the node's own edges do, so the parent's edges are the ESCAPE and the child's own vocabulary decides who handles an event — :authorize is the payment's word and the order never sees it; :cancel is not, so it escapes at once. A finished child admits nothing and stops competing, so every later event falls straight through to the parent."
@@ -58,17 +58,17 @@
      :kind :decision
      :says "A patch carries :depth, and the two halves of the step compare it against their own lookup — a child's patch may only be applied to that child, and this machine's only to this machine. One comparison per level checks the whole descent."
      :why "The bug the seam caught was one layer up: the async layer handed `apply` the patch DEFERRED rather than the patch, and the seam failed loudly at :depth instead of merging nonsense. Nine errors, all one cause."
-     :see [:robertluo.state-graph.compile/phases]
+     :see [:robertluo.state-graph.compiler/phases]
      :cites [:the-split-is-decided-by-what-each-crossing-depends-on]}
     {:id :the-patch-is-never-stale-only-the-admission-is
      :kind :decision
      :says "A handler answers from the event alone, so what it computed while the machine was in S is still exactly right in T; only whether T admits the event can have changed, and that is looked up again at application time. The exception is a handler that READS a view, which is why the concurrency condition includes reads."
-     :see [:robertluo.state-graph.compile/phases]
+     :see [:robertluo.state-graph.compiler/phases]
      :cites [:a-handler-belongs-to-the-event :a-handler-never-sees-the-state]}]}
   (:refer-clojure :exclude [compile])
   (:require [malli.core :as m]
             [malli.util :as mu]
-            [robertluo.state-graph.shape :as shape]))
+            [robertluo.state-graph.shapes :as shape]))
 
 (def State
   "A state is a map that says which node it is in, and optionally which RUN it belongs
@@ -169,7 +169,7 @@
 
    The cost, said out loud: this can block for ever. No timeout is chosen because that is
    policy; clojure.core/deref has a 3-arity if a bounded wait is ever wanted."
-  {:then    (fn [v f] (f (if (instance? clojure.lang.IDeref v) @v v)))
+  {:then    (fn [v f] (f (if #?(:clj (instance? clojure.lang.IDeref v) :cljs (satisfies? IDeref v)) @v v)))
    :pure    identity
    :ignored (fn [state _event] state)})
 
@@ -473,7 +473,12 @@
    throws rather than being quietly ignored."
   {:malli/schema [:=> [:cat shape/Shape [:maybe Context]] Phases]
    :knowledge
-   [{:id :the-split-is-decided-by-what-each-crossing-depends-on
+   [{:id :a-keyword-is-not-identical-to-itself-in-clojurescript
+     :kind :lesson
+     :says "The patch phase says `nothing admitted this` by answering the sentinel ::missed, and `applying` tested for it with identical?. On the JVM a keyword is interned, so that held; in ClojureScript keywords are NOT interned, two ::missed literals are two objects, and the first ClojureScript run of the suite applied the sentinel as a patch — `No edge admits this event where its patch is applied` from fourteen tests and three properties, every one an ignored event. It is = now. Found by nothing but running the same suite on the second host."
+     :when "2026-09-25"
+     :cites [:the-split-is-decided-by-what-each-crossing-depends-on]}
+    {:id :the-split-is-decided-by-what-each-crossing-depends-on
      :kind :decision
      :says "The step is in two halves — a PATCH half that runs the handler and an APPLY half that lands it — and which crossing belongs to which is decided by what it depends on. :event, :sees and :out are the patch half; :answer and :enter are the apply half. :answer FORCED the split to exist: a patch-schema is the TARGET'S own schema, and a licensed patch is applied where the target may be a different node from the one it was computed against."
      :why "The only reason the split exists is that a licensed pair of events may run at once, and taking that licence needs the handler run apart from the application. The lookup is done twice, once per half, and the second is the authority: it reads the edge from the state the patch is actually landing on, and its absence is a defect that throws."
@@ -554,7 +559,9 @@
 
       (applying
         [state event p]
-        (if (identical? ::missed p)
+        ;; = AND NOT identical?: ClojureScript does not intern keywords, so two ::missed
+        ;; are two objects there. See :a-keyword-is-not-identical-to-itself-in-clojurescript.
+        (if (= ::missed p)
           (pure (ignored state event))
           (let [m (inner state event)]
             ;; THE TWO HALVES MUST AGREE ABOUT WHOSE EVENT IT IS. A patch a child's handler

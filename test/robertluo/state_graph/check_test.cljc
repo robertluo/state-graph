@@ -1,5 +1,5 @@
 (ns robertluo.state-graph.check-test
-  (:require [clojure.java.io :as io]
+  (:require #?(:clj [clojure.java.io :as io])
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check.clojure-test :refer [defspec]]
@@ -8,12 +8,12 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.compile :as c]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.compiler :as c]
+            [robertluo.state-graph.shapes :as shape]
             [robertluo.state-graph.test-support :as ts])
-  (:import (java.io File)
-           (java.nio.file Files)
-           (java.nio.file.attribute FileAttribute)))
+  #?(:clj (:import (java.io File)
+                   (java.nio.file Files)
+                   (java.nio.file.attribute FileAttribute))))
 
 (use-fixtures :once ts/instrumented)
 
@@ -270,20 +270,21 @@
 
 ;;; ---------------------------------------------------------------------- drawing
 
-(deftest ^:integration draw-renders-a-picture
-  ;; The only test of the RENDERING path, as opposed to the source: it shells out to
-  ;; `dot`, which is why graphviz is in devenv.nix. A machine without it fails here and
-  ;; nowhere else — the :dot test above needs nothing.
-  (let [f (str (Files/createTempFile "state-graph" ".png" (into-array FileAttribute [])))]
-    (try
-      (check/draw! (ts/counter) {:save {:filename f :format :png}})
-      (let [magic (with-open [in (io/input-stream f)]
-                    (let [buf (byte-array 4)] (.read in buf) (vec buf)))]
-        ;; asserted on the MAGIC BYTES, because a file existing proves only that
-        ;; something wrote one — these prove graphviz actually drew the thing
-        (is (= [-119 80 78 71] magic) "0x89 P N G")
-        (is (< 1000 (.length (File. f))) "three states do not render in a few bytes"))
-      (finally (.delete (File. f))))))
+#?(:clj
+   (deftest ^:integration draw-renders-a-picture
+     ;; The only test of the RENDERING path, as opposed to the source: it shells out to
+     ;; `dot`, which is why graphviz is in devenv.nix. A machine without it fails here and
+     ;; nowhere else — the :dot test above needs nothing.
+     (let [f (str (Files/createTempFile "state-graph" ".png" (into-array FileAttribute [])))]
+       (try
+         (check/draw! (ts/counter) {:save {:filename f :format :png}})
+         (let [magic (with-open [in (io/input-stream f)]
+                       (let [buf (byte-array 4)] (.read in buf) (vec buf)))]
+           ;; asserted on the MAGIC BYTES, because a file existing proves only that
+           ;; something wrote one — these prove graphviz actually drew the thing
+           (is (= [-119 80 78 71] magic) "0x89 P N G")
+           (is (< 1000 (.length (File. f))) "three states do not render in a few bytes"))
+         (finally (.delete (File. f)))))))
 
 ;;; ---------------------------------------------------------------- nesting
 

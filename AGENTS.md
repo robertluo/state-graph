@@ -36,7 +36,7 @@ one, and a compiler can turn it into an ordinary Clojure function.
 
 ## Knowledge, and how to reach it
 
-    (-> #'robertluo.state-graph.shape/fingerprint meta :knowledge)   ; every node on a var
+    (-> #'robertluo.state-graph.shapes/fingerprint meta :knowledge)   ; every node on a var
     (-> (the-ns 'robertluo.state-graph) meta :knowledge)             ; every node on a namespace
 
 A node is a map with `:id`, `:kind`, `:says`, and edges — `:see` to code, `:cites` and
@@ -57,13 +57,14 @@ suite.
 |---|---|
 | `:tests-clojure-test` | true |
 | `:tests-generative-first` | true |
-| `:test-tree` | test/, one `<ns>_test.clj` per source namespace, plus knowledge_test.clj over all of them |
-| `:test-runner` | kaocha, two suites: unit and integration, separated by a ^:integration meta |
+| `:test-tree` | test/, one `<ns>_test` per source namespace, plus knowledge_test.clj over all of them. `.cljc` where the suite runs on both hosts, `.clj` where it is the JVM's alone: async_test and the facade's (they block with <!!), knowledge_test (it reads var metadata) and draw_test (it shells out). A JVM-only form inside a `.cljc` suite is `#?(:clj ...)` |
+| `:test-runner` | kaocha on the JVM, two suites: unit and integration, separated by a ^:integration meta; cljs-test-runner on node for every `.cljc` suite, which knows no ^:integration — so an integration test in a `.cljc` file is `#?(:clj ...)` |
 | `:notebook-cmd` | clojure -X:notebook — renders notebook/tutorial.clj to docs/tutorial.html, offline |
 | `:test-cmd-fast` | clojure -M:dev:test unit |
 | `:test-cmd-gate` | clojure -M:dev:test integration — needs graphviz, so run it inside the devenv |
+| `:test-cmd-cljs` | clojure -M:cljs-test — compiles to target/cljs-test and runs on node, so run it inside the devenv. The first compile prints five `goog.math.Long` warnings from test.check's own ClojureScript: noise, not ours |
 | `:lint-cmd` | clojure -M:lint --lint src test notebook — an ALIAS, not a binary on the path |
-| `:release-cmd` | clojure -T:build ci — clean, both suites, the jar in target/; clojure -T:build deploy — to Clojars as io.github.robertluo/state-graph, version 0.1.<commit count>. LICENSE is MIT and CHANGELOG.md is the list of facts per version |
+| `:release-cmd` | clojure -T:build ci — clean, both JVM suites, the ClojureScript suite, the jar in target/; clojure -T:build deploy — to Clojars as io.github.robertluo/state-graph, version 0.1.<commit count>. LICENSE is MIT and CHANGELOG.md is the list of facts per version |
 | `:ci` | .github/workflows/ci.yml — `devenv test` on ubuntu, on a push to main and on every pull request against it. Nix and devenv are installed by the workflow, so devenv.nix is the one toolchain |
 | `:eval-mechanism` | :nrepl-exclusive |
 | `:malli-shapes-all-data` | true |
@@ -72,8 +73,8 @@ suite.
 | `:repl-launch-cmd` | clojure -M:dev:nrepl, from inside the devenv |
 | `:repl-discover-cmd` | clj-nrepl-eval --discover-ports |
 | `:repl-eval-cmd` | clj-nrepl-eval -p `<port>` |
-| `:repl-eval-reload` | :per-namespace-in-dependency-order — graph, shape, compile, check, async, drive, explore, the facade. NEVER :reload-all; see the shape namespace's `:never-reload-all` |
-| `:deps` | {:malli "0.20.1", :core.async "1.9.865" — manifold until 2026-09-25, see the async namespace's `:core-async-is-the-async-default`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
+| `:repl-eval-reload` | :per-namespace-in-dependency-order — graph, shapes, compiler, check, async, crank, explore, the facade. NEVER :reload-all; see the shapes namespace's `:never-reload-all` |
+| `:deps` | {:malli "0.20.1", :core.async "1.9.865" — manifold until 2026-09-25, see the async namespace's `:core-async-is-the-async-default`, :test.check "1.1.3" — at RUNTIME on purpose, `check/laws` generating through malli.generator, see check's `:dependency-test-check`, :dev {:nrepl "1.3.0", :kaocha "1.91.1392"}, :notebook {:clay "2.0.22"}, :cljs-test {:clojurescript "1.12.145", :cljs-test-runner "3.8.1"}, :build {:build-clj "5d45f58", the author's fork — `clojure -T:build ci` and `deploy`, see build.clj}} |
 
 ## Working here
 
@@ -90,7 +91,9 @@ suite.
   changed .clj file after a shell command and refuses the turn if one will not read
 - THE FORMATTER HOOK fires on the file-writing TOOLS and not on a shell command, and it
   will reflow a whole source file on first touch. Edit through the REPL or the shell
-- COMMIT GATE: clojure -M:dev:test integration passes. The fast suite is for every save.
+- COMMIT GATE: clojure -M:dev:test integration passes, and so does clojure -M:cljs-test where
+  a `.cljc` file changed — the JVM cannot see a ClojureScript-only bug, and the first run on
+  node found one. The fast suite is for every save.
   If the change touched the notebook or the vocabulary it uses, RENDER IT — a tutorial
   example that cannot run is a lie the suite will never see
 
@@ -221,7 +224,7 @@ REPL before anything is built on it. A schema is the cheapest place to be wrong
 
 ## :implement
 
-Write it in src/, lowest layer first (graph, then shape, then compile, then a default, then the
+Write it in src/, lowest layer first (graph, then shapes, then compiler, then a default, then the
 facade). One `<ns>_test.clj` per source namespace as you go, ^:integration on anything that
 opens a file, a socket or a real clock. Dependencies point down only — see the facade's
 `:dependencies-point-down-only`

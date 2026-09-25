@@ -1,10 +1,10 @@
-(ns robertluo.state-graph.compile-test
+(ns robertluo.state-graph.compiler-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [robertluo.state-graph.compile :as c]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.compiler :as c]
+            [robertluo.state-graph.shapes :as shape]
             [robertluo.state-graph.test-support :as ts]))
 
 (use-fixtures :once ts/instrumented)
@@ -60,7 +60,7 @@
                        (shape/state :b [:map] {:final true})
                        (shape/event :go [:map] (constantly {:id :somewhere-else}))
                        (shape/transition :a :go :b))
-        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+        e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                                 ((c/compile g) (c/initial g {}) {:id :go})))]
     (is (= :answer (:crossing (ex-data e))))
     (is (= :malli.core/extra-key (:type (first (:errors (ex-data e))))))
@@ -75,7 +75,7 @@
                        (shape/state :b [:map [:n :int]] {:final true})
                        (shape/event :go [:map] (constantly {:n 1 :typo 2}))
                        (shape/transition :a :go :b))
-        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+        e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                                 ((c/compile g) (c/initial g {}) {:id :go})))]
     (is (= [:typo] (:in (first (:errors (ex-data e))))))))
 
@@ -97,7 +97,7 @@
                                 (shape/state :b [:map] {:final true})
                                 (shape/event :go [:map] (constantly {}))
                                 (shape/transition :a :go :b))
-            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"enter" (c/initial strict {})))]
+            e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"enter" (c/initial strict {})))]
         ;; :schema is the OFFENDING CHILD and not the enclosing map, which is what
         ;; malli's own (:schema error) would give for a missing key; :type is what
         ;; tells a missing key from one whose value is legitimately nil.
@@ -125,7 +125,7 @@
                     (shape/state :b [:map] {:final true})
                     (shape/event :go [:map] (constantly {:instance "somebody-elses"}))
                     (shape/transition :a :go :b))
-            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+            e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                                     ((c/compile sneaky) (c/initial sneaky "mine" {}) {:id :go})))]
         (is (= [:instance] (:in (first (:errors (ex-data e))))))))
 
@@ -144,8 +144,9 @@
   ;; tested with no async library in sight. A core.async channel is NOT IDeref; see the
   ;; async namespace's `blocking` for the Context that takes from one.
   (doseq [[what wrap] [["a delay"   #(delay %)]
-                       ["a promise" #(doto (promise) (deliver %))]
-                       ["a future"  #(future %)]
+                       ;; the JVM's alone: ClojureScript has no promise and no future
+                       #?@(:clj [["a promise" #(doto (promise) (deliver %))]
+                                 ["a future"  #(future %)]])
                        ["a plain map, which is not IDeref at all" identity]]]
     (testing what
       (let [g (shape/shape (shape/state :a [:map] {:initial true})
@@ -206,7 +207,7 @@
         running (step (c/initial g {}) {:id :start :seed 0})]
 
     (testing "an event that is not what its edge says it is"
-      (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"event"
+      (let [e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"event"
                                     (step running {:id :set :to "seven"})))]
         (is (= {:from :running :event :set :to :running :crossing :event}
                (select-keys (ex-data e) [:from :event :to :crossing])))
@@ -218,7 +219,7 @@
                              (shape/state :b [:map [:n :int]] {:final true})
                              (shape/event :go [:map] (constantly {:n "seven"}) [:map [:n :int]])
                              (shape/transition :a :go :b))
-            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"out"
+            e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"out"
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :out (:crossing (ex-data e))))
         (is (= {:n "seven"} (:value (ex-data e))))))
@@ -230,7 +231,7 @@
                              (shape/state :b [:map [:n :int]] {:final true})
                              (shape/event :go [:map] (constantly {:n "seven"}))
                              (shape/transition :a :go :b))
-            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+            e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :answer (:crossing (ex-data e))))
         (is (= {:n "seven"} (:value (ex-data e))))))
@@ -242,7 +243,7 @@
                              (shape/state :b [:map [:n :int]] {:final true})
                              (shape/event :go [:map] (constantly {}))
                              (shape/transition :a :go :b))
-            e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"enter"
+            e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"enter"
                                     ((c/compile bad) (c/initial bad {}) {:id :go})))]
         (is (= :enter (:crossing (ex-data e))))
         (is (= :malli.core/missing-key (:type (first (:errors (ex-data e))))))))))
@@ -316,7 +317,7 @@
                   (shape/state :paying [:map] {:machine (child)})
                   (shape/event :checkout [:map] (constantly {:sub {:id :hacked}}) [:map])
                   (shape/transition :cart :checkout :paying))
-        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"answer"
+        e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                                 ((c/compile reaching) (c/initial reaching {}) {:id :checkout})))]
     (is (= [:sub] (:in (first (:errors (ex-data e)))))))
 
@@ -437,7 +438,7 @@
         step (c/compile g)]
     (is (= {:id :b} (step (c/initial g {:goal "there"}) {:id :go}))
         "the optional key was there, so the view held")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a valid sees"
+    (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"Not a valid sees"
                           (step (c/initial g {}) {:id :go}))
         "and when it was not, the crossing says so rather than the handler finding a nil")))
 
@@ -488,7 +489,7 @@
   (let [g (judging)
         step (c/compile g)
         s0 (c/initial g {:code "x"})]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a valid event"
+    (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"Not a valid event"
                           (step s0 {:id :judged :verdict :amber})))
     (is (= s0 (step s0 {:id :nothing-fires-this}))
         "while an event with no edge at all is still the quiet miss it always was")))
@@ -514,7 +515,7 @@
         s0 (c/initial sh {})]
     (is (= {:answer {:n 4} :depth 0} (patch s0 {:id :start :seed 4}))
         "the handler's answer, and the depth of the machine that owns it")
-    (is (= :robertluo.state-graph.compile/missed (patch s0 {:id :stop}))
+    (is (= :robertluo.state-graph.compiler/missed (patch s0 {:id :stop}))
         "and an event no edge admits is not a patch at all — no handler ran")))
 
 (deftest the-patch-is-never-stale-only-the-admission-is
@@ -564,10 +565,10 @@
         "the child's handler ran, and the patch says it was one level down")
     (is (= {:id :p :sub {:id :c2 :v 1}} (apply s0 {:id :inner :v 1} deep))
         "and applied to the child, it lands in the child")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Patch does not belong"
+    (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"Patch does not belong"
                           (apply s0 {:id :inner :v 1} (assoc deep :depth 0)))
         "a child's patch claimed for the parent is refused")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Patch does not belong"
+    (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"Patch does not belong"
                           (apply s0 {:id :out} {:answer {} :depth 1}))
             "and so is the parent's claimed for a child that does not admit it")))
 
@@ -613,7 +614,7 @@
         ep {:id :p :best {:score 5 :by "pinned"}}
         eq {:id :q :best {:score 9 :by "z"}}]
     (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"combine declared commutative is not"
+         #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"combine declared commutative is not"
          (agree s0 ep (patch s0 ep) eq (patch s0 eq)))
         "the exact case 2,744 generated triples could not reach")
     (testing "and it is silent where the promise holds"
@@ -760,7 +761,7 @@
                                      {:machine child :seed [:map [:job :string]]})
                         (shape/event :go [:map])
                         (shape/transition :a :go :b))
-        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"seed"
+        e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"seed"
                                 ((c/compile sh) (c/initial sh {}) {:id :go})))]
     (is (= :seed (:crossing (ex-data e))))
     (is (= :b (:to (ex-data e))))))
@@ -775,7 +776,7 @@
         sh (shape/shape (shape/state :p [:map] {:initial true :machine child
                                                 :done :z :yield [:map [:receipt :string]]})
                         (shape/state :z [:map [:receipt :string]] {:final true}))
-        e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"yield"
+        e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"yield"
                                 ((c/compile sh) (c/initial sh {}) {:id :fin :other 1})))]
     (is (= :yield (:crossing (ex-data e))))
     (is (= :p (:from (ex-data e))))))

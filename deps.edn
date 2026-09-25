@@ -9,6 +9,13 @@
   :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.3.0"}}
           :main-opts ["-m" "nrepl.cmdline"]}
   :test {:main-opts ["-m" "kaocha.runner"]}
+  ;; clojure -M:cljs-test — every .cljc test namespace, compiled by ClojureScript and run on
+  ;; node. The .clj ones are the JVM's alone, and kaocha runs those. Needs node on the PATH,
+  ;; which devenv.nix provides.
+  :cljs-test {:extra-paths ["test"]
+              :extra-deps {org.clojure/clojurescript {:mvn/version "1.12.145"}
+                           olical/cljs-test-runner {:mvn/version "3.8.1"}}
+              :main-opts ["-m" "cljs-test-runner.main" "--out" "target/cljs-test"]}
   ;; clojure -X:notebook renders notebook/tutorial.clj to docs/tutorial.html. :render
   ;; implies show/serve/browse false, so it needs no browser; drop it for a live page.
   :notebook {:extra-paths ["notebook"]

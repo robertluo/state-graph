@@ -93,8 +93,8 @@
      :says "A completion is never :no-report, and the ordering of `why` says so: that reason is about an event only the WORLD can supply, and ARRIVING is not something anybody supplies. Asked as membership in the completion set rather than by the source state, a nesting node's own edges being its escape and perfectly ordinary events."
      :cites [:a-completion-transition-is-scored-too]}]}
   (:require [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.drive :as drive]
-            [robertluo.state-graph.shape :as shape]))
+            [robertluo.state-graph.crank :as drive]
+            [robertluo.state-graph.shapes :as shape]))
 
 (def ^{:knowledge
        [{:id :a-step-cap-where-drive-has-none

@@ -12,6 +12,14 @@ io.github.robertluo/state-graph {:git/url "https://github.com/robertluo/state-gr
                                  :git/sha "<a commit>"}
 ```
 
+**Clojure and ClojureScript.** Every namespace is `.cljc`. A shape builds, checks, compiles,
+reduces, cranks and explores on both hosts, with the same fingerprint on each — the suites
+for all of that run on node as well as on the JVM. The stream door, `sg/run`, compiles for
+ClojureScript, but its suite blocks with `<!!` and so runs on the JVM only for now. What is
+the JVM's alone by nature: `draw!`, which shells out to graphviz (`dot`, the source, is
+everywhere), and `async/blocking`, because a JavaScript host cannot block. A schema holding a
+*float* is the one thing that prints, and so fingerprints, differently on the two.
+
 ## Tutorial
 
 [`notebook/tutorial.clj`](notebook/tutorial.clj) works the whole API through in order and
@@ -1114,14 +1122,20 @@ Said plainly, because each is a design decision and not an oversight.
 
 Plus the schemas it publishes: `Instance`, `State`, `Event`, `Transition`.
 
-Underneath, and directly usable — the facade is the convenience, these are the truth:
-`.graph` (paths, components, topological order, isomorphism and containment over any plain
-labelled multigraph — `.cljc`, and knowing nothing of machines), `.shape` (the graph and its
-referential checks), `.compile` (shape → function), `.check`
-(the static checks and the drawing), `.drive` (the crank: `awaits`, `awaiting`, `where`,
-`advance`, `step`, `drive`), `.explore` (`covering`: the same questions asked by *running*
-it), `.async` (core.async channels, `.cljc`: `drive` for one machine, `fan` for many, `context`
-and, on the JVM, `blocking`). Nothing below `.async` requires core.async, `.drive` included.
+Underneath are the **implementation namespaces**. They can be required, and the examples
+above reach into two of them as `shape/` and `drive/`, but their names are not part of the
+API and may change — the facade's are. They are `.graph` (paths, components, topological
+order, isomorphism and containment over any plain labelled multigraph, knowing nothing of
+machines), `.shapes` (the graph and its referential checks — `shape/` above), `.compiler`
+(shape → function), `.check` (the static checks and the drawing), `.crank` (`awaits`,
+`awaiting`, `where`, `advance`, `step`, `drive` — `drive/` above), `.explore` (`covering`: the
+same questions asked by *running* it), `.async` (core.async channels: `drive` for one
+machine, `fan` for many, `context` and, on the JVM, `blocking`). Nothing below `.async`
+requires core.async, `.crank` included.
+
+**Why `.shapes`, `.compiler` and `.crank`, and not the facade's own words:** in ClojureScript
+a namespace `a.b.c` and a var `a.b/c` are the same JavaScript path, so the facade's `shape`,
+`compile` and `drive` could not live beside namespaces of those names.
 
 Dependencies: malli, core.async, test.check — no graph library, the graph being a plain map the
 library owns; test.check at runtime and on purpose, since `check/laws` generates through
@@ -1134,14 +1148,17 @@ running the suites: the drawing tests shell out to `dot`.
   in the test fixture and conformed by hand at the seams that must hold in production.
 - Unit tests are generative first (test.check), and a property is an *independent* invariant
   rather than the implementation restated.
-- Two suites over one tree, split by a `^:integration` meta: `clojure -M:dev:test unit` for
-  every save, `clojure -M:dev:test integration` as the gate before a commit.
+- Two JVM suites over one tree, split by a `^:integration` meta: `clojure -M:dev:test unit`
+  for every save, `clojure -M:dev:test integration` as the gate before a commit. And a
+  ClojureScript suite, `clojure -M:cljs-test`: every `.cljc` test namespace compiled and run
+  on node, which is the gate for any change to a `.cljc` file.
 - Do not start a plain `clojure repl`. nREPL is the only evaluator: discover with
   `clj-nrepl-eval --discover-ports`, launch with `clojure -M:dev:nrepl`, eval with
   `clj-nrepl-eval -p <port>`. Use `:reload` per namespace in dependency order — never
   `:reload-all`, which redefines malli's own protocols and breaks every instrumented var.
 - Drawing shells out to `dot`, and a JVM inherits its `PATH` at launch: a REPL started before
-  graphviz was installed cannot draw. The environment the suites need is a JDK, the Clojure CLI
-  and graphviz on the `PATH` — `draw_test` and `dot_test` render for real, in the unit suite.
-- `clojure -T:build ci` cleans, runs both suites and builds the jar; `clojure -T:build deploy`
+  graphviz was installed cannot draw. The environment the suites need is a JDK, the Clojure
+  CLI, graphviz and node on the `PATH` — `draw_test` renders for real, in the unit suite, and
+  the ClojureScript suite runs on node. `devenv.nix` provides all four.
+- `clojure -T:build ci` cleans, runs every suite and builds the jar; `clojure -T:build deploy`
   publishes it to Clojars as `io.github.robertluo/state-graph`. Licence: MIT, in LICENSE.

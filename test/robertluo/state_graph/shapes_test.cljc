@@ -1,10 +1,10 @@
-(ns robertluo.state-graph.shape-test
+(ns robertluo.state-graph.shapes-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.shapes :as shape]
             [robertluo.state-graph.test-support :as ts]))
 
 (use-fixtures :once ts/instrumented)
@@ -158,22 +158,22 @@
   ;; sentence. This needs the instrumentation fixture to mean anything.
   (doseq [bad [[:vector :int] "nonsense" 42 nil]]
     (testing (pr-str bad)
-      (let [e (is (thrown? clojure.lang.ExceptionInfo (shape/state :idle bad)))]
+      (let [e (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) (shape/state :idle bad)))]
         (is (= :malli.core/invalid-input (:type (ex-data e)))))
-      (let [e (is (thrown? clojure.lang.ExceptionInfo (shape/event :go bad (constantly {}))))]
+      (let [e (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) (shape/event :go bad (constantly {}))))]
         (is (= :malli.core/invalid-input (:type (ex-data e)))))))
   (testing "a form and an already-compiled schema are both fine"
     (is (map? (shape/state :idle [:map [:n :int]])))
     (is (map? (shape/state :idle (m/schema [:map [:n :int]])))))
   (testing "and an :out that is not a map schema is refused too, while nil is not.
             :out is the EVENT's now, so that is where it is refused"
-    (let [e (is (thrown? clojure.lang.ExceptionInfo
+    (let [e (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
                          (shape/event :go [:map] (constantly {}) [:vector :int])))]
       (is (= :malli.core/invalid-input (:type (ex-data e)))))
     (is (map? (shape/event :go [:map] (constantly {}))))))
 
 (deftest shape-refuses-to-build-and-says-why
-  (let [e (is (thrown-with-msg? clojure.lang.ExceptionInfo #"problems"
+  (let [e (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"problems"
                                 (shape/shape (shape/state :idle [:map] {:initial true})
                                              (shape/event :ghost [:map] (constantly {})))))]
     (is (= [{:problem :unused-event :id :ghost}] (:problems (ex-data e))))))
@@ -673,3 +673,30 @@
     (is (= (shape/fingerprint (parent :int)) (shape/fingerprint (parent :int))))
     (is (not= (shape/fingerprint (parent :int)) (shape/fingerprint (parent :string)))
         "a change inside the CHILD moves the parent's fingerprint")))
+
+;;; ------------------------------------------------- the fingerprint, on every host
+
+(deftest a-fingerprint-is-the-same-on-every-host
+  ;; PINNED, and here a literal is the whole point rather than a fragile total: a fingerprint
+  ;; is PROMISED to name the same machine in every process and on every host, so these are
+  ;; the values the JVM gave before the digest was written out and before the namespaces
+  ;; were renamed — and this suite runs on node too, which is what proves the hosts agree.
+  ;; `gathering` holds a closure in a schema property, so it prints the opaque marker. See
+  ;; :the-fingerprint-is-the-same-on-every-host and :the-opaque-marker-keeps-its-first-namespace.
+  (is (= "1d0fcb41b97c56836f2d92aabd71aee07576ce71b2de3b32d57a139ead882a97"
+         (shape/fingerprint (ts/counter))))
+  (is (= "6967b5501ebfed675dee7a7abe33525939c478975a1fcd7023f847a4eaa46fd6"
+         (shape/fingerprint (ts/gathering)))))
+
+#?(:clj
+   (defspec the-digest-is-sha-256 200
+     ;; The JVM's own SHA-256 as the independent reference, over strings that reach past
+     ;; one byte per character — the part a hand-written UTF-8 or digest gets wrong.
+     (prop/for-all [s (gen/one-of [gen/string
+                                   (gen/fmap pr-str gen/any-printable-equatable)
+                                   (gen/fmap #(apply str (map char %))
+                                             (gen/vector (gen/choose 0 0xD7FF)))])]
+       (= (#'shape/hex (#'shape/sha-256 (#'shape/utf-8 s)))
+          (apply str (map #(format "%02x" %)
+                          (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                                   (.getBytes ^String s "UTF-8"))))))))

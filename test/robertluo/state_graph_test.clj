@@ -2,7 +2,7 @@
   "What the facade itself can get wrong, and nothing that is already asserted below it.
 
    The delegations are deliberately untested: `sg/state` making a state is
-   robertluo.state-graph.shape's promise, and re-asserting it here would be testing our own
+   robertluo.state-graph.shapes's promise, and re-asserting it here would be testing our own
    code through a second door. What IS the facade's own is the TRANSITION RESULT — the
    record it builds, and :fired, which no layer below it can answer."
   (:require [clojure.core.async :as ca]
@@ -14,7 +14,7 @@
             [malli.core :as m]
             [robertluo.state-graph :as sg]
             [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.shapes :as shape]
             [robertluo.state-graph.test-support :as ts]))
 
 (use-fixtures :once ts/instrumented)

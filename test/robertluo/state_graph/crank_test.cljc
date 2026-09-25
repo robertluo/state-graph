@@ -1,4 +1,4 @@
-(ns robertluo.state-graph.drive-test
+(ns robertluo.state-graph.crank-test
   "THE CRANK: the door that FINDS its own events.
 
   What is asserted here is the driving RULE — which event a state can be told, who
@@ -11,7 +11,7 @@
             [clojure.test.check.properties :as prop]
             [robertluo.state-graph :as sg]
             [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.drive :as sut]
+            [robertluo.state-graph.crank :as sut]
             [robertluo.state-graph.test-support :as ts]))
 
 (use-fixtures :once ts/instrumented)
