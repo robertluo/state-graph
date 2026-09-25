@@ -7,8 +7,8 @@
             [clojure.test.check.properties :as prop]
             [robertluo.state-graph.async :as a]
             [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.compile :as c]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.compiler :as c]
+            [robertluo.state-graph.shapes :as shape]
             [robertluo.state-graph.test-support :as ts]))
 
 (use-fixtures :once ts/instrumented)
@@ -631,7 +631,7 @@
    with its own exception from `booms`."
   [parts mode-of booms]
   (map (fn [p]
-         (if (= :event (:robertluo.state-graph.shape/kind p))
+         (if (= :event (:robertluo.state-graph.shapes/kind p))
            (shape/event (:id p) [:map] (answering (mode-of (:id p)) (booms (:id p))))
            p))
        parts))

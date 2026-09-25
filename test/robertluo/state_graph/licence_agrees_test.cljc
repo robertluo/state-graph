@@ -3,10 +3,10 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.shapes :as shape]
             [robertluo.state-graph.check :as check]
             [robertluo.state-graph.test-support :as ts]
-            [robertluo.state-graph.drive :refer [licence-agrees]]))
+            [robertluo.state-graph.crank :refer [licence-agrees]]))
 
 (deftest licence-agrees-examples
   (testing "given example calls"

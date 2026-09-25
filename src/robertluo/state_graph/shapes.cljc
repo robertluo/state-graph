@@ -1,4 +1,4 @@
-(ns robertluo.state-graph.shape
+(ns robertluo.state-graph.shapes
   "THE BOTTOM OF THE MACHINE: a state machine's shape, which is a graph.
 
    A STATE is a node, shaped by a malli schema and validated on enter. An EVENT is
@@ -23,8 +23,8 @@
      :kind :decision
      :says "Three definitions and no more: a STATE is a node shaped by a malli schema and validated on enter; an EVENT is a value shaped by a schema; a TRANSITION is an edge keyed by event, carrying a function whose return value is applied to the state."
      :why "Two events may join one pair of states, so the graph is a multi-digraph and a plain digraph would silently keep one. :initial is a node attribute, exactly one per shape, while the starting DATA stays an argument to the reduction: a node and its value are different things."
-     :see [:robertluo.state-graph.shape/state :robertluo.state-graph.shape/event
-           :robertluo.state-graph.shape/transition :robertluo.state-graph.shape/shape]}
+     :see [:robertluo.state-graph.shapes/state :robertluo.state-graph.shapes/event
+           :robertluo.state-graph.shapes/transition :robertluo.state-graph.shapes/shape]}
     {:id :ubergraph-is-a-closed-map-and-fails-silently
      :kind :lesson
      :says "An ubergraph is a closed map type that fails silently: (assoc g :junk 1) answers g unchanged, dissoc likewise, with-meta is discarded and meta is hardcoded nil. There is no slot for anything but nodes and edges."
@@ -40,7 +40,7 @@
      :says "Out-edges are stored in a SET — node-info is {:out-edges {dest-id #{edge}}} — so there is no edge order to recover. Anything that needs an order over a node's edges has to compute one."
      :why "It is why document-order first-match guards are unrepresentable here and determinism has to be PROVEN rather than ordered, and why `canonical` and `continuations` sort by printed form."
      :cites [:document-order-first-match-is-unrepresentable]
-     :see [:robertluo.state-graph.shape/canonical :robertluo.state-graph.shape/continuations]}
+     :see [:robertluo.state-graph.shapes/canonical :robertluo.state-graph.shapes/continuations]}
     {:id :malli-maps-are-open-by-default
      :kind :lesson
      :says "Malli maps are OPEN by default and only {:closed true} refuses an extra key; [:map] normalises to :map."
@@ -53,7 +53,7 @@
      :kind :rule
      :says "A static check composes its schemas in exactly the order the runtime composes its values, or the check is about something that never runs. `produced`, `continued`, `accepted` and `yields` each pair with a step in the compiler, and every key the MACHINERY writes appears in both places."
      :why "The subsumption check condemned every edge into a nested node as :target-refuses until it learned about :sub, one minute after nesting first worked. The referential nesting check `declare`s `enter-schema` and `initial-id` from the reading section rather than reimplementing them for the same reason."
-     :see [:robertluo.state-graph.shape/accepted :robertluo.state-graph.shape/enter-schema]}
+     :see [:robertluo.state-graph.shapes/accepted :robertluo.state-graph.shapes/enter-schema]}
     {:id :dependency-ubergraph
      :kind :decision
      :says "ubergraph 0.9.0 is the shape: multigraph and digraph in one library, attributes on nodes and edges, viz-graph for drawing. Its traps are recorded on this namespace and on check's drawing."
@@ -85,7 +85,7 @@
          :kind :decision
          :says "An instance is named by a fixed field, :instance, written by the constructors and never spelled by a caller. It is on the EVENT as well as the state, and the event is the load-bearing half: routing happens before any state is in hand."
          :why "It is a THIRD identity and gets a third name — :id on a state is which node, :id on an event is its type. The word is the README's own, and a plain keyword because it is data a user reads and writes in their own maps. nil names nothing: `fan` keys an event with no :instance under nil, and the invariant worth having — no STATE carries a nil :instance — lives on the enter schema."
-         :see [:robertluo.state-graph.shape/enter-schema]}
+         :see [:robertluo.state-graph.shapes/enter-schema]}
         {:id :an-instance-key-fn-was-turned-down
          :kind :rejected
          :says "A key-fn handed to the async layer, leaving the core ignorant that instances exist, was turned down."
@@ -107,7 +107,7 @@
          :kind :lesson
          :says "Malli has no `is this a schema` predicate for the thing people write: m/schema? is true only of a COMPILED schema and false for the form [:map [:n :int]]. So `Schema` and `MapSchema` are :fn predicates that call m/schema."
          :why "It works because malli runs a :fn predicate through its own -safe-pred, so the throw comes back as false and the try/catch is malli's rather than ours, which is what lets this honour the no-bare-try-catch rule. (m/schema x) on an already-compiled x is identical? to x, so it costs nothing on the common path."
-         :see [:robertluo.state-graph.shape/MapSchema]}]}
+         :see [:robertluo.state-graph.shapes/MapSchema]}]}
   Schema
   "Anything malli can make a schema of: a FORM like [:map [:n :int]], or one already
    compiled.
@@ -159,12 +159,12 @@
          :says "A state is a MAP with :id, the same word in both places it is needed: the node in the graph and the runtime value saying which node it is in. A node's schema describes the REST of the map, and what is validated on enter is the derived merge, never written by hand."
          :why "Forced as well as chosen: the compiled step is (fn [state event] state') and has to know whose out-edges to search, so the identity cannot live only in the graph. THE EDGE ALWAYS WINS — the compiler assocs the target's :id after the merge, so a handler cannot move the machine sideways past the edge that decides the target, and since 2026-09-03 a handler that tries is refused."
          :cites [:an-event-is-the-only-way-a-transition-happens]
-         :see [:robertluo.state-graph.shape/enter-schema]}
+         :see [:robertluo.state-graph.shapes/enter-schema]}
         {:id :the-schema-describes-the-map-without-the-machinery-keys
          :kind :decision
          :says ":id, :instance and :sub are the machinery's words. A state's schema describes the map without them, an event's schema describes its PAYLOAD without :id and :instance, and a part that redeclares one is refused as :reserved-declared."
          :why "A state redeclaring :id would describe something written over it on every entry. An event's :id and :instance are ridden in rather than carried, which is why the step conforms an event against its schema with those keys taken off."
-         :see [:robertluo.state-graph.shape/problems :robertluo.state-graph.shape/patch-schema]}]}
+         :see [:robertluo.state-graph.shapes/problems :robertluo.state-graph.shapes/patch-schema]}]}
   StateDef
   "A node. :schema describes the map WITHOUT its :id — what a state is called is the
    shape's to say, not the user's.
@@ -247,7 +247,7 @@
          :from "the author's payload convention, 2026-09-03"
          :when "2026-09-03"
          :cites [:a-guard-is-a-schema-over-the-event :the-schema-describes-the-map-without-the-machinery-keys]
-         :see [:robertluo.state-graph.shape/accepted]}]}
+         :see [:robertluo.state-graph.shapes/accepted]}]}
   TransDef
   "An edge: which event moves the machine from where to where. What handles the event is
    the EVENT's to say — see EventDef. The TARGET is still the graph's, because
@@ -291,7 +291,7 @@
      :says "A node may carry {:machine <a shape>}, and while the parent sits there that child runs inside it. A child is an ordinary shape, so it is checked, compiled and drawn as one, and the checks recurse for free with faults carrying :within as a PATH."
      :why "Nine states in one graph is about where one graph stops being readable; nesting keeps every machine the size a person can hold. It does not break :a-handler-never-sees-the-state, which constrains HANDLERS — a child's step belongs to the compiler, exactly as :id does. Nesting cannot be circular and needs no check to say so: a shape is an immutable value built out of already-built children."
      :cites [:a-handler-never-sees-the-state]
-     :see [:robertluo.state-graph.shape/machines]}
+     :see [:robertluo.state-graph.shapes/machines]}
     {:id :an-escape-is-unconditional
      :kind :decision
      :says "A parent's own edges are the ESCAPE from a nesting node and fire whether or not the child is finished. Escaping is an abort and yields nothing; {:done} is the second way out, the one that WAITS."
@@ -308,7 +308,7 @@
      :why "Built 2026-09-03 out of a review of this architecture that named one thing genuinely missing and that this record had already named twice. The unification of a simple state and a composite one is why the feature is small: they are not two features. It is not a guard — one target, unconditional, so `compile` stays a lookup and nothing has to be proved disjoint — and a cycle among entry-completing states is then a PROVEN infinite loop, refused referentially as :done-cycle."
      :when "2026-09-03"
      :cites [:a-completion-is-an-edge-and-not-a-node-attribute :a-handler-causes-nothing]
-     :see [:robertluo.state-graph.shape/completions :robertluo.state-graph.shape/continuations]}
+     :see [:robertluo.state-graph.shapes/completions :robertluo.state-graph.shapes/continuations]}
     {:id :yield-is-harvested-at-completion-only
      :kind :decision
      :says "{:yield <a map schema>} is what a finished child hands up, and it is harvested at COMPLETION ONLY. Taken on an ordinary escape the child could be in any state, so the yield schema would be a hope; at completion it is a guarantee."
@@ -320,7 +320,7 @@
      :why "It is still not a guard: it reads the structural fact :done already reads — which state the child is in — one notch finer, over a set finite and known at construction, dispatched by a map lookup on an id. It makes `yields` SHARPER, a per-outcome yield resting on its own final state and no other. What it unblocks is a parent that can tell `it worked` from `it gave up`: before it, both landed in one state and a consumer had to read a :fault key's presence as a tea leaf and copy good code aside under an invented key."
      :when "2026-09-05"
      :cites [:a-state-may-say-where-it-goes-when-it-completes :a-limit-was-read-as-a-principle]
-     :see [:robertluo.state-graph.shape/completions]}
+     :see [:robertluo.state-graph.shapes/completions]}
     {:id :a-completion-on-a-data-condition-is-refused
      :kind :rejected
      :says "A completion on a condition over the state's DATA — `all n reports are in`, `k branches have arrived` — is refused."
@@ -337,7 +337,7 @@
      :why "Added 2026-09-05 for the first consumer that wanted to LOOP over a child machine. Sown off the PROJECTED value and not the merge in flight, which is what keeps the `seeds` check local and sound: a node holds exactly what it declares. The seed and the per-outcome completion are one feature in practice — one lets a host re-enter a child with a new job, the other lets it tell what the child made of the last one."
      :when "2026-09-05"
      :cites [:a-machine-can-nest-in-a-node :done-may-say-where-each-outcome-goes :a-limit-was-read-as-a-principle]
-     :see [:robertluo.state-graph.shape/seed]}
+     :see [:robertluo.state-graph.shapes/seed]}
     {:id :a-limit-was-read-as-a-principle
      :kind :lesson
      :says "`A nested child is entered with no data` and `a yield must hold at every final state` were read as facts about what nesting IS, and a whole alternative was designed around them. Both were absences — nothing had ever carried the other direction, and the single completion target was argued from decidability, which says nothing about a finite set of node ids."
@@ -456,7 +456,7 @@
      :from "the author, 2026-09-04, of a consumer's driver: `it collects otherwise independent steps into a global map, which is an anti pattern — the integration point should not be spread, the FSM shape already did it`"
      :when "2026-09-04"
      :cites [:a-handler-belongs-to-the-event]
-     :see [:robertluo.state-graph.shape/reports]}
+     :see [:robertluo.state-graph.shapes/reports]}
     {:id :a-report-is-not-an-internal-event
      :kind :decision
      :says "A report does not reopen :a-handler-causes-nothing. The machine does not move itself: this is the shape telling a CALLER how an event would be found, and a caller choosing to ask. No queue, no run-to-completion, and the reduction is untouched — a driver that ignores every report still works."
@@ -532,7 +532,7 @@
      :why "What started it: a step of your own workflow that runs the code and then picks the edge with an `if` is a HIDDEN transition — the drawing shows both arrows with nothing saying which fires. With the target a function of [state, event-id] alone a data-dependent branch could not be in the shape at all. A schema and not a predicate because a schema is DATA — drawable, comparable, partially decidable — and an :fn carries a :description, so one expression is both the check and the label."
      :from "the author, 2026-09-03: `a hidden transition is something we want to avoid`"
      :when "2026-09-03"
-     :see [:robertluo.state-graph.shape/disjoint :robertluo.state-graph.shape/accepted]}
+     :see [:robertluo.state-graph.shapes/disjoint :robertluo.state-graph.shapes/accepted]}
     {:id :decidable-guards-branch-and-an-fn-guard-stands-alone
      :kind :rule
      :says "Three decidable levers separate two guards: a shared key whose value schemas are disjoint, a CLOSED schema not naming a key the other insists on, and numeric bounds that do not meet. Decidable guards branch; an :fn guard may only appear ALONE on its [from event], as a FILTER."
@@ -567,7 +567,7 @@
      :says "The closed lever reaches a key the event schema does not declare AT ALL, and no further. `green means no :fault key` does not work when :fault is a key the event's own schema declares as optional: `accepted` merges the guard over that schema and [:fault {:optional true}] survives as genuinely satisfiable, so :unknown is correct and the shape is rightly refused."
      :why "Corrected by trying it in the first consumer, which needed a tag after all: its :judged carries {:verdict [:enum :green :red]}."
      :cites [:decidable-guards-branch-and-an-fn-guard-stands-alone]
-     :see [:robertluo.state-graph.shape/accepted]}
+     :see [:robertluo.state-graph.shapes/accepted]}
     {:id :a-retry-budget-is-two-guarded-edges
      :kind :lesson
      :says "A retry budget works today as two guarded edges on disjoint numeric bounds — [:int {:max 8}] and [:int {:min 9}] over a count the driver reports on the event — so the stopping rule is in the shape and no driving loop needs a counter."
@@ -587,7 +587,7 @@
        [{:id :the-seven-primitive-types-are-pairwise-disjoint
          :kind :lesson
          :says "The seven primitive types are pairwise disjoint, checked and not assumed — every value of each validated against the other six, :int against :double included. That is what licenses `admits` to answer :no from a type difference alone, and `disjoint` inherited it."
-         :see [:robertluo.state-graph.shape/disjoint]}]}
+         :see [:robertluo.state-graph.shapes/disjoint]}]}
   primitive-types
   "Types no single value belongs to two of, so two schemas differing here are a PROOF and
    not a guess. Deliberately small: enough for the common mistake, and not a lattice of
@@ -661,7 +661,7 @@
     {:id :malli-keeps-arbitrary-entry-properties
      :kind :lesson
      :says "Malli keeps arbitrary entry properties and mu/merge carries them through, so {:combine f} on a map entry survives into `enter-schema`. m/children hands back [k props child], which `entries-of` had already destructured and merely thrown the props away. Checked before designing anything on it."
-     :see [:robertluo.state-graph.shape/entries-of :robertluo.state-graph.shape/enter-schema]}]}
+     :see [:robertluo.state-graph.shapes/entries-of :robertluo.state-graph.shapes/enter-schema]}]}
   [s]
   (into {} (for [[k props child] (m/children (m/schema s))
                  :when (or (contains? props :combine)
@@ -775,7 +775,7 @@
      :kind :decision
      :says "Where a check lives is decided by WHEN it must answer, not by what it resembles. `disjoint` could not live beside `admits`: the ambiguity check is REFERENTIAL — a shape whose determinism cannot be proven must not be constructible, so it has to answer before the graph exists — and check sits above shape."
      :why "So `primitive-types` and `entries-of` moved down into shape, and subsumption and disjointness are siblings a layer apart over one vocabulary."
-     :see [:robertluo.state-graph.shape/primitive-types :robertluo.state-graph.shape/entries-of :robertluo.state-graph.shape/problems]}
+     :see [:robertluo.state-graph.shapes/primitive-types :robertluo.state-graph.shapes/entries-of :robertluo.state-graph.shapes/problems]}
     {:id :dis-map-never-answers-no
      :kind :lesson
      :says "Two MAP schemas are never proven to overlap here, so :ambiguous carries no witness. Proving overlap needs a VALUE that satisfies both, and one shared key agreeing is not one — another key may still refuse. The witness did land in check's `coverage`, where a probe constructs the value."
@@ -877,7 +877,7 @@
     {:id :an-argument-that-must-accept-rubbish-keeps-any
      :kind :lesson
      :says "`problems` and `shape` take [:* :any] on purpose: they must ACCEPT a malformed part in order to REPORT it. A tighter schema would refuse it with ::m/invalid-input instead of the list of what is wrong, and only under instrumentation, so the diagnosis would be both worse and different between dev and production."
-     :see [:robertluo.state-graph.shape/shape]}
+     :see [:robertluo.state-graph.shapes/shape]}
     {:id :a-for-whose-body-is-a-cond-puts-nil-in-problems
      :kind :lesson
      :says "A `for` whose body is a `cond` puts nil in `problems`, and every shape with a combine was once refused with a vector of nils. This function is a concat of a dozen comprehensions, and the idiom is :when, never a cond body."}
@@ -1091,7 +1091,7 @@
      :says "The event catalogue is an ARGUMENT to the constructor, which writes each event's schema, handler, :out, :sees, :report and :reads onto EVERY EDGE that fires it and refuses a shape whose edges disagree about one event. The graph remains the whole shape."
      :why "Forced by ubergraph rather than chosen: a graph holds nodes and edges and nothing else, so the catalogue has nowhere on the graph to live."
      :cites [:ubergraph-is-a-closed-map-and-fails-silently]
-     :see [:robertluo.state-graph.shape/transitions]}
+     :see [:robertluo.state-graph.shapes/transitions]}
     {:id :a-bipartite-graph-was-killed
      :kind :rejected
      :says "Making the graph bipartite — state -> event -> state — was killed first, so nobody proposes it again. It is not merely awkward, it is WRONG: two transitions on :submit leaving different states would share one event node and FABRICATE paths the shape never declared, A -> submit -> D when only A -> submit -> B and C -> submit -> D were said."
@@ -1100,7 +1100,7 @@
      :kind :decision
      :says "A completion transition is a real EDGE, marked {:done true}, carrying no :event, one edge per outcome, and nothing about it is left on the node. That absence of an :event is the whole distinction between an edge fired by an event and one fired by arriving."
      :why "The edge-or-attribute question was the whole design, settled by counting what each way costs: as an edge, `reachable`, `dead-ends`, `finishable` and `traps` all walk the graph and needed NOT ONE LINE; as an attribute, each would have had to learn about it or condemn correct shapes. The cost of the edge was one :when in `transitions`. Two places saying one thing is how a shape drifts from itself."
-     :see [:robertluo.state-graph.shape/transitions :robertluo.state-graph.shape/continuations]}
+     :see [:robertluo.state-graph.shapes/transitions :robertluo.state-graph.shapes/continuations]}
     {:id :a-shared-catalogue-must-be-selected-from
      :kind :lesson
      :says "Sharing parts is free and complete — a vector of states and events assembles into two different machines by concat plus different transitions, and one child shape nests into two unrelated parents with nothing to alias. But a shared catalogue must be SELECTED FROM and not splatted in: the first assembly using fewer events than the catalogue holds is refused with :unused-event, and the check is right. A parts library wants to be a MAP KEYED BY ID."
@@ -1269,13 +1269,22 @@
    THE COST IS REAL AND IS THE SAME COST HANDLERS HAVE: a predicate's BODY is invisible, so
    changing what an :fn checks does not move the fingerprint. What is proven is the SHAPE of
    the schema and the presence of a predicate, not its meaning."
+  {:knowledge
+   [{:id :the-opaque-marker-keeps-its-first-namespace
+     :kind :decision
+     :says "The marker `plain` erases a closure to is :robertluo.state-graph.shape/opaque, WRITTEN OUT, and not ::opaque. It is printed into the canonical form and so into every fingerprint, and when this namespace was renamed from robertluo.state-graph.shape to robertluo.state-graph.shapes an auto-resolved ::opaque silently became a different keyword: two fixture shapes of ten, the two with a closure in a schema property, fingerprinted differently, and every transcript naming such a shape would have stopped naming it. MEASURED against the fingerprints taken before the rename. The keyword names a namespace that no longer exists, and that is harmless — it is a value and never resolved."
+     :when "2026-09-25"
+     :cites [:a-shape-has-a-derived-id :closures-are-erased-and-not-rendered]}]}
   [x]
   (cond
     (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) x
     (map? x) (vec (sort-by pr-str (map (fn [[k v]] [(plain k) (plain v)]) x)))
     (set? x) (vec (sort-by pr-str (map plain x)))
     (sequential? x) (mapv plain x)
-    :else ::opaque))
+    ;; WRITTEN OUT, NOT ::opaque: the marker is PRINTED into every fingerprint, and this
+    ;; namespace was renamed from robertluo.state-graph.shape — see
+    ;; :the-opaque-marker-keeps-its-first-namespace.
+    :else :robertluo.state-graph.shape/opaque))
 
 (defn canonical
   "The shape as ORDERED, READABLE DATA — what a fingerprint is taken over, and what to diff
@@ -1330,6 +1339,92 @@
                    (plain [from (:to c) (cond-> {:yield (some-> (:yield c) m/form)}
                                           (:outcome c) (assoc :outcome (:outcome c)))]))))})
 
+;;; ------------------------------------------------------------ the digest
+
+(def ^:private sha-256-k
+  "The 64 round constants: the first 32 bits of the fractional parts of the cube roots of the
+   first 64 primes. WRITTEN OUT AND NOT COMPUTED, so no host's cube root can move a bit."
+  [0x428a2f98 0x71374491 0xb5c0fbcf 0xe9b5dba5 0x3956c25b 0x59f111f1 0x923f82a4 0xab1c5ed5
+   0xd807aa98 0x12835b01 0x243185be 0x550c7dc3 0x72be5d74 0x80deb1fe 0x9bdc06a7 0xc19bf174
+   0xe49b69c1 0xefbe4786 0x0fc19dc6 0x240ca1cc 0x2de92c6f 0x4a7484aa 0x5cb0a9dc 0x76f988da
+   0x983e5152 0xa831c66d 0xb00327c8 0xbf597fc7 0xc6e00bf3 0xd5a79147 0x06ca6351 0x14292967
+   0x27b70a85 0x2e1b2138 0x4d2c6dfc 0x53380d13 0x650a7354 0x766a0abb 0x81c2c92e 0x92722c85
+   0xa2bfe8a1 0xa81a664b 0xc24b8b70 0xc76c51a3 0xd192e819 0xd6990624 0xf40e3585 0x106aa070
+   0x19a4c116 0x1e376c08 0x2748774c 0x34b0bcb5 0x391c0cb3 0x4ed8aa4a 0x5b9cca4f 0x682e6ff3
+   0x748f82ee 0x78a5636f 0x84c87814 0x8cc70208 0x90befffa 0xa4506ceb 0xbef9a3f7 0xc67178f2])
+
+(def ^:private sha-256-h
+  "The initial hash: the first 32 bits of the fractional parts of the square roots of the
+   first 8 primes."
+  [0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05688c 0x1f83d9ab 0x5be0cd19])
+
+(defn- u32
+  "`x` as an unsigned 32-bit word. The JVM's bit operations are over longs and need the mask;
+   JavaScript's answer SIGNED 32-bit ints, and >>> 0 is how that host says unsigned."
+  [x]
+  #?(:clj (bit-and x 0xffffffff) :cljs (unsigned-bit-shift-right x 0)))
+
+(defn- rotr [x n]
+  (u32 (bit-or (unsigned-bit-shift-right x n) (bit-shift-left x (- 32 n)))))
+
+(defn- word
+  "Four bytes, big-endian, as one word."
+  [[b0 b1 b2 b3]]
+  (u32 (+ (* b0 16777216) (* b1 65536) (* b2 256) b3)))
+
+(defn- word-bytes
+  "A word as its four bytes, big-endian."
+  [w]
+  [(quot w 16777216) (mod (quot w 65536) 256) (mod (quot w 256) 256) (mod w 256)])
+
+(defn- sha-256-block
+  "One 64-byte block folded into the hash `hs`."
+  [hs block]
+  (let [w (reduce (fn [w i]
+                    (let [w15 (w (- i 15)) w2 (w (- i 2))
+                          s0 (bit-xor (rotr w15 7) (rotr w15 18) (unsigned-bit-shift-right w15 3))
+                          s1 (bit-xor (rotr w2 17) (rotr w2 19) (unsigned-bit-shift-right w2 10))]
+                      (conj w (u32 (+ (w (- i 16)) s0 (w (- i 7)) s1)))))
+                  (mapv word (partition 4 block))
+                  (range 16 64))
+        [a b c d e f g h]
+        (reduce (fn [[a b c d e f g h] i]
+                  (let [t1 (+ h
+                              (bit-xor (rotr e 6) (rotr e 11) (rotr e 25))
+                              (u32 (bit-xor (bit-and e f) (bit-and (u32 (bit-not e)) g)))
+                              (sha-256-k i)
+                              (w i))
+                        t2 (+ (bit-xor (rotr a 2) (rotr a 13) (rotr a 22))
+                              (u32 (bit-xor (bit-and a b) (bit-and a c) (bit-and b c))))]
+                    [(u32 (+ t1 t2)) a b c (u32 (+ d t1)) e f g]))
+                hs
+                (range 64))]
+    (mapv (comp u32 +) hs [a b c d e f g h])))
+
+(defn- sha-256
+  "The SHA-256 digest of a sequence of bytes, each 0..255, as 32 bytes 0..255 — written out
+   in this file so that a fingerprint is the SAME on every host and needs nothing
+   asynchronous on any of them. See :the-fingerprint-is-the-same-on-every-host."
+  [bs]
+  (let [n    (count bs)
+        bits (* 8 n)
+        padded (concat bs [0x80] (repeat (mod (- 55 n) 64) 0)
+                       (word-bytes (quot bits 4294967296)) (word-bytes (mod bits 4294967296)))]
+    (vec (mapcat word-bytes (reduce sha-256-block sha-256-h (partition 64 padded))))))
+
+(defn- utf-8
+  "The UTF-8 encoding of `s`, as bytes 0..255."
+  [s]
+  #?(:clj  (map #(bit-and % 0xff) (.getBytes ^String s "UTF-8"))
+     :cljs (vec (js/Array.from (.encode (js/TextEncoder.) s)))))
+
+(defn- hex
+  "Bytes 0..255 as lower-case hex, two digits each."
+  [bs]
+  (apply str (mapcat (fn [b] [(nth "0123456789abcdef" (quot b 16))
+                              (nth "0123456789abcdef" (mod b 16))])
+                     bs)))
+
 (defn fingerprint
   "A stable id for the SHAPE of this machine: SHA-256 over `canonical`, as hex.
 
@@ -1349,14 +1444,20 @@
    an :fn predicate checks, and the fingerprint is unmoved. See `plain`."
   {:malli/schema [:=> [:cat Shape] :string]
    :knowledge
-   [{:id :a-shape-has-a-derived-id
+   [{:id :the-fingerprint-is-the-same-on-every-host
+     :kind :decision
+     :says "A shape's fingerprint is the SAME on the JVM and in ClojureScript, so a transcript written by one host names the machine the other runs. SHA-256 is therefore written out in this namespace rather than borrowed: the JVM's MessageDigest has no ClojureScript twin, a browser's SubtleCrypto answers only asynchronously, and node's crypto is node's alone. Its round constants are LITERALS, derived once from their definition on the JVM, so no host's cube root can move a bit. MEASURED on the JVM against MessageDigest over the padding boundaries, multi-byte UTF-8 and 2,000 generated strings, and every fingerprint the fixtures had before was unchanged. The one known gap is the printed form itself: a FLOAT in a schema prints 1.0 on the JVM and 1 in JavaScript."
+     :from "the author, 2026-09-25, choosing an identical fingerprint and a pure SHA-256 over host crypto or a JVM-only fingerprint"
+     :when "2026-09-25"
+     :cites [:a-shape-has-a-derived-id]}
+    {:id :a-shape-has-a-derived-id
      :kind :decision
      :says "A shape has a stable identity: `canonical` is the ordered, readable form and `fingerprint` is SHA-256 over its printed representation. Everything that is DATA goes in — node ids, schema forms, :initial and :final, every edge as [from event to] with its guard, :out, :sees and :reads, every completion edge with its :yield and :outcome — ordered by printed form because ubergraph keeps nodes and edges in sets. A nested machine is its child's fingerprint."
      :why "A transcript row that cannot say which machine produced it is a row nobody can audit. It is DERIVED and not declared, which is the whole reason to have one rather than a version number: nobody can forget to bump it."
      :from "the author, 2026-09-04: `to make sure the transcript log file correspond to a FSM, we may need a stable id for the FSM.`"
      :when "2026-09-04"
      :cites [:closures-are-erased-and-not-rendered :ubergraph-out-edges-are-a-set]
-     :see [:robertluo.state-graph.shape/canonical]}
+     :see [:robertluo.state-graph.shapes/canonical]}
     {:id :hash-shape-is-not-an-id
      :kind :rejected
      :says "(hash shape) is not an identity, measured: two structurally identical shapes built separately in one process are neither = nor equal-hashed, their handlers being distinct closures and their schemas distinct compiled objects. It changes on every namespace load."
@@ -1378,9 +1479,7 @@
      :says "A fingerprint on every transcript row answers `which shape produced this` for a FINISHED run, which is the audit case and the one asked for. An instance in flight across a shape change is still open, and is left open deliberately."
      :cites [:a-shape-has-a-derived-id]}]}
   [sh]
-  (let [bs (.digest (java.security.MessageDigest/getInstance "SHA-256")
-                    (.getBytes (pr-str (canonical sh)) "UTF-8"))]
-    (apply str (map #(format "%02x" %) bs))))
+  (hex (sha-256 (utf-8 (pr-str (canonical sh))))))
 
 (defn continuations
   "{from -> [{:outcome <id or absent>, :to <id>, :yield <schema>} ...]} for every COMPLETION

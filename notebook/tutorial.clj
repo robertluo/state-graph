@@ -20,7 +20,7 @@
      :kind :rule
      :says "An example of a REFERENTIAL fault asks robertluo.state-graph.shape/problems of the PARTS. The facade's `problems` takes a BUILT shape, and the constructor refuses the parts, so there is nothing to hand it."
      :cites [:rendering-the-notebook-is-a-test-the-suite-cannot-be]
-     :see [:robertluo.state-graph.shape/problems :robertluo.state-graph/problems]}
+     :see [:robertluo.state-graph.shapes/problems :robertluo.state-graph/problems]}
     {:id :kind-graphviz-renders-client-side
      :kind :lesson
      :says "kind/graphviz takes a VECTOR whose first element is the dot source and renders it in the browser through viz.js, so a page full of this library's drawings needs NO graphviz installed to read. The one hazard is the JS template literal: a backtick in a node label would break it."
@@ -34,7 +34,7 @@
      :cites [:parallel-is-across-instances]}]}
   (:require [clojure.core.async :as a]
             [robertluo.state-graph :as sg]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.shapes :as shape]
             [scicloj.kindly.v4.kind :as kind]))
 
 ;; ## A machine is three kinds of part
@@ -294,7 +294,7 @@
 ;; **A run is the vector of events**, so that vector is the whole result — nothing was stored
 ;; and nothing mutated. Where it got to is a reduction over it:
 
-(require '[robertluo.state-graph.drive :as drive]
+(require '[robertluo.state-graph.crank :as drive]
          '[robertluo.state-graph.check :as check])
 
 (drive/where build parked opts)

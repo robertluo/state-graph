@@ -3,8 +3,8 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [robertluo.state-graph.shape :as shape]
-            [robertluo.state-graph.drive :refer [reorder-agrees]]))
+            [robertluo.state-graph.shapes :as shape]
+            [robertluo.state-graph.crank :refer [reorder-agrees]]))
 
 (deftest reorder-agrees-examples
   (testing "given calls return given results"

@@ -53,9 +53,16 @@
 
    Requires everything below it, which is what makes one require enough — including
    `check`, so an application loads the graph algorithms it may never run. That is what a
-   facade costs; a user who minds requires robertluo.state-graph.compile directly."
+   facade costs; a user who minds requires robertluo.state-graph.compiler directly."
   {:knowledge
-   [{:id :knowledge-is-metadata
+   [{:id :the-implementation-namespaces-are-renamed-for-clojurescript
+     :kind :decision
+     :says "robertluo.state-graph.shape, .compile and .drive became .shapes, .compiler and .crank on 2026-09-25, and the facade kept its name. In ClojureScript a namespace a.b.c and a var a.b/c are ONE JavaScript path, so the facade's `shape`, `compile` and `drive` overwrote the namespaces of the same names the moment both were loaded — the first ClojureScript compile warned `Namespace robertluo.state-graph.shape clashes with var robertluo.state-graph/shape` and the suite died on it. Renaming the facade was tried first and turned down by the author: it is the one require every user has. The implementation namespaces are not API, and the README now says so."
+     :why "WHAT THIS EDITED, said out loud because a node is added to and never edited: 34 :see and :cites edges naming a var of the three were repointed to its new namespace, since an edge is checked by the knowledge suite and a dangling one is a broken build rather than a record. What a node SAYS in prose was left as written, as a node quoting ../coder is. And the marker a fingerprint prints was pinned to the old name — see :the-opaque-marker-keeps-its-first-namespace — so no fingerprint moved."
+     :from "the author, 2026-09-25: `the sub-nses are implementation details, renaming them is safe.`"
+     :when "2026-09-25"
+     :cites [:the-opaque-marker-keeps-its-first-namespace]}
+    {:id :knowledge-is-metadata
      :kind :rule
      :says "What this library knows about itself lives in metadata on the var or namespace it is about, under :knowledge — a vector of nodes — and never in a standalone file. The source is the source of facts, and a decision attached to the construct it decides is found by whoever finds the construct."
      :why "The record was two markdown files, and a markdown file is a TREE: every decision got one place, one section and one reading order, its edges to code and to other decisions were prose pointers nothing could follow, and retrieval was loading 250KB or grepping a key the author chose. Knowledge is a graph — nodes with edges to code and to each other — and the author of a node supplies edges, never a path. Migrated 2026-09-14 from AGENTS.md and DESIGN.md, which are in git history."
@@ -127,7 +134,7 @@
     {:id :errors-are-data
      :kind :rule
      :says "Errors are DATA — a plain map, m/explain's or our own, over malli.error/humanize prose. Prose reads well to a person and matches badly to a program."
-     :see [:robertluo.state-graph.shape/explain]}
+     :see [:robertluo.state-graph.shapes/explain]}
     {:id :only-assert-what-can-fail
      :kind :rule
      :says "Only assert what can fail. Do not re-test what a library promises — that ubergraph adds an edge, that malli validates, that manifold delivers what was put on a stream — and do not re-test our own code through a second door. A facade re-export IS that second door: the delegation is not worth a test, and what the facade adds is."
@@ -173,20 +180,20 @@
      :kind :decision
      :says "Six vars here were written by robertluo.coder's authoring machine from briefs, and a brief's signature is self-contained — the trial evaluates it with no library in hand — so a shape in one is `\"Shape\" :any` in a registry, or a bare :any, and the landed code kept that: five vars typed a shape as :any where `check/problems` types it `shape/Shape`. The landing page puts the library's own schema where the placeholder was, by PATH inside the :malli/schema value, as data beside the file and the neighbour. A gate of suite and lint cannot see a schema that is too wide; review rule (3) can."
      :when "2026-09-15"
-     :see [:robertluo.state-graph.check/labelled :robertluo.state-graph.check/dot :robertluo.state-graph.check/draw! :robertluo.state-graph.drive/reorder-agrees :robertluo.state-graph.drive/licence-agrees]
+     :see [:robertluo.state-graph.check/labelled :robertluo.state-graph.check/dot :robertluo.state-graph.check/draw! :robertluo.state-graph.crank/reorder-agrees :robertluo.state-graph.crank/licence-agrees]
      :cites [:re-exports-are-delegating-defns-and-never-def-aliases]}
     {:id :patch-and-applied-were-documentation-types-and-went
      :kind :decision
      :says "`compile/Patch` and `drive/Applied` were public schemas nothing validated with: Patch named what a phase's :patch answers and Applied what a driver's :on is told, and both were reached only by docstrings. Dropped 2026-09-16 for the release — a public var is API surface, and a schema nothing checks with is a comment. What they said is in the docstrings of `phases` and `Options`: a patch is {:answer m :depth n} or ::missed, and :on is told a Transition. Patch's two decisions moved to the compile namespace, where the depth check they are about lives."
      :from "the author, 2026-09-16: `drop`"
      :when "2026-09-16"
-     :see [:robertluo.state-graph.compile/phases :robertluo.state-graph.drive/Options]}
+     :see [:robertluo.state-graph.compiler/phases :robertluo.state-graph.crank/Options]}
     {:id :a-building-namespace-publishes-what-another-reaches-for
      :kind :rule
      :says "A var in a building namespace is public when another namespace or a test reaches for it, and private when only its own file does. `check/produced`, `check/continued`, `shape/combines-of` and `shape/completions` became private 2026-09-16 on that test — no caller outside their file, no test — and their :malli/schema went with the `-`, private helpers carrying none here because instrumentation collects ns-publics. The API a user is promised is the facade's and what the README names; the building namespaces are directly usable and publish no more than that."
      :from "the author, 2026-09-16: `Keep the public api minimum while complete.`"
      :when "2026-09-16"
-     :see [:robertluo.state-graph.check/produced :robertluo.state-graph.check/continued :robertluo.state-graph.shape/combines-of :robertluo.state-graph.shape/completions]}
+     :see [:robertluo.state-graph.check/produced :robertluo.state-graph.check/continued :robertluo.state-graph.shapes/combines-of :robertluo.state-graph.shapes/completions]}
     {:id :what-a-consumer-models-is-not-the-library-s-question
      :kind :decision
      :says "This library provides a state machine whose shape is a graph, and decides nothing about what a consumer models with it. Seven questions this record held open since the library was built are not its to answer, and close together: what a run costs at worst, which is what a consumer's reports spend and the library never knows; whether dynamic fan-out is wanted, whether a state may complete on a condition over its own data, whether node-side exposure is needed, whether internal events are wanted, and whether a transition should declare its effects for retry and replay — each a want a consumer would arrive with as a real shape, and none has; and what becomes of an instance in flight across a shape change, which is the consumer's because this library stores nothing. The refusals that stand under them stand: a completion on a data condition is undecidable, a handler causes nothing, a shape is code. A consumer that needs one of these asks with the shape that needs it."
@@ -206,7 +213,7 @@
      :kind :decision
      :says "`Context`'s `:ignored` earns its place, and the second reader the question waited for is this library's own: `explore/covering` drives a shape over the events the shape itself reported and hands `compile` an `:ignored` that is LOUD, because there a miss is not somebody else's stream but a gap between guards arriving late. That is exactly the caller the key was kept for — one who folds by hand and wants to hear about a miss — and it is in the tree. Three lines of surface, read twice."
      :when "2026-09-16"
-     :see [:robertluo.state-graph.compile/Context :robertluo.state-graph.explore/covering]
+     :see [:robertluo.state-graph.compiler/Context :robertluo.state-graph.explore/covering]
      :supersedes [:is-the-contexts-ignored-still-earning-its-place]
      :cites [:how-the-step-says-a-thing-was-ignored :cover-the-graph-by-running-it]}
     {:id :the-limit-on-handlers-raising-predated-the-crank
@@ -215,14 +222,14 @@
      :why "A limit written the day before the feature that lifts half of it is the record lying by omission, in the one file this library calls its specification. The check is to read the limits against the API table whenever the table gains a mechanism: a limit that names what the table now has is a limit to reread."
      :from "the author, 2026-09-16: `There is one limitation I think is relevent: no events produced by a handler. I think it should be legit.` — and, offered the machine-may-move-itself reading against the handler-may-emit one, `1`."
      :when "2026-09-16"
-     :see [:robertluo.state-graph/drive :robertluo.state-graph.shape/reports]
+     :see [:robertluo.state-graph/drive :robertluo.state-graph.shapes/reports]
      :cites [:a-handler-causes-nothing :an-event-may-say-how-it-is-reported :cover-the-graph-by-running-it]}]}
   (:refer-clojure :exclude [compile])
   (:require [robertluo.state-graph.async :as async]
             [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.compile :as compile]
-            [robertluo.state-graph.drive :as drive]
-            [robertluo.state-graph.shape :as shape]))
+            [robertluo.state-graph.compiler :as compile]
+            [robertluo.state-graph.crank :as drive]
+            [robertluo.state-graph.shapes :as shape]))
 
 ;;; ---------------------------------------------------------------- vocabulary
 
@@ -388,15 +395,16 @@
   [sh]
   (check/problems sh))
 
-(defn draw!
-  "The shape as a picture — the same question `problems` answers, by the means a person is
-   better at. An unreachable state is obvious in a drawing and invisible in a map literal.
-
-   Needs graphviz, except for {:save {:filename f :format :dot}}, which writes the source
-   and is a plain spit. No :save at all opens a viewer. It answers nothing: for the source
-   as a VALUE, ask `dot`."
-  ([sh] (check/draw! sh))
-  ([sh opts] (check/draw! sh opts)))
+#?(:clj
+   (defn draw!
+     "The shape as a picture — the same question `problems` answers, by the means a person is
+      better at. An unreachable state is obvious in a drawing and invisible in a map literal.
+   
+      Needs graphviz, except for {:save {:filename f :format :dot}}, which writes the source
+      and is a plain spit. No :save at all opens a viewer. It answers nothing: for the source
+      as a VALUE, ask `dot`."
+     ([sh] (check/draw! sh))
+     ([sh opts] (check/draw! sh opts))))
 
 (defn fingerprint
   "A stable id for the SHAPE of this machine: SHA-256 over its canonical ordered form, as hex.
@@ -520,7 +528,7 @@
    checked. Driving from [] runs the whole machine and driving from a run carries it on —
    there is no second code path for resuming, because carrying on is what this already is.
 
-   See `robertluo.state-graph.drive` for the rest of the vocabulary: `awaiting`, `where`
+   See `robertluo.state-graph.crank` for the rest of the vocabulary: `awaiting`, `where`
    and `advance`, which is the door a person hands an event in by."
   ([sh events] (drive/drive sh events))
   ([sh events opts] (drive/drive sh events opts)))

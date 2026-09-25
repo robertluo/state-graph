@@ -11,7 +11,7 @@
    [robertluo.state-graph :as sg]
    [robertluo.state-graph.check :as check]
    [robertluo.state-graph.explore :as sut]
-   [robertluo.state-graph.shape :as shape]))
+   [robertluo.state-graph.shapes :as shape]))
 
 ;; ── The machine under exploration ──────────────────────────────
 ;;
@@ -148,7 +148,7 @@
                              {:reads [:map] :report (fn [_] {:n ((:n env))})})
                    (sg/transition :start :go :done {:when [:map [:n [:= 1]]]})))]
       (is (= [] (:gaps (sut/covering gappy {:n (constantly 1)} {}))))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No edge out of this state"
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"No edge out of this state"
                             (sut/covering gappy {:n (constantly 2)} {})))))
 
   (testing "and a machine whose stopping rule is NOT an edge is bounded rather

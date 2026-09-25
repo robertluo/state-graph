@@ -21,7 +21,7 @@
      :says "shape/problems is REFERENTIAL — answerable from the parts alone, so it runs inside the constructor and a bad shape never exists. This namespace is STRUCTURAL — it needs the built graph, so it is separate and opt-in, off the runtime path: the compiler does not require it, and an application shipping a working shape never loads a graph algorithm."
      :why "The drawing is in here too, and it belongs: it answers the same question by different means."
      :cites [:where-a-check-lives-is-decided-by-when-it-must-answer]
-     :see [:robertluo.state-graph.shape/problems :robertluo.state-graph.check/problems]}
+     :see [:robertluo.state-graph.shapes/problems :robertluo.state-graph.check/problems]}
     {:id :a-published-check-answers-about-the-machine
      :kind :decision
      :says "A published check answers about the MACHINE and not about one layer of it: every check answering MAPS recurses into nested children and carries :within, the path of nodes it was found under. The checks answering a SET OF IDS — reachable, traps, dead-ends, finishable — are about ONE graph and stay there, because two machines may name a state the same and a set has nowhere to say which it meant."
@@ -42,9 +42,9 @@
             [malli.generator :as mg]
             [malli.util :as mu]
             [robertluo.state-graph.graph :as graph]
-            [robertluo.state-graph.shape :as shape]
-            [clojure.java.shell :as shell]
-            [clojure.java.io :as io]))
+            [robertluo.state-graph.shapes :as shape]
+            #?@(:clj [[clojure.java.shell :as shell]
+                      [clojure.java.io :as io]])))
 
 ;;; ------------------------------------------------------------------ the graph
 
@@ -1262,64 +1262,65 @@
          (str/join "\n" (map edge-stmt edges))
          "\n}\n")))
 
-(defn draw!
-  "The shape as a picture, through graphviz — an EFFECT and never a test: what a drawing is for is a
-   person looking at it, and it answers nothing useful. :save {:filename f :format :dot} writes the
-   graphviz source `dot` answers and needs nothing installed — it is a spit. Any other :format shells
-   out to `dot -T<format> -o f` with the source on stdin and writes f. No :save at all renders a PNG
-   into a temporary file and opens it through java.awt.Desktop, where the JVM has one.
-
-   NOTHING IS SWALLOWED: where graphviz leaves no usable file — it can write a zero-byte file and
-   exit 0 — or where no desktop can open one, it throws an ex-info carrying the file, the format and
-   graphviz's stderr, and what `dot` refuses it refuses too, because a drawing that silently did not
-   appear is the one failure a person cannot see."
-  {:malli/schema [:=> {:registry {"Shape" shape/Shape}} [:cat [:schema [:ref "Shape"]] [:? :map]] :any] :knowledge [{:id :dot-can-write-a-zero-byte-file-and-exit-0
-     :kind :lesson
-     :says "`dot` can write a ZERO-BYTE FILE and exit 0 on an oversized graph, after a warning that looks survivable and is not. CHECK THE FILE AND NOT THE EXIT CODE. SVG rendered the same graph fine, which made it look like a graphviz quirk rather than a label problem."
-     :cites [:a-node-is-labelled-by-its-id]}
-    {:id :two-tests-two-requirements
-     :kind :lesson
-     :says ":format :dot is a spit and needs NOTHING installed; :format :png shells out, and that test is the only thing proving the RENDERING path — asserted on the PNG magic bytes, because a file existing proves only that something wrote one. Verified both ways: outside the devenv the render test errors and the source test passes; inside, both pass. graphviz is in the shared devenv because a drawing nobody can look at is not worth having."
-     :cites [:dot-can-write-a-zero-byte-file-and-exit-0]}
-    {:id :check-the-drawing-as-a-real-png
-     :kind :lesson
-     :says "Check a drawing as a real PNG and not as dot source. The completion transitions were checked that way — dashed unlabelled arrows beside a solid labelled `cancel` for the abort — which is the distinction visible at a glance and the argument for drawing at all. And assert that no $eval reached a label: a closure in a picture is the failure mode."
-     :cites [:the-drawing-is-harels]}
-    {:id :draw-built-from-dot-directly
-     :kind :decision
-     :says "`draw!` renders `dot`'s own graphviz source rather than building any text of its own, so there is exactly one declaration of the drawing. :save {:format :dot} is a plain spit of that source; any other :save format pipes the source into `dot -T<format> -o f` on stdin and then checks the FILE — its existence and its size — never the process's exit code, because dot can print a warning, exit 0, and still write nothing. With no :save at all it falls back to ubergraph's own viewer on the underlying graph, exactly as before, and answers nothing useful either way."
-     :cites [:dot-can-write-a-zero-byte-file-and-exit-0 :dot-arrived-from-a-consumer]}
-    {:id :draw-swallows-nothing
-     :kind :decision
-     :says "`draw!` with no :save renders a PNG into a temporary file and opens it through java.awt.Desktop, and throws where the JVM has no desktop; every other path throws where graphviz left no usable file. Nothing is caught anywhere in it. The old no-:save arity called ubergraph's viewer inside a try that swallowed every exception into nil — the one bare try/catch in this library, against its own rule — and on macOS, which has no xlib viewer, it did nothing and said nothing."
-     :why "A drawing that silently did not appear is the one failure a person cannot see, and this function exists for a person to look at. Found by review rule (2) on 2026-09-15 after the landing's gate — suite and lint — had passed it: a gate checks what a test can see, and a swallowed exception is what no test sees."
-     :from "the author, 2026-09-15, agreeing the review's recommendation that the four defects the landing left come first"
-     :when "2026-09-15"
-     :cites [:draw-built-from-dot-directly :dot-can-write-a-zero-byte-file-and-exit-0]}
-    {:id :a-goal-s-sentence-held-nothing-and-an-example-did
-     :kind :lesson
-     :says "Rewritten by robertluo.coder's authoring machine from a brief whose :goal said `no try/catch anywhere: what fails, throws`. Its first answer wrapped `dot` in a try that swallowed every exception into nil — the defect the brief existed to remove, back in a different place — and passed its suite, because no test fed it a value `dot` refuses. The second brief carried one more example: a non-shape thrown out of `draw!` as it is thrown out of `dot`. The second answer holds no try. A sentence in a goal is words the writer may not weigh; an example is what the machine holds an answer to."
-     :when "2026-09-15"
-     :cites [:draw-swallows-nothing]}]}
-  ([sh] (draw! sh {}))
-  ([sh opts]
-   (if-let [{:keys [filename format]} (:save opts)]
-     (let [src (dot sh)]
-       (if (= format :dot)
-         (spit filename src)
-         (let [{:keys [exit err]} (shell/sh "dot" (str "-T" (name format)) "-o" filename :in src)
-               f (io/file filename)]
-           (when-not (and (.exists f) (pos? (.length f)))
-             (throw (ex-info "dot produced no usable output"
-                             {:exit exit :err err :format format :filename filename}))))))
-     (let [src (dot sh)
-           tmp (java.io.File/createTempFile "draw" ".png")
-           filename (.getAbsolutePath tmp)
-           {:keys [exit err]} (shell/sh "dot" "-Tpng" "-o" filename :in src)
-           f (io/file filename)]
-       (when-not (and (.exists f) (pos? (.length f)))
-         (throw (ex-info "dot produced no usable output"
-                         {:exit exit :err err :format :png :filename filename})))
-       (if (java.awt.Desktop/isDesktopSupported)
-         (.open (java.awt.Desktop/getDesktop) f)
-         (throw (ex-info "no desktop available to open drawing" {:filename filename})))))))
+#?(:clj
+   (defn draw!
+     "The shape as a picture, through graphviz — an EFFECT and never a test: what a drawing is for is a
+      person looking at it, and it answers nothing useful. :save {:filename f :format :dot} writes the
+      graphviz source `dot` answers and needs nothing installed — it is a spit. Any other :format shells
+      out to `dot -T<format> -o f` with the source on stdin and writes f. No :save at all renders a PNG
+      into a temporary file and opens it through java.awt.Desktop, where the JVM has one.
+   
+      NOTHING IS SWALLOWED: where graphviz leaves no usable file — it can write a zero-byte file and
+      exit 0 — or where no desktop can open one, it throws an ex-info carrying the file, the format and
+      graphviz's stderr, and what `dot` refuses it refuses too, because a drawing that silently did not
+      appear is the one failure a person cannot see."
+     {:malli/schema [:=> {:registry {"Shape" shape/Shape}} [:cat [:schema [:ref "Shape"]] [:? :map]] :any] :knowledge [{:id :dot-can-write-a-zero-byte-file-and-exit-0
+        :kind :lesson
+        :says "`dot` can write a ZERO-BYTE FILE and exit 0 on an oversized graph, after a warning that looks survivable and is not. CHECK THE FILE AND NOT THE EXIT CODE. SVG rendered the same graph fine, which made it look like a graphviz quirk rather than a label problem."
+        :cites [:a-node-is-labelled-by-its-id]}
+       {:id :two-tests-two-requirements
+        :kind :lesson
+        :says ":format :dot is a spit and needs NOTHING installed; :format :png shells out, and that test is the only thing proving the RENDERING path — asserted on the PNG magic bytes, because a file existing proves only that something wrote one. Verified both ways: outside the devenv the render test errors and the source test passes; inside, both pass. graphviz is in the shared devenv because a drawing nobody can look at is not worth having."
+        :cites [:dot-can-write-a-zero-byte-file-and-exit-0]}
+       {:id :check-the-drawing-as-a-real-png
+        :kind :lesson
+        :says "Check a drawing as a real PNG and not as dot source. The completion transitions were checked that way — dashed unlabelled arrows beside a solid labelled `cancel` for the abort — which is the distinction visible at a glance and the argument for drawing at all. And assert that no $eval reached a label: a closure in a picture is the failure mode."
+        :cites [:the-drawing-is-harels]}
+       {:id :draw-built-from-dot-directly
+        :kind :decision
+        :says "`draw!` renders `dot`'s own graphviz source rather than building any text of its own, so there is exactly one declaration of the drawing. :save {:format :dot} is a plain spit of that source; any other :save format pipes the source into `dot -T<format> -o f` on stdin and then checks the FILE — its existence and its size — never the process's exit code, because dot can print a warning, exit 0, and still write nothing. With no :save at all it falls back to ubergraph's own viewer on the underlying graph, exactly as before, and answers nothing useful either way."
+        :cites [:dot-can-write-a-zero-byte-file-and-exit-0 :dot-arrived-from-a-consumer]}
+       {:id :draw-swallows-nothing
+        :kind :decision
+        :says "`draw!` with no :save renders a PNG into a temporary file and opens it through java.awt.Desktop, and throws where the JVM has no desktop; every other path throws where graphviz left no usable file. Nothing is caught anywhere in it. The old no-:save arity called ubergraph's viewer inside a try that swallowed every exception into nil — the one bare try/catch in this library, against its own rule — and on macOS, which has no xlib viewer, it did nothing and said nothing."
+        :why "A drawing that silently did not appear is the one failure a person cannot see, and this function exists for a person to look at. Found by review rule (2) on 2026-09-15 after the landing's gate — suite and lint — had passed it: a gate checks what a test can see, and a swallowed exception is what no test sees."
+        :from "the author, 2026-09-15, agreeing the review's recommendation that the four defects the landing left come first"
+        :when "2026-09-15"
+        :cites [:draw-built-from-dot-directly :dot-can-write-a-zero-byte-file-and-exit-0]}
+       {:id :a-goal-s-sentence-held-nothing-and-an-example-did
+        :kind :lesson
+        :says "Rewritten by robertluo.coder's authoring machine from a brief whose :goal said `no try/catch anywhere: what fails, throws`. Its first answer wrapped `dot` in a try that swallowed every exception into nil — the defect the brief existed to remove, back in a different place — and passed its suite, because no test fed it a value `dot` refuses. The second brief carried one more example: a non-shape thrown out of `draw!` as it is thrown out of `dot`. The second answer holds no try. A sentence in a goal is words the writer may not weigh; an example is what the machine holds an answer to."
+        :when "2026-09-15"
+        :cites [:draw-swallows-nothing]}]}
+     ([sh] (draw! sh {}))
+     ([sh opts]
+      (if-let [{:keys [filename format]} (:save opts)]
+        (let [src (dot sh)]
+          (if (= format :dot)
+            (spit filename src)
+            (let [{:keys [exit err]} (shell/sh "dot" (str "-T" (name format)) "-o" filename :in src)
+                  f (io/file filename)]
+              (when-not (and (.exists f) (pos? (.length f)))
+                (throw (ex-info "dot produced no usable output"
+                                {:exit exit :err err :format format :filename filename}))))))
+        (let [src (dot sh)
+              tmp (java.io.File/createTempFile "draw" ".png")
+              filename (.getAbsolutePath tmp)
+              {:keys [exit err]} (shell/sh "dot" "-Tpng" "-o" filename :in src)
+              f (io/file filename)]
+          (when-not (and (.exists f) (pos? (.length f)))
+            (throw (ex-info "dot produced no usable output"
+                            {:exit exit :err err :format :png :filename filename})))
+          (if (java.awt.Desktop/isDesktopSupported)
+            (.open (java.awt.Desktop/getDesktop) f)
+            (throw (ex-info "no desktop available to open drawing" {:filename filename}))))))))

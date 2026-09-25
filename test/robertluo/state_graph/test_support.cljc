@@ -3,7 +3,16 @@
 
    Not named <ns>-test, so kaocha does not load it as a suite."
   {:knowledge
-   [{:id :tests-live-in-test-and-not-in-the-source
+   [{:id :the-synchronous-suites-run-on-both-hosts
+     :kind :decision
+     :says "Every suite that does not block runs on BOTH hosts, as .cljc, since 2026-09-25: graph, shapes, compiler, check, crank, explore, labelled, dot and the two agreement witnesses — kaocha on the JVM, cljs-test-runner on node. What stays .clj: async_test and the facade's, which block on channels with <!! and would each need rewriting against cljs.test/async, a step of its own; knowledge_test, which reads var metadata no ClojureScript runtime keeps; and draw_test, which shells out. The fixture instruments on both — mi/clj-collect! on the JVM, the analyzer-reading mi/collect! macro on ClojureScript, whose namespaces are therefore written out and required here. The first run on node found a real bug the JVM never could: see :a-keyword-is-not-identical-to-itself-in-clojurescript."
+     :from "the author, 2026-09-25, choosing every synchronous suite over a smoke suite or porting the async ones too, and cljs-test-runner on node over shadow-cljs"
+     :when "2026-09-25"
+     :cites [:tests-live-in-test-and-not-in-the-source]}
+    {:id :test-check-warns-about-goog-math-long
+     :kind :lesson
+     :says "A fresh ClojureScript compile prints five `Use of undeclared Var goog.math.Long/...` warnings from test.check 1.1.3's own clojure/test/check/random/longs.cljs against ClojureScript 1.12.145. Noise, not a fault — every property runs — and worth knowing before someone hunts it, as the slf4j lines manifold printed once were."}
+    {:id :tests-live-in-test-and-not-in-the-source
      :kind :rule
      :says "Tests live in test/, one <ns>_test.clj per source namespace, ordinary clojure.test run by kaocha in two suites over one tree — unit, and ^:integration for anything that opens a file, a socket or a real clock. Generative tests ARE the unit suite here, which is why test.check is in :deps and not :dev."
      :cites [:a-generative-test-needs-an-independent-invariant :dependency-test-check]}
@@ -61,22 +70,34 @@
      :cites [:the-shape-owns-its-graph :a-completion-is-an-edge-and-not-a-node-attribute]}]}
   (:require [clojure.test.check.generators :as gen]
             [malli.instrument :as mi]
-            [robertluo.state-graph.shape :as shape]))
+            [robertluo.state-graph.shapes :as shape]
+            ;; ClojureScript's mi/collect! reads the ANALYZER, so what it collects must
+            ;; have been analysed before this file is — hence required here, on that host.
+            #?@(:cljs [[robertluo.state-graph.graph]
+                       [robertluo.state-graph.compiler]
+                       [robertluo.state-graph.check]
+                       [robertluo.state-graph.async]
+                       [robertluo.state-graph]])))
 
 (def namespaces
   "Every namespace whose :malli/schema metadata the fixture collects. THE FACADE IS IN HERE
    and contributes exactly one schema — `run`, the one function it really adds; its
    re-exports carry none on purpose and are guarded by the vars they delegate to."
-  '[robertluo.state-graph.graph robertluo.state-graph.shape robertluo.state-graph.compile
+  '[robertluo.state-graph.graph robertluo.state-graph.shapes robertluo.state-graph.compiler
     robertluo.state-graph.check robertluo.state-graph.async
     robertluo.state-graph])
 
 (defn instrumented
   "A fixture that makes the :malli/schema metadata actually do something. mi/collect!
-   is a MACRO reading *ns*, so in a test file it would collect the TEST; clj-collect!
-   is the plain function underneath it and takes {:ns [...]} as a value."
+   is a MACRO reading *ns*, so in a test file it would collect the TEST; on the JVM
+   clj-collect! is the plain function underneath it and takes {:ns [...]} as a value.
+   ClojureScript has no such function — its collect! reads the analyzer at COMPILE time —
+   so there the namespaces are written out, and must be the same as `namespaces`."
   [f]
-  (mi/clj-collect! {:ns namespaces})
+  #?(:clj  (mi/clj-collect! {:ns namespaces})
+     :cljs (mi/collect! {:ns [robertluo.state-graph.graph robertluo.state-graph.shapes
+                              robertluo.state-graph.compiler robertluo.state-graph.check
+                              robertluo.state-graph.async robertluo.state-graph]}))
   (mi/instrument!)
   (f)
   (mi/unstrument!))
@@ -123,7 +144,7 @@
   (gen/fmap
    (fn [parts]
      (map (fn [p]
-            (if (= :event (:robertluo.state-graph.shape/kind p))
+            (if (= :event (:robertluo.state-graph.shapes/kind p))
               (shape/event (:id p) [:map] (constantly {}) nil
                            {:reads [:map] :report (constantly {})})
               p))
@@ -139,7 +160,7 @@
 (defn parts-of
   "The parts of one kind, out of a generated shape."
   [kind parts]
-  (filter #(= kind (:robertluo.state-graph.shape/kind %)) parts))
+  (filter #(= kind (:robertluo.state-graph.shapes/kind %)) parts))
 
 (def ^:private completing-child
   "A child that can finish TWO ways, so a parent nesting it can say where each outcome goes.
@@ -241,7 +262,7 @@
    are left as they are."
   [parts f]
   (for [p parts]
-    (case (:robertluo.state-graph.shape/kind p)
+    (case (:robertluo.state-graph.shapes/kind p)
       :state (cond-> (update p :id f)
                (map? (:done p)) (update :done update-vals #(update % :to f))
                (keyword? (:done p)) (update :done f))

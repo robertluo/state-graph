@@ -3,7 +3,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.shapes :as shape]
             [clojure.string :as str]
             [robertluo.state-graph.check :refer [dot labelled]]))
 

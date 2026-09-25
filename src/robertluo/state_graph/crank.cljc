@@ -1,4 +1,4 @@
-(ns robertluo.state-graph.drive
+(ns robertluo.state-graph.crank
   "THE REPORT-DRIVEN DOOR: turn the crank yourself, one event at a time.
 
   THE THIRD DOOR, AND THE ONE `:report` WAS MISSING. An event may declare how it
@@ -54,8 +54,8 @@
   (:require [malli.core :as m]
             [malli.util :as mu]
             [robertluo.state-graph.check :as check]
-            [robertluo.state-graph.compile :as compile]
-            [robertluo.state-graph.shape :as shape]
+            [robertluo.state-graph.compiler :as compile]
+            [robertluo.state-graph.shapes :as shape]
             [malli.generator :as mg]))
 
 ;;; ------------------------------------------------------------------ the shapes
@@ -252,7 +252,7 @@
      :says "The driving rule counts how many events CAN BE REPORTED, never how many are awaited, and `awaiting` is that rule as one value: :final, :from :world, :held, :from :driver with one event, or :from :driver with several a join proves."
      :why "The first driver's rule — one out-edge and it drives, none and it is final, several and the world chooses — was wrong the moment a state offered a driver's event BESIDE a person's escape: an interruptible step awaits two, one of them reportable, and the run stopped dead on a shape whose `problems` was []."
      :cites [:the-crank-is-the-door-report-was-missing :the-driver-world-distinction-is-data]
-     :see [:robertluo.state-graph.drive/awaits]}
+     :see [:robertluo.state-graph.crank/awaits]}
     {:id :discovery-recurses-into-a-live-child
      :kind :decision
      :says "The crank follows :sub as deep as it goes and asks the INNERMOST machine first, which is inner-first in the one place it had not yet been applied. :within on the answer is the path of hosts, and :on carries it too, so a history can say where inside a machine something happened."

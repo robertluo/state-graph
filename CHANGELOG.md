@@ -18,6 +18,15 @@ The first version meant to be used from outside the repository it was built in.
   signature.
 - core.async 1.9.865, test.check 1.1.3. test.check is a runtime dependency on purpose:
   `check/laws` generates through malli.generator.
+- ClojureScript: every namespace is `.cljc`, and the suites that do not block run on node as
+  well as on the JVM (`clojure -M:cljs-test`, and in `clojure -T:build ci`). `draw!` and
+  `async/blocking` are the JVM's alone. `fingerprint` computes SHA-256 itself and is the
+  same on both hosts; every fingerprint is unchanged. `compile`'s missed-event sentinel is
+  compared with `=`, which ClojureScript needed.
+- The implementation namespaces are renamed, since in ClojureScript a namespace `a.b.c` and
+  the facade's var `a.b/c` are one JavaScript path: `robertluo.state-graph.shape` is
+  `.shapes`, `.compile` is `.compiler`, `.drive` is `.crank`. The facade is unchanged, and
+  the implementation namespaces are no longer API.
 - core.async replaces manifold, towards ClojureScript: `.async` is `.cljc`. `run`, `async/drive`
   and `async/fan` answer a channel of results and a promise-chan for `:done`, and take a
   channel of events. A step that throws delivers the exception itself on `:done`, unwrapped.
