@@ -263,6 +263,36 @@
                 (mu/assoc :id [:= to]))
       (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
 
+(defn- answered
+  "The schema of what a transition's HANDLER answers, as the `:answer` crossing reads it:
+   the edge's declared :out, CLOSED. nil where the edge declared no :out.
+
+   `produced` asks what the target HOLDS after the merge and the projection, and the
+   projection is what drops a key the SOURCE held. It cannot see the other crossing on the
+   way in: the step conforms the handler's answer against the target's `patch-schema`,
+   whose map is closed, so a key the handler answers that the target does not declare is
+   REFUSED before anything is merged. What is checked must be what runs, so that crossing
+   is asked here too.
+
+   CLOSED because an :out is the handler's DECLARATION of what it answers: a key it does not
+   name is not one the check can reason about, and read open every declared edge would be
+   :unknown against a patch schema that is always closed."
+  {:knowledge
+   [{:id :the-answer-crossing-is-checked-statically-too
+     :kind :lesson
+     :says "`subsumption` checked what a target HOLDS — the source merged with :out, projected — against its enter-schema, which is open, and never the `:answer` crossing, which conforms the handler's answer against the target's CLOSED patch schema first. So a pure lift carrying a key the target did not declare — a routing tag, {:positive true} into a state holding only the computation's variables — was :yes, `problems` answered [], and the compiled step threw `Not a valid answer`. The runtime was the design, `:an-event-is-the-only-way-a-transition-happens`, and the check was what was wrong: an edge now takes the worse of the two verdicts."
+     :when "2026-09-29"
+     :from "issue #6"
+     :cites [:what-is-checked-must-be-what-runs :an-event-is-the-only-way-a-transition-happens :the-answer-crossing-sits-between-out-and-enter]}]}
+  [{:keys [out]}]
+  (when out
+    (mu/update-properties out assoc :closed true)))
+
+(defn- worst
+  "The weaker of two verdicts: :no over :unknown over :yes."
+  [a b]
+  (some (hash-set a b) [:no :unknown :yes]))
+
 (defn- continued
   "The schema of what a COMPLETION TRANSITION hands its target: the source state's own
    schema, the :yield merged over it, and the machinery's own keys written in last — the
@@ -314,7 +344,8 @@
    (for [t (shape/transitions sh)]
      (assoc (select-keys t [:from :event :to])
             :verdict (if-let [p (produced sh t)]
-                       (admits (shape/enter-schema sh (:to t)) p)
+                       (worst (admits (shape/enter-schema sh (:to t)) p)
+                              (admits (shape/patch-schema sh (:to t)) (answered t)))
                        :undeclared)))
    (for [[from cs] (shape/continuations sh), c cs]
      (cond-> {:from from :to (:to c) :done true

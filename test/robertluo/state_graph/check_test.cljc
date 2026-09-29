@@ -268,6 +268,29 @@
          :unknown stays out of it — a checker that cries about what it could not work
          out is a checker people turn off")))
 
+(deftest a-key-the-target-does-not-declare-is-refused-by-the-check-as-by-the-step
+  ;; Issue #6: a pure lift answering a key its target does not hold passed `problems` and
+  ;; threw at the :answer crossing. The two doors must agree, both ways round.
+  (let [lift (fn [out]
+               (shape/shape
+                (shape/state :a [:map [:x :int]] {:initial true})
+                (shape/state :b [:map [:x :int]] {:final true})
+                (shape/event :go out)
+                (shape/transition :a :go :b)))
+        s0   (fn [sh] (c/initial sh {:x 1}))]
+    (testing "an undeclared key: refused at run time, and so :target-refuses"
+      (let [sh (lift [:map [:y :int]])]
+        (is (= [{:from :a :event :go :to :b :problem :target-refuses}] (check/problems sh)))
+        (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
+                              ((c/compile sh) (s0 sh) {:id :go :y 2})))))
+    (testing "an OPTIONAL undeclared key is one the handler may answer, and is refused too"
+      (is (= [:target-refuses]
+             (map :problem (check/problems (lift [:map [:y {:optional true} :int]]))))))
+    (testing "a declared key: admitted at run time, and :yes"
+      (let [sh (lift [:map [:x :int]])]
+        (is (= [:yes] (map :verdict (check/subsumption sh))))
+        (is (= {:id :b :x 2} ((c/compile sh) (s0 sh) {:id :go :x 2})))))))
+
 ;;; ---------------------------------------------------------------------- drawing
 
 #?(:clj
