@@ -288,7 +288,9 @@
    THE SCHEMA IS WHAT THIS NODE HOLDS, not a lower bound on it: the merge is projected onto
    these keys on entry, so anything a state does not declare is dropped at its door. Data that
    must survive several states is declared by each of them, and dropping a field is declaring
-   one fewer. That is also what bounds what anything INSIDE the machine can see — a state that
+   one fewer. What is dropped is what the PREVIOUS state held: a key a HANDLER answers that
+   this state does not declare is refused, not dropped — see `compile` — and `problems`
+   reports the edge as :target-refuses wherever the event declares it. That is also what bounds what anything INSIDE the machine can see — a state that
    never held a secret cannot leak one.
 
    It describes the map WITHOUT :id, :instance and :sub — what a state is called, which run it

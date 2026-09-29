@@ -997,6 +997,16 @@
 ;; tells the edge where to go, and no state holds it — so a lift, which answers every key the
 ;; schema declares, would answer a key the target does not admit and the patch check would
 ;; refuse it. A guarded event usually spells its handler out for exactly that reason.
+;;
+;; And `problems` says so before anything runs. A lift's `:out` is its event's own schema, so
+;; the key it would answer is declared, and one the target does not hold is `:target-refuses`:
+
+(sg/problems
+ (sg/shape
+  (sg/state :written     [:map [:code :string]] {:initial true})
+  (sg/state :implemented [:map [:code :string]] {:final true})
+  (sg/event :judged [:map [:verdict [:enum :green :red]]])
+  (sg/transition :written :judged :implemented)))
 
 (def review
   (sg/shape
