@@ -252,6 +252,10 @@
   "An event as it arrives: a map saying its own type, and which run it is for."
   compile/Event)
 
+(def Shape
+  "A built machine, as `shape` answers it, for a caller's own function schemas."
+  shape/Shape)
+
 (def ^{:knowledge
        [{:id :the-output-is-a-transition-and-not-a-state
          :kind :decision
@@ -437,6 +441,21 @@
    nothing installed."
   [sh]
   (check/dot sh))
+
+(defn labelled
+  "The same drawing AS DATA, {:nodes :edges}, for anything that draws a machine itself, such
+   as a terminal or a web page. `dot` is this rendered as graphviz source. A node nesting a
+   machine is marked with its size and not drawn into: ask `machines` for the child, and draw
+   it as the shape it is."
+  [sh]
+  (check/labelled sh))
+
+(defn machines
+  "{node id -> the machine nested in it}, for every node that has one, and empty for a flat
+   shape. Each child is an ordinary shape, so a caller walks a machine level by level with
+   this and nothing else."
+  [sh]
+  (shape/machines sh))
 
 ;;; ----------------------------------------------------- walking it as a graph
 
