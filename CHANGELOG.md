@@ -49,6 +49,8 @@ The first version meant to be used from outside the repository it was built in.
   with its states renamed) and `subgraph?`, and `out-degree` and `in-degree` (counting edges).
   They are built on `robertluo.state-graph.graph`, a new `.cljc` namespace below `shape` that
   holds the same algorithms over plain labelled multigraphs.
+- `labelled` and `machines` on the facade: the drawing as data, and the machine nested in each
+  node. A caller that draws every level itself needs no implementation namespace.
 - A smaller public surface: `compile/Patch` and `drive/Applied` are gone, being schemas nothing
   validated with, and `check/produced`, `check/continued`, `shape/combines-of` and
   `shape/completions` are private. What a user is promised is the facade and what the README names.

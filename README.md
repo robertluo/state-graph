@@ -183,7 +183,7 @@ partition is a machine of its own.
 | | |
 |---|---|
 | `state` `event` `transition` `shape` | build a machine; a state may nest a machine, and a transition may carry a guard |
-| `problems` `draw!` `dot` `fingerprint` | check it, draw it, and name it with a stable id |
+| `problems` `draw!` `dot` `labelled` `machines` `fingerprint` | check it, draw it level by level, and name it with a stable id |
 | `path` `paths` `components` `topsort` `dag?` `isomorphism` `subgraph?` `out-degree` `in-degree` | walk it as a graph |
 | `compile` `initial` | the reduction: `(reduce (compile sh) (initial sh data) events)` |
 | `run` | the stream: a channel of events in, a channel of transitions out |

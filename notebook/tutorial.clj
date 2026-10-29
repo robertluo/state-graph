@@ -657,6 +657,14 @@
 
 (picture order)
 
+;; Something that draws a machine itself, a terminal or a web page, asks for the same drawing
+;; as data, nodes and edges, with `sg/labelled`. `sg/machines` answers the machine nested in
+;; each node, which is the next picture to draw:
+
+(sg/labelled order)
+
+(= {:paying payment} (sg/machines order))
+
 ;; Now watch one order run. The parent's `:id` and the child's sit side by side:
 
 (def order-step (sg/compile order))
