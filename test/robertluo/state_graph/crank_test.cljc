@@ -219,3 +219,61 @@
          (cond (:final t)                :final
                (= :driver (:from t))     :driver
                :else                     :world)))))
+
+#?(:clj
+   (defn- collected?
+     "Whether the collector got to what `r` refers to, asking it up to twenty times."
+     [^java.lang.ref.WeakReference r]
+     (loop [n 0]
+       (cond (nil? (.get r)) true
+             (= n 20)        false
+             :else           (do (System/gc) (Thread/sleep 5) (recur (inc n)))))))
+
+#?(:clj
+   (defn- fresh-join
+     "`joined` built anew, its report closing over a value of this call's — the way a
+      consumer builds a shape per run because its handlers close over that run."
+     []
+     (let [code (str (random-uuid))]
+       (sg/shape (sg/state :asked [:map] {:initial true})
+                 (sg/state :coded [:map [:code :string]])
+                 (sg/state :lawed [:map [:law :string]])
+                 (sg/state :both  [:map [:code :string] [:law :string]] {:final true})
+                 (sg/event :write [:map [:code :string]] {:reads [:map] :report (fn [_] {:code code})})
+                 (sg/event :draft [:map [:law :string]]  {:reads [:map] :report (constantly {:law "l"})})
+                 (sg/transition :asked :write :coded)
+                 (sg/transition :asked :draft :lawed)
+                 (sg/transition :coded :draft :both)
+                 (sg/transition :lawed :write :both)))))
+
+#?(:clj
+   (defn- dropped
+     "Do `f` to `sh`, and answer only a WEAK reference to it — so nothing of the
+      caller's is what keeps it."
+     [sh f]
+     (f sh)
+     (java.lang.ref.WeakReference. sh)))
+
+#?(:clj
+   (deftest a-driven-shape-is-let-go
+     ;; A CONSUMER THAT BUILDS A SHAPE PER RUN LEAVES NOTHING BEHIND. `stepper` and
+     ;; `commuting` were memoized on the shape and pinned every one driven, about a
+     ;; megabyte a run — issue #10. A fresh closure in :context made a fresh key too, so
+     ;; a reused shape leaked the same way. A join, so the confluence lookup is built.
+     (is (collected? (java.lang.ref.WeakReference. (fresh-join)))
+         "the control: where a shape nobody drove is kept, the probe says nothing")
+     (is (= [:draft :write] (mapv :id (sut/drive (fresh-join) []))))
+     (is (collected? (dropped (fresh-join) #(sut/drive % []))))
+     (is (collected? (dropped (fresh-join) #(sut/drive % [] {:context {:ignored (fn [s _] s)}}))))))
+
+#?(:clj
+   (defspec every-door-lets-the-shape-go 10
+     ;; THE SAME OF GENERATED SHAPES, through `step`, `advance`, `where` and `awaiting`.
+     ;; Cranked a bounded number of turns rather than driven, since a generated shape may
+     ;; be a cycle every event of which is reportable, and `drive` would rightly never stop.
+     (prop/for-all [parts ts/gen-driven-shape
+                    n (gen/choose 0 6)]
+       (collected? (dropped (apply sg/shape parts)
+                            (fn [sh]
+                              (sut/awaiting sh (cranked sh n))
+                              (sut/where sh (cranked sh n) {:context {:ignored (fn [s _] s)}})))))))

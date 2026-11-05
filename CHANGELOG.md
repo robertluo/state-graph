@@ -51,6 +51,10 @@ The first version meant to be used from outside the repository it was built in.
   holds the same algorithms over plain labelled multigraphs.
 - `labelled` and `machines` on the facade: the drawing as data, and the machine nested in each
   node. A caller that draws every level itself needs no implementation namespace.
+- `drive`, `step`, `advance`, `where` and `awaiting` keep nothing between calls. They had
+  memoized the compiled shape and its confluence lookup on the shape itself, so a process that
+  built a shape per run kept every one until it exited, about 1 MB a run. `drive` compiles once
+  for the whole run; each of the others compiles once per call. The API is unchanged (#10).
 - A smaller public surface: `compile/Patch` and `drive/Applied` are gone, being schemas nothing
   validated with, and `check/produced`, `check/continued`, `shape/combines-of` and
   `shape/completions` are private. What a user is promised is the facade and what the README names.
