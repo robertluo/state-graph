@@ -50,7 +50,28 @@
     {:id :a-budget-in-drive-was-not-taken
      :kind :rejected
      :says "A budget, a retry limit or a give-up rule inside `drive` was not taken. Those are EDGES, where they can be drawn and checked; `drive` needs no counter because the stopping rule is in the shape, which is the only reason a loop belongs in a library at all."
-     :cites [:the-crank-is-the-door-report-was-missing :a-retry-budget-is-two-guarded-edges]}]}
+     :cites [:the-crank-is-the-door-report-was-missing :a-retry-budget-is-two-guarded-edges]}
+    {:id :the-crank-remembers-nothing-between-calls
+     :kind :decision
+     :says "Nothing in the crank outlives a call. `drive` prepares the shape once — compiled, and confluence as a lookup for each machine the run is in, the first time a fork there asks — and every turn of that drive shares it; a direct `where`, `advance`, `step` or `awaiting` prepares once each. The two `clojure.core/memoize`s keyed on the shape, `stepper` and `commuting`, are gone."
+     :why "They pinned every shape ever driven, and a consumer that builds a shape per run because its handlers close over that run grew the heap by about a megabyte a run until it exited. Measured on coder's intake machine, 11 events: compiling 0.29 ms, `commuting` 0.18 ms, building the shape 1.3 ms, and `drive` no faster with the shape reused (6.1 ms) than fresh (5.7 ms) — the caches bought nothing measurable. A fresh closure in :context was a fresh key as well, so a reused shape leaked the same way."
+     :from "issue #10, the author's: `Remove both caches`"
+     :when "2026-11-05"
+     :see [:robertluo.state-graph.crank/drive :robertluo.state-graph.crank/step :robertluo.state-graph.crank/advance :robertluo.state-graph.crank/where :robertluo.state-graph.crank/awaiting]
+     :cites [:the-crank-is-the-door-report-was-missing :a-run-is-the-vector-of-events]}
+    {:id :a-bounded-shape-cache-was-not-taken
+     :kind :rejected
+     :says "A bounded cache of compiled shapes was not taken: it still holds N shapes, for a saving that measured as zero, and parallel drives of different shapes push each other out of it."
+     :cites [:the-crank-remembers-nothing-between-calls]}
+    {:id :a-weak-keyed-shape-cache-was-not-taken
+     :kind :rejected
+     :says "A cache with weak keys was not taken: the compiled step refers to its shape, so a value that holds its own key strongly keeps that key from ever becoming collectable."
+     :cites [:the-crank-remembers-nothing-between-calls]}
+    {:id :a-cache-keyed-on-a-shape-pinned-every-shape
+     :kind :lesson
+     :says "`clojure.core/memoize` on a shape held every shape it was ever asked about, and nothing said so until a consumer measured it: a test.check draw of 18,000 histories filled a 32 GB heap. Seen again on 2026-11-05 in a REPL: a shape driven once was never collected under twenty `System/gc`s, and one nobody drove was collected on the first. And an nREPL :interrupt did not stop the evaluation it interrupted — a JDK that cannot `Thread/stop` left the drawing thread running, so a REPL that has interrupted a runaway property is a REPL to restart."
+     :when "2026-11-05"
+     :cites [:the-crank-remembers-nothing-between-calls]}]}
   (:require [malli.core :as m]
             [malli.util :as mu]
             [robertluo.state-graph.check :as check]
@@ -139,36 +160,43 @@
   [sh id]
   (into #{} (comp (filter #(= id (:from %))) (map :event)) (shape/transitions sh)))
 
-(def ^:private stepper
-  "The shape compiled, remembered. A shape is a value and a reduction happens once
-   a turn, so compiling it twice is work nobody asked for."
-  (memoize (fn [sh context] (if context (compile/compile sh context) (compile/compile sh)))))
+(defn- confluence-index
+  "`check/confluence` as a lookup — {[state #{a b}] verdict}.
 
-(def ^:private commuting
-  "`check/confluence` as a lookup, remembered — {[state #{a b}] verdict}. A static
-   check is not something to recompute once a turn."
-  (memoize
-   (fn [sh]
-     ;; THIS MACHINE'S OWN PAIRS. `check/confluence` recurses into nested children now, and
-     ;; a lookup keyed by state id would merge a child's pair into a parent state that
-     ;; happens to share its name. Each level is asked about its OWN shape, here and in
-     ;; `check/commuting`, for the same reason.
-     (into {} (for [{:keys [in pair verdict within]} (check/confluence sh)
-                    :when (empty? within)]
-                [[in (set pair)] verdict])))))
+   THIS MACHINE'S OWN PAIRS. `check/confluence` recurses into nested children, and a
+   lookup keyed by state id would merge a child's pair into a parent state that
+   happens to share its name. Each level is asked about its OWN shape, here and in
+   `check/commuting`, for the same reason."
+  [sh]
+  (into {} (for [{:keys [in pair verdict within]} (check/confluence sh)
+                 :when (empty? within)]
+             [[in (set pair)] verdict])))
+
+(defn- prepared
+  "What ONE CALL needs of `sh`, worked out once for that call: the shape compiled, and
+   `confluence-index` for each machine the run is in, the first time a fork there asks.
+
+   NOTHING OUTLIVES THE CALL. `drive` prepares once and every turn shares it; a direct
+   `where`, `advance`, `step` or `awaiting` prepares once each. There is no cache keyed
+   on a shape anywhere, so a consumer that builds a shape per run leaves nothing behind."
+  [sh context]
+  {:shape sh
+   :step  (if context (compile/compile sh context) (compile/compile sh))
+   :index (memoize confluence-index)})
 
 (defn- confluent?
   "Whether every DISTINCT pair among `ids` is proven to land in the same state either
-   way round, in state `id`.
+   way round, in state `id` of the machine `sh` — `index` answering `confluence-index`
+   of it.
 
    THIS IS WHAT LICENSES A DRIVER TO CHOOSE. Two reportable events out of one state
    is a fork, and a driver that picked one at random would be inventing an order the
    shape never promised — unless the shape PROVES the order cannot be observed, which
    is exactly what `confluence` answers. A pair of the SAME event is not asked about:
    nothing is being chosen between."
-  [sh id ids]
-  (let [index (commuting sh)]
-    (every? (fn [[a b]] (= :yes (get index [id #{a b}])))
+  [index sh id ids]
+  (let [verdicts (index sh)]
+    (every? (fn [[a b]] (= :yes (get verdicts [id #{a b}])))
             (for [a ids b ids :when (neg? (compare a b))] [a b]))))
 
 (defn- levels
@@ -186,7 +214,7 @@
 
 (defn- turn-at
   "What a driver can do at ONE level, or nil where it can do nothing."
-  [sh st path permitted]
+  [index sh st path permitted]
   (let [awaited (awaits sh (:id st))
         can     (into #{} (filter (set (keys (shape/reports sh)))) awaited)
         base    (cond-> {:at (:id st) :awaits awaited}
@@ -197,16 +225,16 @@
           (empty? allowed)              (assoc base :from :driver :held true
                                                :event (first (sort can)))
           (= 1 (count allowed))         (assoc base :from :driver :event (first allowed))
-          (confluent? sh (:id st) allowed) (assoc base :from :driver :events (vec allowed))
+          (confluent? index sh (:id st) allowed) (assoc base :from :driver :events (vec allowed))
           :else                         (assoc base :from :world))))))
 
 (defn- turn
   "The Turn, and the level it is about — `[turn shape state path]`. Private because
    `step` needs the level to project a report's `:reads`, and a caller does not."
-  [sh state permitted]
+  [{sh :shape index :index} state permitted]
   (let [ls (levels sh state)]
     (or (some (fn [[s st path]]
-                (when-let [t (turn-at s st path permitted)] [t s st path]))
+                (when-let [t (turn-at index s st path permitted)] [t s st path]))
               (reverse ls))
         ;; INNER FIRST, and nothing anywhere can be reported: the run is waiting where
         ;; it actually is, which is the innermost machine.
@@ -219,6 +247,15 @@
 
 ;;; ------------------------------------------------------------------ the door
 
+(defn- replayed
+  "`where` over a shape already `prepared`."
+  [{sh :shape f :step} events {:keys [data instance]}]
+  (reduce f
+          (if instance
+            (compile/initial sh instance (or data {}))
+            (compile/initial sh (or data {})))
+          events))
+
 (defn where
   "Where `events` got to: the state, with everything it holds.
 
@@ -230,12 +267,8 @@
                   [:=> [:cat shape/Shape Run] compile/State]
                   [:=> [:cat shape/Shape Run Options] compile/State]]}
   ([sh events] (where sh events {}))
-  ([sh events {:keys [data instance context]}]
-   (reduce (stepper sh context)
-           (if instance
-             (compile/initial sh instance (or data {}))
-             (compile/initial sh (or data {})))
-           events)))
+  ([sh events {:keys [context] :as opts}]
+   (replayed (prepared sh context) events opts)))
 
 (defn awaiting
   "Why `events` is not moving and WHO CAN MOVE IT — a `Turn`, derived from the shape
@@ -260,7 +293,8 @@
      :cites [:inner-first :count-what-can-be-reported-not-what-is-awaited]}]}
   ([sh events] (awaiting sh events {}))
   ([sh events opts]
-   (first (turn sh (where sh events opts) (or (:permitted opts) any?)))))
+   (let [p (prepared sh (:context opts))]
+     (first (turn p (replayed p events opts) (or (:permitted opts) any?))))))
 
 (defn reorder-agrees
   "Run two events out of ONE state BOTH WAYS through the compiled machine and answer where each order landed and whether the two landings are identical. It is the independent witness the concurrency licence has never had: it recomputes nothing `confluence` computes — it holds the two concrete events, applies a then b, applies b then a, and compares the resulting states — so a pair the checker calls :yes whose two orders differ is an unsound licence and this says so. A pair called :no or :unknown is merely never taken and may disagree freely. It RUNS the machine, so like `laws` it is not part of `problems`; it is what the generative soundness property over `confluence` and the `commuting` licence is written on."
@@ -351,6 +385,17 @@
      {:licensed 0 :disagreeing []}
      commute-map)))
 
+(defn- advanced
+  "`advance` over a shape already `prepared`."
+  [{sh :shape f :step :as p} events event opts]
+  (let [state  (replayed p events opts)
+        landed (f state event)]
+    (when-let [on (:on opts)]
+      (let [path (nth (last (levels sh state)) 2)]
+        (on (cond-> {:event event :from (:id state) :to (:id landed) :state landed}
+              (seq path) (assoc :within path)))))
+    (conj (vec events) event)))
+
 (defn advance
   "One event applied to a run: the run it grows into, and `:on` told what happened.
 
@@ -367,13 +412,7 @@
                   [:=> [:cat shape/Shape Run compile/Event Options] Run]]}
   ([sh events event] (advance sh events event {}))
   ([sh events event opts]
-   (let [state  (where sh events opts)
-         landed ((stepper sh (:context opts)) state event)]
-     (when-let [on (:on opts)]
-       (let [path (nth (last (levels sh state)) 2)]
-         (on (cond-> {:event event :from (:id state) :to (:id landed) :state landed}
-               (seq path) (assoc :within path)))))
-     (conj (vec events) event))))
+   (advanced (prepared sh (:context opts)) events event opts)))
 
 (defn- reported
   "One event, as the shape says it would be found: the report run against the view
@@ -388,6 +427,21 @@
       (throw (ex-info "The state cannot provide what this report reads"
                       {:at (:id st) :event id :explain (dissoc wrong :schema)})))
     (fn [] (assoc (report seen) :id id))))
+
+(defn- stepped
+  "`step` over a shape already `prepared` — which is how `drive` compiles once for a
+   whole run rather than once a turn."
+  [p events opts]
+  (let [state    (replayed p events opts)
+        [t s st] (turn p state (or (:permitted opts) any?))
+        ids      (cond (:held t) nil
+                       (:event t) [(:event t)]
+                       :else (:events t))]
+    (if (empty? ids)
+      (vec events)
+      (let [run  (or (:reports opts) (fn [thunks] (mapv #(%) thunks)))
+            evts (run (mapv #(reported s st %) ids))]
+        (reduce (fn [es e] (advanced p es e opts)) (vec events) evts)))))
 
 (defn step
   "One turn: find what the state `events` lands in is waiting to be told, go and
@@ -417,16 +471,7 @@
      :cites [:a-join-is-the-product-and-the-licence :the-licence-is-one-machines :everything-else-is-injected]}]}
   ([sh events] (step sh events {}))
   ([sh events opts]
-   (let [state (where sh events opts)
-         [t s st] (turn sh state (or (:permitted opts) any?))
-         ids   (cond (:held t) nil
-                     (:event t) [(:event t)]
-                     :else (:events t))]
-     (if (empty? ids)
-       (vec events)
-       (let [run  (or (:reports opts) (fn [thunks] (mapv #(%) thunks)))
-             evts (run (mapv #(reported s st %) ids))]
-         (reduce (fn [es e] (advance sh es e opts)) (vec events) evts))))))
+   (stepped (prepared sh (:context opts)) events opts)))
 
 (defn drive
   "Turn the crank until the machine stops moving, and answer the run it got to.
@@ -450,6 +495,7 @@
      :cites [:a-budget-in-drive-was-not-taken :a-run-is-the-vector-of-events]}]}
   ([sh events] (drive sh events {}))
   ([sh events opts]
-   (loop [es (vec events)]
-     (let [next (step sh es opts)]
-       (if (= next es) es (recur next))))))
+   (let [p (prepared sh (:context opts))]
+     (loop [es (vec events)]
+       (let [next (stepped p es opts)]
+         (if (= next es) es (recur next)))))))
