@@ -71,6 +71,7 @@
      :supersedes [:dependency-ubergraph]
      :cites [:dependency-ubergraph :ubergraph-out-edges-are-a-set :ubergraph-is-equal-and-edn-for-value-attributes :ubergraph-is-a-closed-map-and-fails-silently]}]}
   (:require [malli.core :as m]
+            [malli.error :as me]
             [malli.util :as mu]
             [robertluo.state-graph.graph :as graph]))
 
@@ -889,7 +890,13 @@
     {:id :a-malformed-event-that-failed-every-guard-looked-like-a-miss
      :kind :lesson
      :says "Selection happens before conform!, so an event failing every guard looked like an ordinary miss, conflating a DEFECT with a legitimate one. A guard is a refinement of a schema the event must already satisfy, so where nothing matches the compiler conforms the event against the group's schema — a bad event throws and a well-formed one no guard wanted is still ignored."
-     :cites [:there-is-no-else]}]}
+     :cites [:there-is-no-else]}
+    {:id :a-malformed-part-says-why
+     :kind :decision
+     :says ":malformed carries :why, malli's humanized explanation of the part against its definition: which key and what it should be. A part of no known kind is told it should be a state, an event or a transition."
+     :why "A caller shown only the kind and the id could not tell which of a part's schemas was refused: a model given an event of [:or map map] guessed, and spent a lap."
+     :from "the author, 2026-11-13: `the information is lost there and it shouldn't`"
+     :when "2026-11-13T13:35:54Z"}]}
   [& parts]
   (let [{:keys [state event transition]} (group-by ::kind parts)
         state-ids (set (map :id state))
@@ -901,11 +908,12 @@
     (vec
      (concat
       ;; 0 — a part that is not the thing it says it is. One check for a handler that
-      ;; is not a fn, a schema that is not a map schema, and every missing key.
+      ;; is not a fn, a schema that is not a map schema, and every missing key. :why is
+      ;; malli's own words for which key and what it should be, so the reason survives.
       (for [p parts
-            :let [s (def-schema (::kind p))]
-            :when (or (nil? s) (not (m/validate s p)))]
-        {:problem :malformed :kind (::kind p) :id (:id p)})
+            :let [s (or (def-schema (::kind p)) [:map [::kind [:enum :state :event :transition]]])]
+            :when (not (m/validate s p))]
+        {:problem :malformed :kind (::kind p) :id (:id p) :why (me/humanize (m/explain s p))})
       (dupes :state state)
       (dupes :event event)
       ;; 1, 2 — a transition naming something that is not there

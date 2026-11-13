@@ -7,6 +7,9 @@ metadata on the vars and namespaces themselves; see AGENTS.md for how to reach i
 
 The first version meant to be used from outside the repository it was built in.
 
+- A `:malformed` problem carries `:why`, malli's humanized explanation of the part: which key
+  and what it should be. Before, it named only the kind and the id.
+
 - `fingerprint` on the facade: a stable SHA-256 identity for a shape.
 - `dot` answers the drawing as graphviz source built from plain data; `draw!` renders it,
   writes a file with `:save`, opens a PNG without one, and swallows nothing — where graphviz

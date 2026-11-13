@@ -122,7 +122,16 @@
     (testing "a part that is not the thing it says it is — one check for a handler that
               is not a fn, a schema that is not a map schema, and every missing key.
               The handler hangs off the EVENT, so that is where a bad one goes"
-      (is (= [:malformed] (kinds idle run (assoc go :handler "not a fn") t))))
+      (is (= [:malformed] (kinds idle run (assoc go :handler "not a fn") t)))
+      (is (= [{:problem :malformed :kind :event :id :go :why {:handler ["should be a fn"]}}]
+             (filterv #(= :malformed (:problem %)) (shape/problems idle run (assoc go :handler "not a fn") t)))
+          "and says why, in malli's words, so the reason is not lost")
+      (is (= {:schema ["should be a malli schema over a map"]}
+             (:why (first (shape/problems (assoc go :schema [:or [:map] [:map [:a :int]]]))))))
+      (is (= [{::shape/kind ["missing required key"]}
+              {::shape/kind ["should be either :state, :event or :transition"]}]
+             (mapv #(:why (first (shape/problems %))) [{:id :x} {::shape/kind :edge :id :x}]))
+          "a part of no kind, or of one there is not, is told so"))
 
     (testing "two parts under one id, which a map would silently collapse"
       (is (= [:duplicate] (kinds idle run (shape/state :run [:map]) go t))))
