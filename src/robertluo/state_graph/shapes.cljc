@@ -850,6 +850,36 @@
     (or (nil? child)
         (and (shape? child) (final? child (initial-id child))))))
 
+(def Referential
+  "A fault `problems` answers, as data, each kind with the evidence it carries: the ids and
+   keys it is about, and where malli refused a part, its own words under :why. :within is the
+   path of nodes a nested machine's fault was found under."
+  (let [w [:within {:optional true} [:vector Id]]
+        of (fn [k & entries] [k (into [:map {:closed true} [:problem [:= k]] w] entries)])]
+    [:multi {:dispatch :problem}
+     (of :malformed [:kind [:maybe :keyword]] [:id :any] [:why [:map-of :any :any]])
+     (of :duplicate [:kind :keyword] [:id :any] [:count :int])
+     (of :unknown-state [:in [:vector :any]] [:key :keyword] [:id :any])
+     (of :unknown-event [:in [:vector :any]] [:id :any])
+     (of :ambiguous [:from Id] [:event Id] [:to [:vector Id]] [:verdict [:enum :no :unknown]])
+     (of :reads-without-report [:id Id])
+     (of :unused-event [:id Id])
+     (of :initial [:count :int] [:ids [:vector Id]])
+     (of :reserved-declared [:id Id] [:key :keyword])
+     (of :combine-not-a-function [:id Id] [:key :keyword])
+     (of :law-without-combine [:id Id] [:key :keyword])
+     (of :machine-cannot-start [:id Id] [:initial Id] [:why [:map-of :any :any]])
+     (of :seed-without-machine [:id Id])
+     (of :outcome-without-machine [:id Id])
+     (of :unknown-outcome [:id Id] [:outcome :any])
+     (of :yield-with-outcomes [:id Id])
+     (of :done-and-final [:id Id])
+     (of :done-with-edges [:id Id])
+     (of :machine-cannot-finish [:id Id])
+     (of :done-cycle [:id Id])
+     (of :yield-without-machine [:id Id])
+     (of :yield-without-done [:id Id])]))
+
 (defn problems
   "What is wrong with these parts, AS DATA — a vector of maps, empty when nothing is.
 
@@ -860,7 +890,7 @@
    The parts are [:* :any] and stay that way: this must ACCEPT a malformed part in
    order to report it, so a tighter argument schema would refuse the very input the
    function exists to answer about."
-  {:malli/schema [:=> [:cat [:* :any]] [:vector :map]]
+  {:malli/schema [:=> [:cat [:* :any]] [:vector Referential]]
    :knowledge
    [{:id :the-referential-faults
      :kind :decision
@@ -896,7 +926,14 @@
      :says ":malformed carries :why, malli's humanized explanation of the part against its definition: which key and what it should be. A part of no known kind is told it should be a state, an event or a transition."
      :why "A caller shown only the kind and the id could not tell which of a part's schemas was refused: a model given an event of [:or map map] guessed, and spent a lap."
      :from "the author, 2026-11-13: `the information is lost there and it shouldn't`"
-     :when "2026-11-13T13:35:54Z"}]}
+     :when "2026-11-13T13:35:54Z"}
+    {:id :every-problem-kind-declares-its-evidence
+     :kind :decision
+     :says "`problems` answers `Referential` and check's answers `Structural`: a :multi on :problem whose every kind is a closed map of the evidence it carries. Instrumented, a fault that loses its evidence fails every suite that makes one, so a missing reason is found by the type and not by luck."
+     :why "Each gap a model met was a check that had its reason and did not pass it on, and hundreds of assertions on chosen cases never saw one go missing."
+     :from "the author, 2026-11-13: `If we are fix gaps in this pace, we need days if not months, and yet no real guarantee.`"
+     :when "2026-11-13T14:40:00Z"
+     :cites [:a-malformed-part-says-why]}]}
   [& parts]
   (let [{:keys [state event transition]} (group-by ::kind parts)
         state-ids (set (map :id state))
@@ -993,7 +1030,8 @@
             :when (and child (shape? child) (not (:seed s)))
             :let [id (initial-id child)]
             :when (not (m/validate (enter-schema child id) {:id id}))]
-        {:problem :machine-cannot-start :id (:id s) :initial id})
+        {:problem :machine-cannot-start :id (:id s) :initial id
+         :why (me/humanize (m/explain (enter-schema child id) {:id id}))})
       ;; A :seed needs something to sow INTO, exactly as a :yield needs something to
       ;; harvest FROM. Without a machine it is a declaration nothing ever reads.
       (for [s state :when (and (:seed s) (not (:machine s)))]

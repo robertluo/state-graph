@@ -112,6 +112,10 @@
 
 ;;; ------------------------------------------------------------------- the checks
 
+(deftest a-referential-fault-without-its-evidence-is-not-a-problem
+  (is (not (m/validate shape/Referential {:problem :malformed :kind :event :id :go})))
+  (is (m/validate shape/Referential {:problem :malformed :kind :event :id :go :why {:handler ["should be a fn"]}})))
+
 (deftest problems-are-data
   (let [idle (shape/state :idle [:map] {:initial true})
         run  (shape/state :run [:map])
@@ -278,7 +282,7 @@
                (shape/state :z     [:map [:x :int]] {:final true})
                (shape/event :g [:map] (constantly {}) [:map])
                (shape/transition :needs :g :z))]
-    (is (= [{:problem :machine-cannot-start :id :host :initial :needs}]
+    (is (= [{:problem :machine-cannot-start :id :host :initial :needs :why {:x ["missing required key"]}}]
            (shape/problems (shape/state :host [:map] {:initial true :machine needy}))))))
 
 (deftest sub-is-the-machinerys-word

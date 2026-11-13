@@ -9,6 +9,13 @@ The first version meant to be used from outside the repository it was built in.
 
 - A `:malformed` problem carries `:why`, malli's humanized explanation of the part: which key
   and what it should be. Before, it named only the kind and the id.
+- `check/judged` answers `admits`'s verdict with its reasons: each key path, and whether the key
+  is `:absent`, `:maybe-absent`, `:undeclared` or a `:mismatch`, with an enum's `:values` the
+  target does not take. Every check row that is `:no` carries them under `:reasons`, and so do
+  `:target-refuses`, `:view-unavailable`, `:reads-unavailable`, `:yield-unavailable`,
+  `:seed-unavailable` and `:seed-refused`. `:machine-cannot-start` carries `:why`.
+- `shapes/Referential` and `check/Structural` type every fault `problems` answers, each kind a
+  closed map of the evidence it carries, and `problems` declares them.
 
 - `fingerprint` on the facade: a stable SHA-256 identity for a shape.
 - `dot` answers the drawing as graphviz source built from plain data; `draw!` renders it,

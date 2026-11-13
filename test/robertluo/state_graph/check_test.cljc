@@ -258,10 +258,27 @@
 
 ;;; --------------------------------------------------------------------- problems
 
+;; ADR 0048 of smart-boundary: a refusal carries its evidence, by its type. Instrumented, a
+;; fault without its reasons fails every suite that makes one.
+(deftest a-fault-without-its-evidence-is-not-a-problem
+  (is (not (m/validate check/Structural {:problem :target-refuses :from :a :event :go :to :b})))
+  (is (m/validate check/Structural {:problem :target-refuses :from :a :event :go :to :b
+                                    :reasons [{:at [:n] :because :absent}]}))
+  (is (not (m/validate check/Judgement {:verdict :no})) "a :no with no reason is not an answer")
+  (is (= {:verdict :no :reasons [{:at [:n] :because :mismatch :takes :int :holds :string}]}
+         (check/judged [:map [:n :int]] [:map [:n :string]])))
+  (is (= {:verdict :no :reasons [{:at [:k] :because :mismatch :takes [:enum :a] :holds [:enum :a :b] :values [:b]}]}
+         (check/judged [:map [:k [:enum :a]]] [:map [:k [:enum :a :b]]]))
+      "an enum says which of its values the target does not take")
+  (is (= {:verdict :no :reasons [{:at [:o :x] :because :maybe-absent}]}
+         (check/judged [:map [:o [:map [:x :int]]]] [:map [:o [:map [:x {:optional true} :int]]]]))
+      "a nested key, by its path"))
+
 (deftest structural-problems-are-data-and-only-the-proven-ones
   (let [ps (check/problems (ts/broken))]
     (is (= #{:unreachable :dead-end :target-refuses} (set (map :problem ps))))
-    (is (= {:from :running :event :bad :to :typed :problem :target-refuses}
+    (is (= {:from :running :event :bad :to :typed :problem :target-refuses
+            :reasons [{:at [:n] :because :mismatch :takes :int :holds :string}]}
            (first (filter #(= :target-refuses (:problem %)) ps))))
     (is (empty? (check/problems (ts/counter)))
         "a sound shape has nothing structurally wrong, and every :undeclared and
@@ -280,7 +297,8 @@
         s0   (fn [sh] (c/initial sh {:x 1}))]
     (testing "an undeclared key: refused at run time, and so :target-refuses"
       (let [sh (lift [:map [:y :int]])]
-        (is (= [{:from :a :event :go :to :b :problem :target-refuses}] (check/problems sh)))
+        (is (= [{:from :a :event :go :to :b :problem :target-refuses
+                 :reasons [{:at [:y] :because :undeclared}]}] (check/problems sh)))
         (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                               ((c/compile sh) (s0 sh) {:id :go :y 2})))))
     (testing "an OPTIONAL undeclared key is one the handler may answer, and is refused too"
@@ -347,11 +365,11 @@
            (shape/transition :thin :maybe   :end)
            (shape/transition :rich :nothing :end))]
     (is (= #{{:from :rich :event :ok      :verdict :yes}
-             {:from :thin :event :maybe   :verdict :no}
+             {:from :thin :event :maybe   :verdict :no :reasons [{:at [:goal] :because :maybe-absent}]}
              {:from :rich :event :nothing :verdict :undeclared}}
            (set (check/views g)))
         "an OPTIONAL key is :no — a view a handler is handed cannot rest on a maybe")
-    (is (= [{:from :thin :event :maybe :problem :view-unavailable}]
+    (is (= [{:from :thin :event :maybe :problem :view-unavailable :reasons [{:at [:goal] :because :maybe-absent}]}]
            (filterv #(= :view-unavailable (:problem %)) (check/problems g)))
         "and only the proven one is a fault")))
 
@@ -562,7 +580,7 @@
   (testing "a target that insists on a key the source cannot have is a PROVEN fault"
     (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})
                           (shape/state :b [:map [:needed :int]] {:final true}))]
-      (is (= [{:from :a :to :b :done true :problem :target-refuses}]
+      (is (= [{:from :a :to :b :done true :problem :target-refuses :reasons [{:at [:needed] :because :absent}]}]
              (check/problems sh))))))
 
 (deftest a-yield-is-admits-for-the-third-time
@@ -601,10 +619,10 @@
         sh (shape/shape (shape/state :p [:map] {:initial true :machine child
                                                 :done :z :yield [:map [:r :string]]})
                         (shape/state :z [:map [:r :string]] {:final true}))]
-    (is (= [{:from :p :final :bad :verdict :no}
+    (is (= [{:from :p :final :bad :verdict :no :reasons [{:at [:r] :because :absent}]}
             {:from :p :final :ok :verdict :yes}]
            (vec (check/yields sh))))
-    (is (= [{:from :p :final :bad :problem :yield-unavailable}]
+    (is (= [{:from :p :final :bad :problem :yield-unavailable :reasons [{:at [:r] :because :absent}]}]
            (filter (comp #{:yield-unavailable} :problem) (check/problems sh))))))
 
 (deftest a-PER-OUTCOME-yield-is-asked-about-its-OWN-final-state-and-no-other
@@ -656,10 +674,11 @@
     ;; `:b` is a dead end in these fixtures and says so; what is asserted is the seed.
     (let [seedy (fn [s] (filter (comp #{:seed-unavailable :seed-refused} :problem)
                                 (check/problems s)))]
-      (is (= [{:problem :seed-unavailable :from :b}]
+      (is (= [{:problem :seed-unavailable :from :b :reasons [{:at [:job] :because :absent}]}]
              (seedy (sh [:map] [:map [:job :string]] [:map [:job :string]])))
           "and the proven half is a fault, exactly as :yield-unavailable is")
-      (is (= [{:problem :seed-refused :from :b :initial :c1}]
+      (is (= [{:problem :seed-refused :from :b :initial :c1
+               :reasons [{:at [:job] :because :mismatch :takes :int :holds :string}]}]
              (seedy (sh [:map [:job :string]] [:map [:job :string]] [:map [:job :int]])))))))
 
 (deftest a-continuing-JOIN-NODE-keeps-its-licence
@@ -787,14 +806,14 @@
       (is (= [] (check/problems (sh [:map [:n :int]] [:map [:n :int]])))))
 
     (testing "it does not, and that is PROVEN rather than suspected"
-      (is (= [{:from :a :event :go :verdict :no}]
+      (is (= [{:from :a :event :go :verdict :no :reasons [{:at [:n] :because :absent}]}]
              (vec (check/readings (sh [:map] [:map [:n :int]])))))
-      (is (= [{:from :a :event :go :problem :reads-unavailable}]
+      (is (= [{:from :a :event :go :problem :reads-unavailable :reasons [{:at [:n] :because :absent}]}]
              (check/problems (sh [:map] [:map [:n :int]])))))
 
     (testing "it only MIGHT, which is also :no — a report cannot rest on a maybe any
               more than a handler's view can"
-      (is (= [{:from :a :event :go :verdict :no}]
+      (is (= [{:from :a :event :go :verdict :no :reasons [{:at [:n] :because :maybe-absent}]}]
              (vec (check/readings (sh [:map [:n {:optional true} :int]] [:map [:n :int]]))))))
 
     (testing "an event with no report comes from the WORLD, so there is nothing to check"
@@ -829,8 +848,8 @@
                            (shape/transition :s :go :x))
         host  (shape/shape (shape/state :in  [:map] {:initial true :machine child :done :out})
                            (shape/state :out [:map] {:final true}))]
-    (is (= [{:from :s :event :go :verdict :no :within [:in]}] (check/readings host)))
-    (is (= [{:from :s :event :go :problem :reads-unavailable :within [:in]}]
+    (is (= [{:from :s :event :go :verdict :no :within [:in] :reasons [{:at [:nowhere] :because :absent}]}] (check/readings host)))
+    (is (= [{:from :s :event :go :problem :reads-unavailable :within [:in] :reasons [{:at [:nowhere] :because :absent}]}]
            (check/problems host))
         "and reported ONCE — `problems` takes only its own from a check that now recurses")))
 
