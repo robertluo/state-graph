@@ -7,13 +7,17 @@ metadata on the vars and namespaces themselves; see AGENTS.md for how to reach i
 
 The first version meant to be used from outside the repository it was built in.
 
-- A `:malformed` problem carries `:why`, malli's humanized explanation of the part: which key
-  and what it should be. Before, it named only the kind and the id.
+- A `:malformed` problem carries `:why`, malli's explanation of the part as data: a vector of
+  `shapes/Reason`, each place refused by its path into the part, with the schema it broke as a
+  form (the key's own where it is missing), malli's kind of refusal and the value there. A
+  function in either is the symbol `fn`. Never `humanize`'s words. Before, it named only the kind
+  and the id.
 - `check/judged` answers `admits`'s verdict with its reasons: each key path, and whether the key
   is `:absent`, `:maybe-absent`, `:undeclared` or a `:mismatch`, with an enum's `:values` the
   target does not take. Every check row that is `:no` carries them under `:reasons`, and so do
   `:target-refuses`, `:view-unavailable`, `:reads-unavailable`, `:yield-unavailable`,
-  `:seed-unavailable` and `:seed-refused`. `:machine-cannot-start` carries `:why`.
+  `:seed-unavailable` and `:seed-refused`. `:machine-cannot-start` carries `:why`, the same
+  vector of `Reason`.
 - `shapes/Referential` and `check/Structural` type every fault `problems` answers, each kind a
   closed map of the evidence it carries, and `problems` declares them.
 
