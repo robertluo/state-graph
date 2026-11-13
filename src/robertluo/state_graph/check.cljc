@@ -166,46 +166,99 @@
 
 (declare ^:private sub)
 
+(def ^:private yes {:verdict :yes})
+(def ^:private unknown {:verdict :unknown})
+
+(defn- refused
+  "A :no and its one reason: where, and why."
+  [at because & {:as more}]
+  {:verdict :no :reasons [(merge {:at at :because because} more)]})
+
+(defn- weakest
+  "The weakest of several judgements: :no over :unknown over :yes, a :no carrying the
+   reasons of every :no among them."
+  [judgements]
+  (let [nos (filter #(= :no (:verdict %)) judgements)]
+    (cond (seq nos) {:verdict :no :reasons (into [] (comp (mapcat :reasons) (distinct)) nos)}
+          (some #(= :unknown (:verdict %)) judgements) unknown
+          :else yes)))
+
 (defn- sub-map
-  [target produced]
+  [target produced at]
   (let [t (shape/entries-of target)
         p (shape/entries-of produced)
-        closed? (:closed (m/properties target))
-        verdicts
+        closed? (:closed (m/properties target))]
+    (weakest
+     (concat
+      (for [[k {:keys [optional? schema]}] t
+            :let [here (conj at k)]]
+        (if-let [pe (get p k)]
+          (if (and (:optional? pe) (not optional?))
+            ;; produced MAY leave it out where the target insists on it
+            (refused here :maybe-absent)
+            (sub schema (:schema pe) here))
+          (if optional? yes (refused here :absent))))
+      (when closed?
         (concat
-         (for [[k {:keys [optional? schema]}] t]
-           (if-let [pe (get p k)]
-             (if (and (:optional? pe) (not optional?))
-               ;; produced MAY leave it out where the target insists on it
-               :no
-               (sub schema (:schema pe)))
-             (if optional? :yes :no)))
-         (when closed?
-           (concat
-            (for [k (keys p) :when (not (contains? t k))] :no)
-            ;; an OPEN produced may carry keys nobody declared, and a closed target
-            ;; would refuse them — unprovable either way
-            (when-not (:closed (m/properties produced)) [:unknown]))))]
-    (cond (some #{:no} verdicts) :no
-          (some #{:unknown} verdicts) :unknown
-          :else :yes)))
+         (for [k (keys p) :when (not (contains? t k))] (refused (conj at k) :undeclared))
+         ;; an OPEN produced may carry keys nobody declared, and a closed target
+         ;; would refuse them — unprovable either way
+         (when-not (:closed (m/properties produced)) [unknown])))))))
 
 (defn- sub
-  [target produced]
-  (let [tt (m/type target), pt (m/type produced)]
+  [target produced at]
+  (let [tt (m/type target), pt (m/type produced)
+        mismatch (fn [& {:as more}]
+                   (refused at :mismatch (merge {:takes (m/form target) :holds (m/form produced)} more)))]
     (cond
       ;; a sufficient condition and not a necessary one, which is all it is used for.
       ;; Beware a form holding a regex: (= #"a" #"a") is false, so this answers
       ;; :unknown there rather than lying.
-      (= (m/form target) (m/form produced)) :yes
-      (= :any tt) :yes
-      (= :maybe tt) (sub (first (m/children target)) produced)
+      (= (m/form target) (m/form produced)) yes
+      (= :any tt) yes
+      (= :maybe tt) (sub (first (m/children target)) produced at)
       ;; a single value, or a finite set of them, is DECIDABLE — just try it
-      (= := pt) (if (m/validate target (first (m/children produced))) :yes :no)
-      (= :enum pt) (if (every? #(m/validate target %) (m/children produced)) :yes :no)
-      (and (= :map tt) (= :map pt)) (sub-map target produced)
-      (and (shape/primitive-types tt) (shape/primitive-types pt)) :no
-      :else :unknown)))
+      (= := pt) (if (m/validate target (first (m/children produced))) yes (mismatch))
+      (= :enum pt) (let [bad (vec (remove #(m/validate target %) (m/children produced)))]
+                     (if (empty? bad) yes (mismatch :values bad)))
+      (and (= :map tt) (= :map pt)) (sub-map target produced at)
+      (and (shape/primitive-types tt) (shape/primitive-types pt)) (mismatch)
+      :else unknown)))
+
+(def Reason
+  "Why a target does not admit what is produced, at one place: the path of keys it is at;
+   and because the key is :absent where the target requires it, :maybe-absent where the
+   produced side holds it only as optional, :undeclared where a closed target does not
+   declare it, or a :mismatch of the target's schema, :takes, against the produced one,
+   :holds, with the :values of an enum the target does not take."
+  [:map {:closed true}
+   [:at [:vector :any]]
+   [:because [:enum :absent :maybe-absent :undeclared :mismatch]]
+   [:takes {:optional true} :any]
+   [:holds {:optional true} :any]
+   [:values {:optional true} [:vector :any]]])
+
+(def Judgement
+  "What `judged` answers: a verdict, and with :no at least one `Reason`."
+  [:multi {:dispatch :verdict}
+   [:yes [:map {:closed true} [:verdict [:= :yes]]]]
+   [:unknown [:map {:closed true} [:verdict [:= :unknown]]]]
+   [:no [:map {:closed true} [:verdict [:= :no]] [:reasons [:vector {:min 1} Reason]]]]])
+
+(defn judged
+  "`admits` with its reasons kept: :yes, :unknown, or :no with every place it was proven at,
+   each a `Reason`. `admits` is its verdict, so a reason is worked out once, here."
+  {:malli/schema [:=> [:cat shape/Schema shape/Schema] Judgement]
+   :knowledge
+   [{:id :a-no-carries-its-reasons
+     :kind :decision
+     :says "`judged` answers `admits`'s verdict with the reasons it was proven by: each key path, and whether the key is absent, held only as optional, undeclared by a closed target, or a mismatch of schemas. `admits` is its verdict, and every check row that is :no carries them, so a reason is never worked out again downstream."
+     :why "`admits` dropped the reasons `sub-map` had, so :target-refuses reached a model with none, and a consumer wrote a second copy of the rule that drifted."
+     :from "the author, 2026-11-13: `the information is lost there and it shouldn't`"
+     :when "2026-11-13T14:40:00Z"
+     :cites [:a-partial-subsumption-checker]}]}
+  [target produced]
+  (sub (m/schema target) (m/schema produced) []))
 
 (defn admits
   "Does `target` admit EVERY value `produced` describes? :yes, :no, or :unknown.
@@ -237,7 +290,7 @@
      :says "Where `admits` says :yes, values generated from the produced schema must all validate against the target — a genuinely independent second opinion. That direction is the one worth paying for: a checker saying :no where it should say :unknown merely nags, one saying :yes where it should say :no HIDES A BUG."
      :cites [:a-partial-subsumption-checker]}]}
   [target produced]
-  (sub (m/schema target) (m/schema produced)))
+  (:verdict (judged target produced)))
 
 (defn- produced
   "The schema of what a transition actually hands its target: the source state's own
@@ -288,10 +341,11 @@
   (when out
     (mu/update-properties out assoc :closed true)))
 
-(defn- worst
-  "The weaker of two verdicts: :no over :unknown over :yes."
-  [a b]
-  (some (hash-set a b) [:no :unknown :yes]))
+(defn- row
+  "A check's row with the verdict of `judgement` under `k`, and where it is :no its reasons."
+  [row k judgement]
+  (cond-> (assoc row k (:verdict judgement))
+    (= :no (:verdict judgement)) (update :reasons (fnil into []) (:reasons judgement))))
 
 (defn- continued
   "The schema of what a COMPLETION TRANSITION hands its target: the source state's own
@@ -342,15 +396,15 @@
   [sh]
   (concat
    (for [t (shape/transitions sh)]
-     (assoc (select-keys t [:from :event :to])
-            :verdict (if-let [p (produced sh t)]
-                       (worst (admits (shape/enter-schema sh (:to t)) p)
-                              (admits (shape/patch-schema sh (:to t)) (answered t)))
-                       :undeclared)))
+     (if-let [p (produced sh t)]
+       (row (select-keys t [:from :event :to]) :verdict
+            (weakest [(judged (shape/enter-schema sh (:to t)) p)
+                      (judged (shape/patch-schema sh (:to t)) (answered t))]))
+       (assoc (select-keys t [:from :event :to]) :verdict :undeclared)))
    (for [[from cs] (shape/continuations sh), c cs]
-     (cond-> {:from from :to (:to c) :done true
-              :verdict (admits (shape/enter-schema sh (:to c)) (continued sh from c))}
-       (:outcome c) (assoc :outcome (:outcome c))))
+     (row (cond-> {:from from :to (:to c) :done true}
+            (:outcome c) (assoc :outcome (:outcome c)))
+          :verdict (judged (shape/enter-schema sh (:to c)) (continued sh from c))))
    (inside sh subsumption)))
 
 (defn views
@@ -377,10 +431,9 @@
   [sh]
   (concat
    (for [{:keys [from event sees]} (shape/transitions sh)]
-     {:from from :event event
-      :verdict (if sees
-                 (admits sees (shape/enter-schema sh from))
-                 :undeclared)})
+     (if sees
+       (row {:from from :event event} :verdict (judged sees (shape/enter-schema sh from)))
+       {:from from :event event :verdict :undeclared}))
    (inside sh views)))
 
 (defn readings
@@ -404,10 +457,9 @@
   [sh]
   (concat
    (for [{:keys [from event reads report]} (shape/transitions sh)]
-     {:from from :event event
-      :verdict (if (and report reads)
-                 (admits reads (shape/enter-schema sh from))
-                 :undeclared)})
+     (if (and report reads)
+       (row {:from from :event event} :verdict (judged reads (shape/enter-schema sh from)))
+       {:from from :event event :verdict :undeclared}))
    (inside sh readings)))
 
 (defn yields
@@ -444,8 +496,7 @@
          id (if outcome
               [outcome]
               (sort (filter #(shape/final? child %) (shape/states child))))]
-     {:from from :final id
-      :verdict (admits yield (shape/enter-schema child id))})
+     (row {:from from :final id} :verdict (judged yield (shape/enter-schema child id))))
    (inside sh yields)))
 
 (defn seeds
@@ -479,10 +530,11 @@
          :let [seed (shape/seed sh id), child (shape/machine sh id)]
          :when (and seed child)
          :let [first-id (shape/initial-id child)]]
-     {:from id :initial first-id
-      :provides (admits seed (shape/enter-schema sh id))
-      :accepts (admits (shape/enter-schema child first-id)
-                       (mu/assoc seed :id [:= first-id]))})
+     (let [provides (judged seed (shape/enter-schema sh id))
+           accepts  (judged (shape/enter-schema child first-id) (mu/assoc seed :id [:= first-id]))]
+       (cond-> {:from id :initial first-id :provides (:verdict provides) :accepts (:verdict accepts)}
+         (= :no (:verdict provides)) (assoc :provides-reasons (:reasons provides))
+         (= :no (:verdict accepts))  (assoc :accepts-reasons (:reasons accepts)))))
    (inside sh seeds)))
 
 (defn- domains
@@ -1051,6 +1103,25 @@
 
 ;;; --------------------------------------------------------------------- problems
 
+(def Structural
+  "A fault check's `problems` answers, as data, each kind with the evidence it carries: the
+   state it is about, or the crossing and every `Reason` the target refused it for. :within is
+   the path of nodes a nested machine's fault was found under."
+  (let [w [:within {:optional true} [:vector shape/Id]]
+        rs [:reasons [:vector {:min 1} Reason]]
+        of (fn [k & entries] [k (into [:map {:closed true} [:problem [:= k]] w] entries)])]
+    [:multi {:dispatch :problem}
+     (of :unreachable [:id shape/Id])
+     (of :dead-end [:id shape/Id])
+     (of :trap [:id shape/Id])
+     (of :target-refuses [:from shape/Id] [:event {:optional true} shape/Id] [:to shape/Id]
+         [:done {:optional true} [:= true]] [:outcome {:optional true} shape/Id] rs)
+     (of :view-unavailable [:from shape/Id] [:event shape/Id] rs)
+     (of :reads-unavailable [:from shape/Id] [:event shape/Id] rs)
+     (of :yield-unavailable [:from shape/Id] [:final shape/Id] rs)
+     (of :seed-unavailable [:from shape/Id] rs)
+     (of :seed-refused [:from shape/Id] [:initial shape/Id] rs)]))
+
 (defn problems
   "What is STRUCTURALLY wrong with a built shape, as data — the checks that need the
    graph, where shape/problems is the referential ones that need only the parts.
@@ -1058,7 +1129,7 @@
    Only PROVEN faults. An :unknown subsumption is not reported: a checker that cries
    about what it could not work out is a checker people turn off — and a machine with no
    :final declared is not condemned for having no way to finish, see `finishable`."
-  {:malli/schema [:=> [:cat shape/Shape] [:vector :map]]
+  {:malli/schema [:=> [:cat shape/Shape] [:vector Structural]]
    :knowledge
    [{:id :the-structural-faults
      :kind :decision
@@ -1101,9 +1172,9 @@
           ;; is `:machine-cannot-start` proven where the parts alone could not prove it:
           ;; a seedless node is answered referentially, a seeded one needs subsumption.
           (for [{:keys [provides] :as v} (own (seeds sh)) :when (= :no provides)]
-            {:problem :seed-unavailable :from (:from v)})
+            {:problem :seed-unavailable :from (:from v) :reasons (:provides-reasons v)})
           (for [{:keys [accepts] :as v} (own (seeds sh)) :when (= :no accepts)]
-            {:problem :seed-refused :from (:from v) :initial (:initial v)})
+            {:problem :seed-refused :from (:from v) :initial (:initial v) :reasons (:accepts-reasons v)})
           ;; A NESTED MACHINE IS CHECKED AS AN ORDINARY SHAPE, which is most of why
           ;; nesting cost so little: every check above is about one graph, and a child is
           ;; one. :within names the path of nodes it was found under, so a fault three

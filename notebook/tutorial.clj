@@ -192,9 +192,9 @@
 ;;   `:retrying` bounce off each other for ever. A dead end is a trap of size one; this is
 ;;   the smallest interesting one, and the reason a `no out-edge` check is not enough.
 ;; - `:target-refuses` — `:submit` declares that it answers `[:map]`, so nothing ever sets
-;;   `:by`, and `:review` requires it. **Found without running anything.** The checker is
-;;   partial on purpose: it answers yes, no, or *don't know*, reports only what it can
-;;   prove, and never lies.
+;;   `:by`, and `:review` requires it. **Found without running anything.** It says why,
+;;   under `:reasons`: the key at `[:by]` is `:absent`. The checker is partial on purpose:
+;;   it answers yes, no, or *don't know*, reports only what it can prove, and never lies.
 ;;
 ;; And the same faults by the means a person is better at. The pocket that `:oops` leads
 ;; into has no arrow reaching a double circle, and `:archived` floats free:
