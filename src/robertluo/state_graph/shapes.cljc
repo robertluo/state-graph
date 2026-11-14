@@ -235,6 +235,7 @@
    BOTH HALVES off this map and nothing at all off the graph."
   [:map [::kind [:= :event]] [:id Id] [:schema MapSchema] [:handler fn?]
    [:out {:optional true} MapSchema]
+   [:lift {:optional true} [:= true]]
    [:sees {:optional true} MapSchema]
    [:report {:optional true} fn?]
    [:reads {:optional true} MapSchema]])
@@ -490,14 +491,14 @@
      :says "Are internal events wanted at all? Nothing is blocked meanwhile: the motivation is HANDLER REUSE rather than cascades, and the commonest reason to want one — `move on now that this is finished` — is what a completion transition now is."
      :why "Three things to settle before any of it: whether the machine may drive itself at all, since a caller triggering the next event by hand costs nothing and hides the flow from `check`, which is the whole trade; breadth-first or depth-first, which is observable in the history and cannot be left to whatever `into` happens to do; and how an audit trail tells what the world did from what the machine did. And an internal raise is a SECOND EVENT SOURCE where source-merging was pushed onto the caller precisely because the machine has no clock."
      :cites [:a-handler-causes-nothing :one-ordered-stream-per-instance]}]}
-  ([id schema] (event id schema (lifting (m/schema schema)) schema nil))
+  ([id schema] (assoc (event id schema (lifting (m/schema schema)) schema nil) :lift true))
   ;; A PURE LIFT MAY STILL HAVE OPTIONS. A handler is a fn and options are a map, so the
   ;; third argument says which it is with no ceremony — and without this, declaring a
   ;; :report on a lifting event would have cost it the short form and written its schema
   ;; out twice again, which is the whole thing the short form removed.
   ([id schema handler-or-opts]
    (if (map? handler-or-opts)
-     (event id schema (lifting (m/schema schema)) schema handler-or-opts)
+     (assoc (event id schema (lifting (m/schema schema)) schema handler-or-opts) :lift true)
      (event id schema handler-or-opts nil nil)))
   ([id schema handler out] (event id schema handler out nil))
   ([id schema handler out opts]
@@ -1198,7 +1199,7 @@
   (when-let [ps (seq (apply problems parts))]
     (throw (ex-info "The shape has problems" {:problems (vec ps)})))
   (let [{:keys [state event transition]} (group-by ::kind parts)
-        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :sees :report :reads]))) event)]
+        catalogue (into {} (map (juxt :id #(select-keys % [:schema :handler :out :lift :sees :report :reads]))) event)]
     {::nodes
      (into {} (for [s state] [(:id s) (cond-> (select-keys s [:schema :initial :final :machine])
                                         (:seed s) (assoc :seed (m/schema (:seed s))))]))

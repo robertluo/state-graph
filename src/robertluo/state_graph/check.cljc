@@ -195,12 +195,13 @@
         (if-let [pe (get p k)]
           (if (and (:optional? pe) (not optional?))
             ;; produced MAY leave it out where the target insists on it
-            (refused here :maybe-absent)
+            (refused here :maybe-absent :takes (m/form schema) :holds (m/form (:schema pe)))
             (sub schema (:schema pe) here))
-          (if optional? yes (refused here :absent))))
+          (if optional? yes (refused here :absent :takes (m/form schema)))))
       (when closed?
         (concat
-         (for [k (keys p) :when (not (contains? t k))] (refused (conj at k) :undeclared))
+         (for [[k {:keys [schema]}] p :when (not (contains? t k))]
+           (refused (conj at k) :undeclared :holds (m/form schema)))
          ;; an OPEN produced may carry keys nobody declared, and a closed target
          ;; would refuse them — unprovable either way
          (when-not (:closed (m/properties produced)) [unknown])))))))
@@ -229,14 +230,21 @@
   "Why a target does not admit what is produced, at one place: the path of keys it is at;
    and because the key is :absent where the target requires it, :maybe-absent where the
    produced side holds it only as optional, :undeclared where a closed target does not
-   declare it, or a :mismatch of the target's schema, :takes, against the produced one,
-   :holds, with the :values of an enum the target does not take."
+   declare it, or a :mismatch, with the :values of an enum the target does not take. Each
+   says what the two sides hold there, as schema forms: :takes, the target's, where it
+   declares the key, and :holds, the produced side's, where it has one.
+
+   A reason of a transition says which CROSSING refused, :enter or :answer, and where the
+   produced key came from, its :source: the source :state, the :event's answer, the :yield
+   of a completion, or the :machinery's own keys, :id and :sub."
   [:map {:closed true}
    [:at [:vector :any]]
    [:because [:enum :absent :maybe-absent :undeclared :mismatch]]
    [:takes {:optional true} :any]
    [:holds {:optional true} :any]
-   [:values {:optional true} [:vector :any]]])
+   [:values {:optional true} [:vector :any]]
+   [:crossing {:optional true} [:enum :enter :answer]]
+   [:source {:optional true} [:enum :state :event :yield :machinery]]])
 
 (def Judgement
   "What `judged` answers: a verdict, and with :no at least one `Reason`."
@@ -292,6 +300,53 @@
   [target produced]
   (:verdict (judged target produced)))
 
+(defn- narrowed
+  "What an edge's event answers once its guard has admitted the event: the event's :out,
+   and where the event is a PURE LIFT and the edge has a :when, each key the guard names
+   held as the guard holds it — required where the guard requires it, and by the guard's
+   schema where that is the narrower one. nil where the edge declared no :out.
+
+   SOUND FOR A LIFT ALONE. The compiler validates the guard against the payload and only
+   then runs the handler, and a lift answers the payload's own keys, so a key the guard
+   requires is in the answer and holds what the guard admits. Any other handler computes its
+   answer, and the guard says nothing of it. A key the guard names that the :out does not
+   declare is not answered, so it is not added."
+  {:knowledge
+   [{:id :a-guard-narrows-what-a-lift-hands-on
+     :kind :decision
+     :says "An edge whose event is a pure lift hands its target the event's :out narrowed by the edge's :when: a key the guard requires is required, and holds the guard's schema where that is narrower. So one event may branch to targets needing different keys, each guard naming the keys its target requires. A computing handler's :out is not narrowed."
+     :why "The check read an edge without its guard, so a case-split event, its case's keys {:optional true}, was :maybe-absent into the target that requires them, on a shape that runs: what is checked must be what runs. A recipe designer followed the advice to split so, and every lap was refused."
+     :from "the author, 2026-11-14: `yes, the guard should apply to all recipes`"
+     :when "2026-11-14T02:30:00Z"
+     :supersedes [:the-out-is-the-events-and-that-is-the-friction]
+     :cites [:what-is-checked-must-be-what-runs :a-guard-is-a-schema-over-the-event :an-event-given-only-a-schema-is-a-pure-lift]}
+    {:id :two-edges-of-a-lift-share-one-out-and-each-guard-narrows-it
+     :kind :decision
+     :says "Two edges firing one event share its handler and its :out. Where they need different data, a lift's :out holds every case's keys, those of one case {:optional true}, and the guard of each edge requires its own case's keys. A computing handler still needs two events, or no :out and the runtime crossings."
+     :from "the author, 2026-11-14: `yes, the guard should apply to all recipes`"
+     :when "2026-11-14T02:30:00Z"
+     :supersedes [:two-edges-share-one-out]
+     :cites [:a-guard-narrows-what-a-lift-hands-on]}
+    {:id :a-refusal-says-its-crossing-its-source-and-both-sides
+     :kind :decision
+     :says "Each `Reason` says what both sides hold at its key, :takes and :holds; a transition's says the :crossing that refused, :enter or :answer, and the :source of the produced key; and a :target-refuses row carries its edge's :when. A reader is told what the check knew, and need not work it out from the shape."
+     :why "A reason gave its path and its kind alone, and two crossings' reasons were merged as one: a recipe designer told :maybe-absent could not tell its guard had been ignored, and wrote the same edge again."
+     :from "the author, 2026-11-14: `does it contains the whole information (no-loss) in a structural way?`"
+     :when "2026-11-14T02:30:00Z"
+     :cites [:a-no-carries-its-reasons]}]}
+  [{:keys [out lift] guard :when}]
+  (if (and out lift guard)
+    (let [held (shape/entries-of guard)]
+      (m/into-schema :map (m/properties out)
+                     (for [[k props child] (m/children out)
+                           :let [{:keys [optional? schema]} (get held k)]]
+                       (if schema
+                         [k (cond-> props (not optional?) (some-> (dissoc :optional) not-empty))
+                          (if (= :yes (admits child schema)) schema child)]
+                         [k props child]))
+                     (m/options out)))
+    out))
+
 (defn- produced
   "The schema of what a transition actually hands its target: the source state's own
    schema, the handler's DECLARED answer merged over it, then the machinery's own keys —
@@ -310,8 +365,8 @@
      :kind :lesson
      :says "Until this composed :sub the way the compiler does, nesting was broken in a way only the check could see: a nesting target's enter-schema REQUIRES :sub, no handler may write it, and the step assocs the child's first state on entry, so every edge into a nested node was condemned :target-refuses. Found one minute after nesting first worked."
      :cites [:what-is-checked-must-be-what-runs :sub-is-the-machinerys]}]}
-  [sh {:keys [from to out]}]
-  (when out
+  [sh {:keys [from to] :as t}]
+  (when-let [out (narrowed t)]
     (cond-> (-> (mu/merge (shape/state-schema sh from) out)
                 (mu/assoc :id [:= to]))
       (shape/machine sh to) (mu/assoc :sub [:map [:id shape/Id]]))))
@@ -337,9 +392,19 @@
      :when "2026-09-29"
      :from "issue #6"
      :cites [:what-is-checked-must-be-what-runs :an-event-is-the-only-way-a-transition-happens :the-answer-crossing-sits-between-out-and-enter]}]}
-  [{:keys [out]}]
-  (when out
+  [t]
+  (when-let [out (narrowed t)]
     (mu/update-properties out assoc :closed true)))
+
+(defn- crossed
+  "`judgement` with each reason saying the crossing it was proven at, and the :source of the
+   key it is at, as `whence` answers of the path's first key, where it answers one."
+  [judgement crossing whence]
+  (cond-> judgement
+    (:reasons judgement)
+    (update :reasons (fn [rs] (mapv #(let [s (whence (first (:at %)))]
+                                       (cond-> (assoc % :crossing crossing) s (assoc :source s)))
+                                    rs)))))
 
 (defn- row
   "A check's row with the verdict of `judgement` under `k`, and where it is :no its reasons."
@@ -395,16 +460,23 @@
      :cites [:the-out-is-the-events-and-that-is-the-friction]}]}
   [sh]
   (concat
-   (for [t (shape/transitions sh)]
+   (for [t (shape/transitions sh)
+         :let [edge (cond-> (select-keys t [:from :event :to]) (:when t) (assoc :when (m/form (:when t))))]]
      (if-let [p (produced sh t)]
-       (row (select-keys t [:from :event :to]) :verdict
-            (weakest [(judged (shape/enter-schema sh (:to t)) p)
-                      (judged (shape/patch-schema sh (:to t)) (answered t))]))
-       (assoc (select-keys t [:from :event :to]) :verdict :undeclared)))
-   (for [[from cs] (shape/continuations sh), c cs]
+       (let [out   (shape/entries-of (narrowed t))
+             state (shape/entries-of (shape/state-schema sh (:from t)))
+             from  (fn [k] (cond (#{:id :sub} k) :machinery (contains? out k) :event (contains? state k) :state))]
+         (row edge :verdict
+              (weakest [(crossed (judged (shape/enter-schema sh (:to t)) p) :enter from)
+                        (crossed (judged (shape/patch-schema sh (:to t)) (answered t)) :answer (constantly :event))])))
+       (assoc edge :verdict :undeclared)))
+   (for [[from cs] (shape/continuations sh), c cs
+         :let [yield (some-> (:yield c) shape/entries-of)
+               state (shape/entries-of (shape/state-schema sh from))
+               whence (fn [k] (cond (#{:id :sub} k) :machinery (contains? yield k) :yield (contains? state k) :state))]]
      (row (cond-> {:from from :to (:to c) :done true}
             (:outcome c) (assoc :outcome (:outcome c)))
-          :verdict (judged (shape/enter-schema sh (:to c)) (continued sh from c))))
+          :verdict (crossed (judged (shape/enter-schema sh (:to c)) (continued sh from c)) :enter whence)))
    (inside sh subsumption)))
 
 (defn views
@@ -1115,6 +1187,7 @@
      (of :dead-end [:id shape/Id])
      (of :trap [:id shape/Id])
      (of :target-refuses [:from shape/Id] [:event {:optional true} shape/Id] [:to shape/Id]
+         [:when {:optional true} :any]
          [:done {:optional true} [:= true]] [:outcome {:optional true} shape/Id] rs)
      (of :view-unavailable [:from shape/Id] [:event shape/Id] rs)
      (of :reads-unavailable [:from shape/Id] [:event shape/Id] rs)
