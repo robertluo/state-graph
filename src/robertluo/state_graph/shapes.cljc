@@ -71,7 +71,6 @@
      :supersedes [:dependency-ubergraph]
      :cites [:dependency-ubergraph :ubergraph-out-edges-are-a-set :ubergraph-is-equal-and-edn-for-value-attributes :ubergraph-is-a-closed-map-and-fails-silently]}]}
   (:require [malli.core :as m]
-            [malli.error :as me]
             [malli.util :as mu]
             [robertluo.state-graph.graph :as graph]))
 
@@ -850,14 +849,48 @@
     (or (nil? child)
         (and (shape? child) (final? child (initial-id child))))))
 
+(def Reason
+  "One place malli refused a part, as data: the path into the part, the schema the value there
+   broke as a form, the key's own where it is missing, malli's kind of refusal where it names one,
+   and the value there where there was one. A function in a schema or a value is the symbol fn."
+  [:map {:closed true}
+   [:in [:vector :any]]
+   [:schema :any]
+   [:type {:optional true} :keyword]
+   [:value {:optional true} :any]])
+
+(defn- as-data
+  "`x` with each compiled schema in it as its form and each function as the symbol `fn`, so a
+   problem prints and compares: an error nobody can print or compare is not data."
+  [x]
+  (cond (m/schema? x) (as-data (m/form x))
+        (fn? x)       'fn
+        (map? x)      (into {} (map (fn [[k v]] [(as-data k) (as-data v)])) x)
+        (vector? x)   (mapv as-data x)
+        (seq? x)      (apply list (map as-data x))
+        (set? x)      (set (map as-data x))
+        :else         x))
+
+(defn- explained
+  "Why `schema` refuses `value`, as a vector of `Reason`, one per place malli refused."
+  [schema value]
+  (mapv (fn [{:keys [in type] :as e}]
+          (let [missing (= ::m/missing-key type)]
+            (cond-> {:in (vec in)
+                     :schema (as-data (or (when missing (mu/get (:schema e) (peek (vec in))))
+                                          (:schema e)))}
+              type (assoc :type type)
+              (and (contains? e :value) (not missing)) (assoc :value (as-data (:value e))))))
+        (:errors (m/explain schema value))))
+
 (def Referential
   "A fault `problems` answers, as data, each kind with the evidence it carries: the ids and
-   keys it is about, and where malli refused a part, its own words under :why. :within is the
-   path of nodes a nested machine's fault was found under."
+   keys it is about, and where malli refused a part, each place it refused as a `Reason` under
+   :why. :within is the path of nodes a nested machine's fault was found under."
   (let [w [:within {:optional true} [:vector Id]]
         of (fn [k & entries] [k (into [:map {:closed true} [:problem [:= k]] w] entries)])]
     [:multi {:dispatch :problem}
-     (of :malformed [:kind [:maybe :keyword]] [:id :any] [:why [:map-of :any :any]])
+     (of :malformed [:kind [:maybe :keyword]] [:id :any] [:why [:vector {:min 1} Reason]])
      (of :duplicate [:kind :keyword] [:id :any] [:count :int])
      (of :unknown-state [:in [:vector :any]] [:key :keyword] [:id :any])
      (of :unknown-event [:in [:vector :any]] [:id :any])
@@ -868,7 +901,7 @@
      (of :reserved-declared [:id Id] [:key :keyword])
      (of :combine-not-a-function [:id Id] [:key :keyword])
      (of :law-without-combine [:id Id] [:key :keyword])
-     (of :machine-cannot-start [:id Id] [:initial Id] [:why [:map-of :any :any]])
+     (of :machine-cannot-start [:id Id] [:initial Id] [:why [:vector {:min 1} Reason]])
      (of :seed-without-machine [:id Id])
      (of :outcome-without-machine [:id Id])
      (of :unknown-outcome [:id Id] [:outcome :any])
@@ -933,7 +966,15 @@
      :why "Each gap a model met was a check that had its reason and did not pass it on, and hundreds of assertions on chosen cases never saw one go missing."
      :from "the author, 2026-11-13: `If we are fix gaps in this pace, we need days if not months, and yet no real guarantee.`"
      :when "2026-11-13T14:40:00Z"
-     :cites [:a-malformed-part-says-why]}]}
+     :cites [:a-malformed-part-says-why]}
+    {:id :a-malformed-part-says-why-as-data
+     :kind :decision
+     :says ":malformed and :machine-cannot-start carry :why as a vector of `Reason`: each place malli refused, by its path into the part, with the schema it broke as a form (the key's own where it is missing), malli's kind of refusal, and the value there. Never humanize's words."
+     :why "Words about data make a reader guess the data back: a model told `should be a malli schema over a map` is not told which schema it gave or where."
+     :from "the author, 2026-11-13: humanize's messages `only encourage human/ai to guess`"
+     :when "2026-11-13T18:37:14Z"
+     :supersedes [:a-malformed-part-says-why]
+     :cites [:every-problem-kind-declares-its-evidence]}]}
   [& parts]
   (let [{:keys [state event transition]} (group-by ::kind parts)
         state-ids (set (map :id state))
@@ -946,11 +987,12 @@
      (concat
       ;; 0 — a part that is not the thing it says it is. One check for a handler that
       ;; is not a fn, a schema that is not a map schema, and every missing key. :why is
-      ;; malli's own words for which key and what it should be, so the reason survives.
+      ;; malli's explanation as data, each place with the schema it broke, so the reason
+      ;; survives and nobody has to read it back out of words.
       (for [p parts
             :let [s (or (def-schema (::kind p)) [:map [::kind [:enum :state :event :transition]]])]
             :when (not (m/validate s p))]
-        {:problem :malformed :kind (::kind p) :id (:id p) :why (me/humanize (m/explain s p))})
+        {:problem :malformed :kind (::kind p) :id (:id p) :why (explained s p)})
       (dupes :state state)
       (dupes :event event)
       ;; 1, 2 — a transition naming something that is not there
@@ -1031,7 +1073,7 @@
             :let [id (initial-id child)]
             :when (not (m/validate (enter-schema child id) {:id id}))]
         {:problem :machine-cannot-start :id (:id s) :initial id
-         :why (me/humanize (m/explain (enter-schema child id) {:id id}))})
+         :why (explained (enter-schema child id) {:id id})})
       ;; A :seed needs something to sow INTO, exactly as a :yield needs something to
       ;; harvest FROM. Without a machine it is a declaration nothing ever reads.
       (for [s state :when (and (:seed s) (not (:machine s)))]
