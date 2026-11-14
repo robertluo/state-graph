@@ -7,6 +7,16 @@ metadata on the vars and namespaces themselves; see AGENTS.md for how to reach i
 
 The first version meant to be used from outside the repository it was built in.
 
+- An edge whose event is a pure lift is checked with its guard: a key its `:when` requires is
+  required in what the edge hands its target, and holds the guard's schema where that is
+  narrower. One event may branch to targets that need different keys, each guard requiring its
+  own case's. A handler that computes its answer is checked as before. An event built from its
+  schema alone says so with `:lift true`.
+- Each `check/Reason` says what both sides hold at its key, `:takes` and `:holds`, for every
+  kind. A transition's reason says the crossing that refused, `:crossing` `:enter` or `:answer`,
+  and where the produced key came from, `:source` `:state`, `:event`, `:yield` or `:machinery`.
+  A `:target-refuses` problem carries its edge's `:when`. Two crossings that refuse at one key
+  give a reason each.
 - A `:malformed` problem carries `:why`, malli's explanation of the part as data: a vector of
   `shapes/Reason`, each place refused by its path into the part, with the schema it broke as a
   form (the key's own where it is missing), malli's kind of refusal and the value there. A

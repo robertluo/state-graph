@@ -270,7 +270,7 @@
   (is (= {:verdict :no :reasons [{:at [:k] :because :mismatch :takes [:enum :a] :holds [:enum :a :b] :values [:b]}]}
          (check/judged [:map [:k [:enum :a]]] [:map [:k [:enum :a :b]]]))
       "an enum says which of its values the target does not take")
-  (is (= {:verdict :no :reasons [{:at [:o :x] :because :maybe-absent}]}
+  (is (= {:verdict :no :reasons [{:at [:o :x] :because :maybe-absent :takes :int :holds :int}]}
          (check/judged [:map [:o [:map [:x :int]]]] [:map [:o [:map [:x {:optional true} :int]]]]))
       "a nested key, by its path"))
 
@@ -278,7 +278,8 @@
   (let [ps (check/problems (ts/broken))]
     (is (= #{:unreachable :dead-end :target-refuses} (set (map :problem ps))))
     (is (= {:from :running :event :bad :to :typed :problem :target-refuses
-            :reasons [{:at [:n] :because :mismatch :takes :int :holds :string}]}
+            :reasons [{:at [:n] :because :mismatch :takes :int :holds :string :crossing :enter :source :event}
+                      {:at [:n] :because :mismatch :takes :int :holds :string :crossing :answer :source :event}]}
            (first (filter #(= :target-refuses (:problem %)) ps))))
     (is (empty? (check/problems (ts/counter)))
         "a sound shape has nothing structurally wrong, and every :undeclared and
@@ -298,7 +299,7 @@
     (testing "an undeclared key: refused at run time, and so :target-refuses"
       (let [sh (lift [:map [:y :int]])]
         (is (= [{:from :a :event :go :to :b :problem :target-refuses
-                 :reasons [{:at [:y] :because :undeclared}]}] (check/problems sh)))
+                 :reasons [{:at [:y] :because :undeclared :holds :int :crossing :answer :source :event}]}] (check/problems sh)))
         (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) #"answer"
                               ((c/compile sh) (s0 sh) {:id :go :y 2})))))
     (testing "an OPTIONAL undeclared key is one the handler may answer, and is refused too"
@@ -365,11 +366,11 @@
            (shape/transition :thin :maybe   :end)
            (shape/transition :rich :nothing :end))]
     (is (= #{{:from :rich :event :ok      :verdict :yes}
-             {:from :thin :event :maybe   :verdict :no :reasons [{:at [:goal] :because :maybe-absent}]}
+             {:from :thin :event :maybe   :verdict :no :reasons [{:at [:goal] :because :maybe-absent :takes :string :holds :string}]}
              {:from :rich :event :nothing :verdict :undeclared}}
            (set (check/views g)))
         "an OPTIONAL key is :no — a view a handler is handed cannot rest on a maybe")
-    (is (= [{:from :thin :event :maybe :problem :view-unavailable :reasons [{:at [:goal] :because :maybe-absent}]}]
+    (is (= [{:from :thin :event :maybe :problem :view-unavailable :reasons [{:at [:goal] :because :maybe-absent :takes :string :holds :string}]}]
            (filterv #(= :view-unavailable (:problem %)) (check/problems g)))
         "and only the proven one is a fault")))
 
@@ -580,7 +581,7 @@
   (testing "a target that insists on a key the source cannot have is a PROVEN fault"
     (let [sh (shape/shape (shape/state :a [:map] {:initial true :done :b})
                           (shape/state :b [:map [:needed :int]] {:final true}))]
-      (is (= [{:from :a :to :b :done true :problem :target-refuses :reasons [{:at [:needed] :because :absent}]}]
+      (is (= [{:from :a :to :b :done true :problem :target-refuses :reasons [{:at [:needed] :because :absent :takes :int :crossing :enter}]}]
              (check/problems sh))))))
 
 (deftest a-yield-is-admits-for-the-third-time
@@ -619,10 +620,10 @@
         sh (shape/shape (shape/state :p [:map] {:initial true :machine child
                                                 :done :z :yield [:map [:r :string]]})
                         (shape/state :z [:map [:r :string]] {:final true}))]
-    (is (= [{:from :p :final :bad :verdict :no :reasons [{:at [:r] :because :absent}]}
+    (is (= [{:from :p :final :bad :verdict :no :reasons [{:at [:r] :because :absent :takes :string}]}
             {:from :p :final :ok :verdict :yes}]
            (vec (check/yields sh))))
-    (is (= [{:from :p :final :bad :problem :yield-unavailable :reasons [{:at [:r] :because :absent}]}]
+    (is (= [{:from :p :final :bad :problem :yield-unavailable :reasons [{:at [:r] :because :absent :takes :string}]}]
            (filter (comp #{:yield-unavailable} :problem) (check/problems sh))))))
 
 (deftest a-PER-OUTCOME-yield-is-asked-about-its-OWN-final-state-and-no-other
@@ -674,7 +675,7 @@
     ;; `:b` is a dead end in these fixtures and says so; what is asserted is the seed.
     (let [seedy (fn [s] (filter (comp #{:seed-unavailable :seed-refused} :problem)
                                 (check/problems s)))]
-      (is (= [{:problem :seed-unavailable :from :b :reasons [{:at [:job] :because :absent}]}]
+      (is (= [{:problem :seed-unavailable :from :b :reasons [{:at [:job] :because :absent :takes :string}]}]
              (seedy (sh [:map] [:map [:job :string]] [:map [:job :string]])))
           "and the proven half is a fault, exactly as :yield-unavailable is")
       (is (= [{:problem :seed-refused :from :b :initial :c1
@@ -806,14 +807,14 @@
       (is (= [] (check/problems (sh [:map [:n :int]] [:map [:n :int]])))))
 
     (testing "it does not, and that is PROVEN rather than suspected"
-      (is (= [{:from :a :event :go :verdict :no :reasons [{:at [:n] :because :absent}]}]
+      (is (= [{:from :a :event :go :verdict :no :reasons [{:at [:n] :because :absent :takes :int}]}]
              (vec (check/readings (sh [:map] [:map [:n :int]])))))
-      (is (= [{:from :a :event :go :problem :reads-unavailable :reasons [{:at [:n] :because :absent}]}]
+      (is (= [{:from :a :event :go :problem :reads-unavailable :reasons [{:at [:n] :because :absent :takes :int}]}]
              (check/problems (sh [:map] [:map [:n :int]])))))
 
     (testing "it only MIGHT, which is also :no — a report cannot rest on a maybe any
               more than a handler's view can"
-      (is (= [{:from :a :event :go :verdict :no :reasons [{:at [:n] :because :maybe-absent}]}]
+      (is (= [{:from :a :event :go :verdict :no :reasons [{:at [:n] :because :maybe-absent :takes :int :holds :int}]}]
              (vec (check/readings (sh [:map [:n {:optional true} :int]] [:map [:n :int]]))))))
 
     (testing "an event with no report comes from the WORLD, so there is nothing to check"
@@ -848,8 +849,8 @@
                            (shape/transition :s :go :x))
         host  (shape/shape (shape/state :in  [:map] {:initial true :machine child :done :out})
                            (shape/state :out [:map] {:final true}))]
-    (is (= [{:from :s :event :go :verdict :no :within [:in] :reasons [{:at [:nowhere] :because :absent}]}] (check/readings host)))
-    (is (= [{:from :s :event :go :problem :reads-unavailable :within [:in] :reasons [{:at [:nowhere] :because :absent}]}]
+    (is (= [{:from :s :event :go :verdict :no :within [:in] :reasons [{:at [:nowhere] :because :absent :takes :string}]}] (check/readings host)))
+    (is (= [{:from :s :event :go :problem :reads-unavailable :within [:in] :reasons [{:at [:nowhere] :because :absent :takes :string}]}]
            (check/problems host))
         "and reported ONCE — `problems` takes only its own from a check that now recurses")))
 
@@ -909,3 +910,42 @@
       (is (= [] (check/problems host)))
       (is (= {:id :s :awaits #{:one :two} :reports #{:one :two} :verdict :fork :within [:in]}
              (first (filter #(= :fork (:verdict %)) (check/driving host))))))))
+
+;;; -------------------------------------------------------- a guard narrows a lift
+
+(defn- case-split
+  "A lift that branches on :started to two targets, of which only :unstarted requires the
+   case's key, :reason: `guard` is the :when of that edge, and `event` builds the event."
+  [guard event]
+  (shape/shape
+   (shape/state :ran [:map [:exit :int]] {:initial true})
+   (shape/state :unstarted [:map [:started :boolean] [:reason [:enum :gone :denied]]] {:final true})
+   (shape/state :finished [:map [:started :boolean] [:reason {:optional true} [:enum :gone :denied]]] {:final true})
+   (event :checked [:map [:started :boolean] [:reason {:optional true} [:enum :gone :denied]]])
+   (shape/transition :ran :checked :unstarted {:when guard})
+   (shape/transition :ran :checked :finished {:when [:map [:started [:= true]]]})))
+
+(deftest a-guard-narrows-what-a-lift-hands-its-target
+  (testing "a guard that requires the case's key makes it required on its edge alone"
+    (is (empty? (check/problems (case-split [:map [:started [:= false]] [:reason [:enum :gone :denied]]] shape/event)))))
+  (testing "one that does not name it leaves it maybe absent, and the refusal says all of it"
+    (is (= [{:problem :target-refuses :from :ran :event :checked :to :unstarted
+             :when [:map [:started [:= false]]]
+             :reasons [{:at [:reason] :because :maybe-absent :takes [:enum :gone :denied]
+                        :holds [:enum :gone :denied] :crossing :enter :source :event}]}]
+           (check/problems (case-split [:map [:started [:= false]]] shape/event)))))
+  (testing "a handler that computes its answer is not narrowed: the guard read the payload"
+    (let [computing (fn [id schema] (shape/event id schema (fn [e] (select-keys e [:started :reason])) schema))]
+      (is (= [:maybe-absent]
+             (map :because (mapcat :reasons (check/problems (case-split [:map [:started [:= false]] [:reason [:enum :gone :denied]]] computing)))))))))
+
+(defspec a-narrowed-lift-is-never-a-lie 200
+  ;; What a lift hands on is the payload's own keys, and the payload passed the guard: every
+  ;; value of the :out that the guard admits must validate against the narrowed :out.
+  (prop/for-all [out  ts/gen-map-schema
+                 seed gen/nat
+                 n    (gen/choose 0 3)]
+                (let [values   (mg/sample out {:size 12 :seed seed})
+                      guard    (into [:map] (for [[k v] (take n (first values))] [k [:= v]]))
+                      narrowed (#'check/narrowed {:out (m/schema out) :lift true :when (m/schema guard)})]
+                  (every? #(m/validate narrowed %) (filter #(m/validate guard %) values)))))
