@@ -7,6 +7,9 @@ metadata on the vars and namespaces themselves; see AGENTS.md for how to reach i
 
 The first version meant to be used from outside the repository it was built in.
 
+- On the JVM a fingerprint is digested with the host's own SHA-256, two orders of magnitude
+  faster than the one written out, which ClojureScript still uses; a property test holds the two
+  equal, and every fingerprint is unchanged.
 - An edge whose event is a pure lift is checked with its guard: a key its `:when` requires is
   required in what the edge hands its target, and holds the guard's schema where that is
   narrower. One event may branch to targets that need different keys, each guard requiring its

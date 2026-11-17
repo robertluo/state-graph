@@ -1490,6 +1490,7 @@
                 (range 64))]
     (mapv (comp u32 +) hs [a b c d e f g h])))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ;; ClojureScript digests with it, and the suite holds the JVM's to it
 (defn- sha-256
   "The SHA-256 digest of a sequence of bytes, each 0..255, as 32 bytes 0..255 — written out
    in this file so that a fingerprint is the SAME on every host and needs nothing
@@ -1501,18 +1502,36 @@
                        (word-bytes (quot bits 4294967296)) (word-bytes (mod bits 4294967296)))]
     (vec (mapcat word-bytes (reduce sha-256-block sha-256-h (partition 64 padded))))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ;; ClojureScript digests with it, and the suite holds the JVM's to it
 (defn- utf-8
   "The UTF-8 encoding of `s`, as bytes 0..255."
   [s]
   #?(:clj  (map #(bit-and % 0xff) (.getBytes ^String s "UTF-8"))
      :cljs (vec (js/Array.from (.encode (js/TextEncoder.) s)))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ;; ClojureScript digests with it, and the suite holds the JVM's to it
 (defn- hex
   "Bytes 0..255 as lower-case hex, two digits each."
   [bs]
   (apply str (mapcat (fn [b] [(nth "0123456789abcdef" (quot b 16))
                               (nth "0123456789abcdef" (mod b 16))])
                      bs)))
+
+(defn- digest
+  "The SHA-256 of the string `s`, its UTF-8 bytes, as lower-case hex. On the JVM it is the
+   host's own MessageDigest, which `the-digest-is-sha-256` holds equal to the `sha-256` written
+   out here, and which is two orders of magnitude faster; in ClojureScript it is the one written
+   out, since no digest there answers at once. One string, one digest, on every host. See
+   :the-jvm-digests-with-its-own-sha-256."
+  [s]
+  #?(:clj  (let [bs (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s "UTF-8"))
+                 sb (StringBuilder. 64)]
+             (doseq [b bs]
+               (let [v (bit-and (long b) 0xff)]
+                 (.append sb (.charAt "0123456789abcdef" (int (quot v 16))))
+                 (.append sb (.charAt "0123456789abcdef" (int (mod v 16))))))
+             (str sb))
+     :cljs (hex (sha-256 (utf-8 s)))))
 
 (defn fingerprint
   "A stable id for the SHAPE of this machine: SHA-256 over `canonical`, as hex.
@@ -1559,6 +1578,12 @@
      :kind :lesson
      :says "A shape built as a function of its env fingerprints the same in every env, the env being closed over in reports that are erased. Measured on the first consumer: (shape {}) and (shape {:writer ... :repl ...}) are one fingerprint. Right — it is the same machine — and it means the fingerprint does not say WHERE it ran; that belongs in the log's context beside the name."
      :cites [:a-shape-is-a-function-of-its-env :the-fingerprint-proves-the-graph-and-not-the-code]}
+    {:id :the-jvm-digests-with-its-own-sha-256
+     :kind :decision
+     :says "On the JVM a fingerprint is digested with the host's MessageDigest, not the SHA-256 written out here, which stays for ClojureScript. They are one function: `the-digest-is-sha-256` holds them equal on generated strings, and every fixture fingerprint is unchanged. MEASURED in a consumer: the written-out digest was half of all CPU its suite spent, since every run of a machine logs its fingerprint."
+     :from "the author, 2026-11-17, of a suite whose time went to the fingerprint: `fix` it, `Is the hash also hurting runtime?`"
+     :when "2026-11-17"
+     :cites [:the-fingerprint-is-the-same-on-every-host]}
     {:id :the-fingerprint-carries-no-name
      :kind :decision
      :says "A fingerprint carries no NAME. What a machine is called is a fact about the JOB rather than about the graph, and belongs to whoever owns the job — so identity is two-part and only half of it is the library's."
@@ -1568,7 +1593,7 @@
      :says "A fingerprint on every transcript row answers `which shape produced this` for a FINISHED run, which is the audit case and the one asked for. An instance in flight across a shape change is still open, and is left open deliberately."
      :cites [:a-shape-has-a-derived-id]}]}
   [sh]
-  (hex (sha-256 (utf-8 (pr-str (canonical sh))))))
+  (digest (pr-str (canonical sh))))
 
 (defn continuations
   "{from -> [{:outcome <id or absent>, :to <id>, :yield <schema>} ...]} for every COMPLETION

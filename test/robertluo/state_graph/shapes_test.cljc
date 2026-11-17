@@ -708,6 +708,16 @@
          (shape/fingerprint (ts/gathering)))))
 
 #?(:clj
+   (defspec the-host-digest-is-the-one-written-out 200
+     ;; What a fingerprint is digested with on the JVM, against the SHA-256 written out, which
+     ;; ClojureScript digests with: one string, one digest, on every host.
+     (prop/for-all [s (gen/one-of [gen/string
+                                   (gen/fmap pr-str gen/any-printable-equatable)
+                                   (gen/fmap #(apply str (map char %))
+                                             (gen/vector (gen/choose 0 0xD7FF)))])]
+       (= (#'shape/digest s) (#'shape/hex (#'shape/sha-256 (#'shape/utf-8 s)))))))
+
+#?(:clj
    (defspec the-digest-is-sha-256 200
      ;; The JVM's own SHA-256 as the independent reference, over strings that reach past
      ;; one byte per character — the part a hand-written UTF-8 or digest gets wrong.
