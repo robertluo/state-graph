@@ -9,7 +9,9 @@ The first version meant to be used from outside the repository it was built in.
 
 - On the JVM a fingerprint is digested with the host's own SHA-256, two orders of magnitude
   faster than the one written out, which ClojureScript still uses; a property test holds the two
-  equal, and every fingerprint is unchanged.
+  equal, and every fingerprint is unchanged. `canonical` prints each part once to sort it, where
+  `sort-by pr-str` printed both sides of every comparison; the order, and so every fingerprint,
+  is the same. Together a fingerprint costs a tenth to a twentieth of what it did.
 - An edge whose event is a pure lift is checked with its guard: a key its `:when` requires is
   required in what the edge hands its target, and holds the guard's schema where that is
   narrower. One event may branch to targets that need different keys, each guard requiring its

@@ -1345,6 +1345,14 @@
 
 (declare fingerprint continuations)
 
+(defn- by-print
+  "`xs` sorted by their printed form, as a vector, each printed ONCE: `(sort-by pr-str xs)`
+   prints both sides of every comparison, so a schema was printed n log n times, at every
+   level `plain` sorts. The order is the same, a stable sort over the same keys, so no
+   fingerprint moves. See :each-is-printed-once-to-be-sorted."
+  [xs]
+  (mapv second (sort-by first (map (juxt pr-str identity) xs))))
+
 (defn- plain
   "A value with every UNREADABLE thing replaced by ::opaque, and every collection put in
    a deterministic order.
@@ -1367,8 +1375,8 @@
   [x]
   (cond
     (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) x
-    (map? x) (vec (sort-by pr-str (map (fn [[k v]] [(plain k) (plain v)]) x)))
-    (set? x) (vec (sort-by pr-str (map plain x)))
+    (map? x) (by-print (map (fn [[k v]] [(plain k) (plain v)]) x))
+    (set? x) (by-print (map plain x))
     (sequential? x) (mapv plain x)
     ;; WRITTEN OUT, NOT ::opaque: the marker is PRINTED into every fingerprint, and this
     ;; namespace was renamed from robertluo.state-graph.shape — see
@@ -1399,7 +1407,7 @@
      :cites [:a-shape-has-a-derived-id]}]}
   [sh]
   {:states
-   (vec (sort-by pr-str
+   (by-print
                  (for [id (states sh)
                        :let [a (attrs sh id)]]
                    (plain [id (cond-> {:schema (m/form (:schema a))
@@ -1410,9 +1418,9 @@
                                 ;; sows nothing fingerprints exactly as it did before seeds
                                 ;; existed. A transcript written yesterday still names the
                                 ;; machine that wrote it.
-                                (:seed a) (assoc :seed (m/form (:seed a))))]))))
+                                (:seed a) (assoc :seed (m/form (:seed a))))])))
    :events
-   (vec (sort-by pr-str
+   (by-print
                  (for [t (transitions sh)]
                    (plain [(:from t) (:event t) (:to t)
                            {:schema (m/form (:schema t))
@@ -1421,12 +1429,12 @@
                             :sees (some-> (:sees t) m/form)
                             :reads (some-> (:reads t) m/form)
                             :handler (some? (:handler t))
-                            :report (some? (:report t))}]))))
+                            :report (some? (:report t))}])))
    :done
-   (vec (sort-by pr-str
+   (by-print
                  (for [[from cs] (continuations sh), c cs]
                    (plain [from (:to c) (cond-> {:yield (some-> (:yield c) m/form)}
-                                          (:outcome c) (assoc :outcome (:outcome c)))]))))})
+                                          (:outcome c) (assoc :outcome (:outcome c)))])))})
 
 ;;; ------------------------------------------------------------ the digest
 
@@ -1584,6 +1592,11 @@
      :from "the author, 2026-11-17, of a suite whose time went to the fingerprint: `fix` it, `Is the hash also hurting runtime?`"
      :when "2026-11-17"
      :cites [:the-fingerprint-is-the-same-on-every-host]}
+    {:id :each-is-printed-once-to-be-sorted
+     :kind :lesson
+     :says "`canonical` and `plain` sort by printed form, and `(sort-by pr-str xs)` prints both sides of every comparison: a schema was printed n log n times at every level, and that, not the digest, was most of a fingerprint. Each is printed once now, and sorted on the text; the order, and every fingerprint, is the same. MEASURED in a consumer: about a second per fingerprint of a machine that nests two others."
+     :when "2026-11-17"
+     :cites [:a-shape-has-a-derived-id]}
     {:id :the-fingerprint-carries-no-name
      :kind :decision
      :says "A fingerprint carries no NAME. What a machine is called is a fact about the JOB rather than about the graph, and belongs to whoever owns the job — so identity is two-part and only half of it is the library's."
@@ -1618,7 +1631,7 @@
              :when done]
          [from (cond-> {:to to} outcome (assoc :outcome outcome) yield (assoc :yield yield))])
        (reduce (fn [m [from c]] (update m from (fnil conj []) c)) {})
-       (into {} (map (fn [[from cs]] [from (vec (sort-by pr-str cs))])))))
+       (into {} (map (fn [[from cs]] [from (by-print cs)])))))
 
 (defn seed
   "The map schema a state sows its nested machine with, or nil where it sows nothing.
