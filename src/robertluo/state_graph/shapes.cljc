@@ -1345,6 +1345,14 @@
 
 (declare fingerprint continuations)
 
+(defn- by-print
+  "`xs` sorted by their printed form, as a vector, each printed ONCE: `(sort-by pr-str xs)`
+   prints both sides of every comparison, so a schema was printed n log n times, at every
+   level `plain` sorts. The order is the same, a stable sort over the same keys, so no
+   fingerprint moves. See :each-is-printed-once-to-be-sorted."
+  [xs]
+  (mapv second (sort-by first (map (juxt pr-str identity) xs))))
+
 (defn- plain
   "A value with every UNREADABLE thing replaced by ::opaque, and every collection put in
    a deterministic order.
@@ -1367,8 +1375,8 @@
   [x]
   (cond
     (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) x
-    (map? x) (vec (sort-by pr-str (map (fn [[k v]] [(plain k) (plain v)]) x)))
-    (set? x) (vec (sort-by pr-str (map plain x)))
+    (map? x) (by-print (map (fn [[k v]] [(plain k) (plain v)]) x))
+    (set? x) (by-print (map plain x))
     (sequential? x) (mapv plain x)
     ;; WRITTEN OUT, NOT ::opaque: the marker is PRINTED into every fingerprint, and this
     ;; namespace was renamed from robertluo.state-graph.shape — see
@@ -1399,7 +1407,7 @@
      :cites [:a-shape-has-a-derived-id]}]}
   [sh]
   {:states
-   (vec (sort-by pr-str
+   (by-print
                  (for [id (states sh)
                        :let [a (attrs sh id)]]
                    (plain [id (cond-> {:schema (m/form (:schema a))
@@ -1410,9 +1418,9 @@
                                 ;; sows nothing fingerprints exactly as it did before seeds
                                 ;; existed. A transcript written yesterday still names the
                                 ;; machine that wrote it.
-                                (:seed a) (assoc :seed (m/form (:seed a))))]))))
+                                (:seed a) (assoc :seed (m/form (:seed a))))])))
    :events
-   (vec (sort-by pr-str
+   (by-print
                  (for [t (transitions sh)]
                    (plain [(:from t) (:event t) (:to t)
                            {:schema (m/form (:schema t))
@@ -1421,12 +1429,12 @@
                             :sees (some-> (:sees t) m/form)
                             :reads (some-> (:reads t) m/form)
                             :handler (some? (:handler t))
-                            :report (some? (:report t))}]))))
+                            :report (some? (:report t))}])))
    :done
-   (vec (sort-by pr-str
+   (by-print
                  (for [[from cs] (continuations sh), c cs]
                    (plain [from (:to c) (cond-> {:yield (some-> (:yield c) m/form)}
-                                          (:outcome c) (assoc :outcome (:outcome c)))]))))})
+                                          (:outcome c) (assoc :outcome (:outcome c)))])))})
 
 ;;; ------------------------------------------------------------ the digest
 
@@ -1490,6 +1498,7 @@
                 (range 64))]
     (mapv (comp u32 +) hs [a b c d e f g h])))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ;; ClojureScript digests with it, and the suite holds the JVM's to it
 (defn- sha-256
   "The SHA-256 digest of a sequence of bytes, each 0..255, as 32 bytes 0..255 — written out
    in this file so that a fingerprint is the SAME on every host and needs nothing
@@ -1501,18 +1510,36 @@
                        (word-bytes (quot bits 4294967296)) (word-bytes (mod bits 4294967296)))]
     (vec (mapcat word-bytes (reduce sha-256-block sha-256-h (partition 64 padded))))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ;; ClojureScript digests with it, and the suite holds the JVM's to it
 (defn- utf-8
   "The UTF-8 encoding of `s`, as bytes 0..255."
   [s]
   #?(:clj  (map #(bit-and % 0xff) (.getBytes ^String s "UTF-8"))
      :cljs (vec (js/Array.from (.encode (js/TextEncoder.) s)))))
 
+#_{:clj-kondo/ignore [:unused-private-var]} ;; ClojureScript digests with it, and the suite holds the JVM's to it
 (defn- hex
   "Bytes 0..255 as lower-case hex, two digits each."
   [bs]
   (apply str (mapcat (fn [b] [(nth "0123456789abcdef" (quot b 16))
                               (nth "0123456789abcdef" (mod b 16))])
                      bs)))
+
+(defn- digest
+  "The SHA-256 of the string `s`, its UTF-8 bytes, as lower-case hex. On the JVM it is the
+   host's own MessageDigest, which `the-digest-is-sha-256` holds equal to the `sha-256` written
+   out here, and which is two orders of magnitude faster; in ClojureScript it is the one written
+   out, since no digest there answers at once. One string, one digest, on every host. See
+   :the-jvm-digests-with-its-own-sha-256."
+  [s]
+  #?(:clj  (let [bs (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s "UTF-8"))
+                 sb (StringBuilder. 64)]
+             (doseq [b bs]
+               (let [v (bit-and (long b) 0xff)]
+                 (.append sb (.charAt "0123456789abcdef" (int (quot v 16))))
+                 (.append sb (.charAt "0123456789abcdef" (int (mod v 16))))))
+             (str sb))
+     :cljs (hex (sha-256 (utf-8 s)))))
 
 (defn fingerprint
   "A stable id for the SHAPE of this machine: SHA-256 over `canonical`, as hex.
@@ -1559,6 +1586,17 @@
      :kind :lesson
      :says "A shape built as a function of its env fingerprints the same in every env, the env being closed over in reports that are erased. Measured on the first consumer: (shape {}) and (shape {:writer ... :repl ...}) are one fingerprint. Right — it is the same machine — and it means the fingerprint does not say WHERE it ran; that belongs in the log's context beside the name."
      :cites [:a-shape-is-a-function-of-its-env :the-fingerprint-proves-the-graph-and-not-the-code]}
+    {:id :the-jvm-digests-with-its-own-sha-256
+     :kind :decision
+     :says "On the JVM a fingerprint is digested with the host's MessageDigest, not the SHA-256 written out here, which stays for ClojureScript. They are one function: `the-digest-is-sha-256` holds them equal on generated strings, and every fixture fingerprint is unchanged. MEASURED in a consumer: the written-out digest was half of all CPU its suite spent, since every run of a machine logs its fingerprint."
+     :from "the author, 2026-11-17, of a suite whose time went to the fingerprint: `fix` it, `Is the hash also hurting runtime?`"
+     :when "2026-11-17"
+     :cites [:the-fingerprint-is-the-same-on-every-host]}
+    {:id :each-is-printed-once-to-be-sorted
+     :kind :lesson
+     :says "`canonical` and `plain` sort by printed form, and `(sort-by pr-str xs)` prints both sides of every comparison: a schema was printed n log n times at every level, and that, not the digest, was most of a fingerprint. Each is printed once now, and sorted on the text; the order, and every fingerprint, is the same. MEASURED in a consumer: about a second per fingerprint of a machine that nests two others."
+     :when "2026-11-17"
+     :cites [:a-shape-has-a-derived-id]}
     {:id :the-fingerprint-carries-no-name
      :kind :decision
      :says "A fingerprint carries no NAME. What a machine is called is a fact about the JOB rather than about the graph, and belongs to whoever owns the job — so identity is two-part and only half of it is the library's."
@@ -1568,7 +1606,7 @@
      :says "A fingerprint on every transcript row answers `which shape produced this` for a FINISHED run, which is the audit case and the one asked for. An instance in flight across a shape change is still open, and is left open deliberately."
      :cites [:a-shape-has-a-derived-id]}]}
   [sh]
-  (hex (sha-256 (utf-8 (pr-str (canonical sh))))))
+  (digest (pr-str (canonical sh))))
 
 (defn continuations
   "{from -> [{:outcome <id or absent>, :to <id>, :yield <schema>} ...]} for every COMPLETION
@@ -1593,7 +1631,7 @@
              :when done]
          [from (cond-> {:to to} outcome (assoc :outcome outcome) yield (assoc :yield yield))])
        (reduce (fn [m [from c]] (update m from (fnil conj []) c)) {})
-       (into {} (map (fn [[from cs]] [from (vec (sort-by pr-str cs))])))))
+       (into {} (map (fn [[from cs]] [from (by-print cs)])))))
 
 (defn seed
   "The map schema a state sows its nested machine with, or nil where it sows nothing.

@@ -51,9 +51,10 @@
 
 (defn- ordered
   "Sorted by printed form, so that what a set iterates in no particular order is walked in
-   one. Deterministic only where the values are plain data — a closure prints its address."
+   one, each printed once. Deterministic only where the values are plain data — a closure
+   prints its address."
   [xs]
-  (sort-by pr-str xs))
+  (map second (sort-by first (map (juxt pr-str identity) xs))))
 
 ;;; ---------------------------------------------------------------- adjacency
 
